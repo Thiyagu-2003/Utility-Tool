@@ -19,6 +19,7 @@ class AppColors {
 
   // Dark Theme Neutral Colors
   static const Color darkBg = Color(0xFF0D0F14);
+  static const Color darkBackground = darkBg;
   static const Color darkSurface = Color(0xFF151821);
   static const Color darkCard = Color(0xFF1E222D);
   static const Color darkCardHover = Color(0xFF282D3C);
@@ -29,6 +30,7 @@ class AppColors {
 
   // Light Theme Neutral Colors
   static const Color lightBg = Color(0xFFF8FAFC);
+  static const Color lightBackground = lightBg;
   static const Color lightSurface = Color(0xFFFFFFFF);
   static const Color lightCard = Color(0xFFFFFFFF);
   static const Color lightCardHover = Color(0xFFF1F5F9);

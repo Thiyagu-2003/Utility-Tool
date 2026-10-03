@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:utility_tool/main.dart';
 import 'package:utility_tool/core/services/preferences_service.dart';
 import 'package:utility_tool/core/registry/tool_registry.dart';
+import 'package:utility_tool/core/models/tool_model.dart';
 
 void main() {
   setUp(() async {
@@ -46,6 +47,22 @@ void main() {
     final scannerTool = ToolRegistry.findById('document_scanner');
     expect(scannerTool, isNotNull);
     expect(scannerTool!.title, 'Document Scanner');
+
+    final healthTool = ToolRegistry.findById('health_calc');
+    expect(healthTool, isNotNull);
+    expect(healthTool!.category, ToolCategory.health);
+
+    final gpaTool = ToolRegistry.findById('gpa_calc');
+    expect(gpaTool, isNotNull);
+    expect(gpaTool!.category, ToolCategory.education);
+
+    final kitchenTool = ToolRegistry.findById('kitchen_calc');
+    expect(kitchenTool, isNotNull);
+    expect(kitchenTool!.category, ToolCategory.kitchen);
+
+    final passwordTool = ToolRegistry.findById('password_generator');
+    expect(passwordTool, isNotNull);
+    expect(passwordTool!.category, ToolCategory.security);
   });
 
   test('Electricity Bill calculation test', () {
