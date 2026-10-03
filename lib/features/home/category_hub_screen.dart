@@ -24,7 +24,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
-  // The 12 official sections in screenshot order
+  // The 12 official sections
   static const List<ToolCategory> _mainSections = [
     ToolCategory.calculate,
     ToolCategory.convert,
@@ -81,31 +81,39 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
-            // Top App Bar / Brand / Search
+            // Header + Search
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Brand Logo
                     const Padding(
-                      padding: EdgeInsets.only(bottom: 12.0, top: 4.0),
-                      child: ToolBoxProLogo(iconSize: 38),
+                      padding: EdgeInsets.only(bottom: 16.0),
+                      child: ToolBoxProLogo(iconSize: 36),
                     ),
                     // Search Bar
                     Container(
                       decoration: BoxDecoration(
-                        color: isDark ? AppColors.darkSurface : AppColors.lightCardHover,
+                        color: isDark ? AppColors.darkSurface : Colors.white,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
                           color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
                         ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(isDark ? 0.15 : 0.04),
+                            blurRadius: 12,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
                       ),
                       child: TextField(
                         controller: _searchController,
                         onChanged: (val) => setState(() => _searchQuery = val),
                         decoration: InputDecoration(
-                          hintText: 'Search tools (e.g. GST, BMI, PDF, Cup, GPA)...',
+                          hintText: 'Search tools (GST, BMI, PDF, GPA...)',
                           hintStyle: TextStyle(
                             fontSize: 14,
                             color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
@@ -126,7 +134,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                                 )
                               : null,
                           border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                         ),
                       ),
                     ),
@@ -135,7 +143,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
               ),
             ),
 
-            // Pinned Favorites Carousel (only when not searching)
+            // Pinned Favorites (only when not searching)
             if (!isSearching) ...[
               AnimatedBuilder(
                 animation: prefs,
@@ -149,7 +157,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
 
                   return SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -158,55 +166,54 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                               const Icon(Icons.star_rounded, size: 16, color: AppColors.primaryOrange),
                               const SizedBox(width: 6),
                               Text(
-                                'QUICK FAVORITES',
+                                'FAVORITES',
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.9,
+                                  letterSpacing: 1.0,
                                   color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
                                 ),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 8),
-                          SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            physics: const BouncingScrollPhysics(),
-                            child: Row(
-                              children: favTools.map((tool) {
-                                return Padding(
-                                  padding: const EdgeInsets.only(right: 8.0),
-                                  child: Material(
-                                    color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-                                    borderRadius: BorderRadius.circular(14),
-                                    child: InkWell(
-                                      borderRadius: BorderRadius.circular(14),
-                                      onTap: () => _openTool(context, tool),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                        decoration: BoxDecoration(
-                                          borderRadius: BorderRadius.circular(14),
-                                          border: Border.all(
-                                            color: tool.color.withOpacity(0.35),
-                                          ),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(tool.icon, size: 16, color: tool.color),
-                                            const SizedBox(width: 8),
-                                            Text(
-                                              tool.title,
-                                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                                            ),
-                                          ],
-                                        ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: favTools.map((tool) {
+                              return Material(
+                                color: isDark ? AppColors.darkSurface : Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(12),
+                                  onTap: () => _openTool(context, tool),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: tool.color.withOpacity(0.3),
                                       ),
                                     ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(tool.icon, size: 16, color: tool.color),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          tool.title,
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 12,
+                                            color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                );
-                              }).toList(),
-                            ),
+                                ),
+                              );
+                            }).toList(),
                           ),
                         ],
                       ),
@@ -216,24 +223,24 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
               ),
             ],
 
-            // Section Header
+            // Section header
             if (!isSearching)
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
                   child: Row(
                     children: [
                       Container(
                         width: 4,
                         height: 18,
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFF6D00),
+                          color: AppColors.primaryOrange,
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        'SECTIONS',
+                        'CATEGORIES',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
@@ -242,11 +249,19 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                         ),
                       ),
                       const Spacer(),
-                      Text(
-                        '12 Categories',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryOrange.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '${ToolRegistry.allTools.length} tools',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.primaryOrange.withOpacity(0.8),
+                          ),
                         ),
                       ),
                     ],
@@ -254,7 +269,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                 ),
               ),
 
-            // Content: Either Search Results or 12 Section Bento Grid
+            // Content: Search Results or 12 Section Grid
             if (isSearching) ...[
               if (searchResults.isEmpty)
                 SliverFillRemaining(
@@ -276,7 +291,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                 )
               else
                 SliverPadding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
@@ -288,15 +303,15 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                   ),
                 ),
             ] else ...[
-              // 12 Grouped Sections Grid
+              // 12 Category Cards — 2 columns, vertical scroll
               SliverPadding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 sliver: SliverGrid(
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    childAspectRatio: 1.15,
+                    mainAxisSpacing: 10,
+                    crossAxisSpacing: 10,
+                    childAspectRatio: 1.2,
                   ),
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
@@ -309,14 +324,13 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
               ),
             ],
 
-            const SliverToBoxAdapter(child: SizedBox(height: 36)),
+            const SliverToBoxAdapter(child: SizedBox(height: 24)),
           ],
         ),
       ),
     );
   }
 
-  // Double-Bezel luxury section card
   Widget _buildSectionCard(BuildContext context, ToolCategory category, bool isDark) {
     final tools = ToolRegistry.getByCategory(category);
     final count = tools.length;
@@ -324,57 +338,54 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         onTap: () => _openSection(context, category),
         child: Container(
           decoration: BoxDecoration(
-            color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-            borderRadius: BorderRadius.circular(18),
+            color: isDark ? AppColors.darkSurface : Colors.white,
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-              width: 1,
+              width: 0.8,
             ),
             boxShadow: [
               BoxShadow(
-                color: category.color.withOpacity(0.04),
-                blurRadius: 10,
+                color: category.color.withOpacity(isDark ? 0.06 : 0.08),
+                blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
             ],
           ),
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Top row: Glowing Icon + Count Badge
+              // Top: Icon + Count
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Container(
-                    width: 38,
-                    height: 38,
+                    width: 40,
+                    height: 40,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [
-                          category.color.withOpacity(0.25),
-                          category.color.withOpacity(0.12),
+                          category.color.withOpacity(0.2),
+                          category.color.withOpacity(0.08),
                         ],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: category.color.withOpacity(0.3),
-                      ),
                     ),
                     child: Icon(category.icon, color: category.color, size: 20),
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                     decoration: BoxDecoration(
-                      color: category.color.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(10),
+                      color: category.color.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
                       '$count',
@@ -388,7 +399,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                 ],
               ),
 
-              // Bottom block: Title & Subtitle
+              // Bottom: Title + Subtitle
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -398,19 +409,17 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 15,
+                      fontSize: 14,
                       color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    tools.isNotEmpty
-                        ? tools.map((t) => t.title.split(' ').first).take(2).join(', ')
-                        : category.description,
+                    category.description,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 10.5,
                       color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
                     ),
                   ),
@@ -425,10 +434,10 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
 
   Widget _buildSearchResultTile(BuildContext context, ToolItem tool, bool isDark) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-        borderRadius: BorderRadius.circular(16),
+        color: isDark ? AppColors.darkSurface : Colors.white,
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
         ),
@@ -439,7 +448,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
           width: 40,
           height: 40,
           decoration: BoxDecoration(
-            color: tool.color.withOpacity(0.15),
+            color: tool.color.withOpacity(0.12),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(tool.icon, color: tool.color, size: 20),
@@ -460,13 +469,13 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
         trailing: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: tool.category.color.withOpacity(0.15),
+            color: tool.category.color.withOpacity(0.12),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
             tool.category.label,
             style: TextStyle(
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: FontWeight.w600,
               color: tool.category.color,
             ),
@@ -481,101 +490,152 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
 
     return Scaffold(
       backgroundColor: isDark ? AppColors.darkBackground : AppColors.lightBackground,
-      appBar: AppBar(
-        title: const Text('Finance & Shopping'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  const Color(0xFF10B981).withOpacity(0.2),
-                  const Color(0xFF059669).withOpacity(0.05),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: const Color(0xFF10B981).withOpacity(0.35),
-              ),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF10B981).withOpacity(0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.account_balance_wallet_outlined,
-                    color: Color(0xFF10B981),
-                    size: 26,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Finance Suite',
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'GST, Loan EMI, Discounts, Currency & Utilities',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          ...financeTools.map((tool) {
-            return Container(
-              margin: const EdgeInsets.only(bottom: 12),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            // Finance Suite Header
+            Container(
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-                borderRadius: BorderRadius.circular(16),
+                gradient: LinearGradient(
+                  colors: [
+                    const Color(0xFF10B981).withOpacity(0.15),
+                    const Color(0xFF059669).withOpacity(0.04),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                  color: const Color(0xFF10B981).withOpacity(0.25),
                 ),
               ),
-              child: ListTile(
-                onTap: () => _openTool(context, tool),
-                leading: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: tool.color.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withOpacity(0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.account_balance_wallet_outlined,
+                      color: Color(0xFF10B981),
+                      size: 26,
+                    ),
                   ),
-                  child: Icon(tool.icon, color: tool.color, size: 22),
-                ),
-                title: Text(
-                  tool.title,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                ),
-                subtitle: Text(
-                  tool.description,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Finance Suite',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'GST, Loan EMI, Discounts, Currency & more',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey),
+                ],
               ),
-            );
-          }),
-        ],
+            ),
+            const SizedBox(height: 16),
+
+            // Section label
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                'ALL FINANCE TOOLS',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.0,
+                  color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+                ),
+              ),
+            ),
+
+            // Tool cards
+            ...financeTools.map((tool) {
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.darkSurface : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                  ),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () => _openTool(context, tool),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: tool.color.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(tool.icon, color: tool.color, size: 22),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  tool.title,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15,
+                                    color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  tool.description,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            size: 20,
+                            color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
       ),
     );
   }

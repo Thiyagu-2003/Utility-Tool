@@ -169,12 +169,24 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Drag handle
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text(
-                    'Calculation History',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    'History',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
                   if (history.isNotEmpty)
                     TextButton.icon(
@@ -209,7 +221,10 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                             contentPadding: const EdgeInsets.symmetric(vertical: 4),
                             title: Text(
                               item.expression,
-                              style: const TextStyle(fontSize: 14, color: AppColors.darkTextSecondary),
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                              ),
                             ),
                             subtitle: Text(
                               item.result,
@@ -217,7 +232,10 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                             ),
                             trailing: Text(
                               DateFormat('HH:mm').format(item.timestamp),
-                              style: const TextStyle(fontSize: 12, color: AppColors.darkTextMuted),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+                              ),
                             ),
                             onTap: () {
                               setState(() {
@@ -242,42 +260,57 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     Color? textColor,
     Color? bgColor,
     bool isAccent = false,
+    bool isOperator = false,
     bool isSpecial = false,
     VoidCallback? onTap,
     Widget? customChild,
+    int flex = 1,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    Color resolvedBg = bgColor ?? (isDark ? AppColors.darkSurface : AppColors.lightCardHover);
-    if (isAccent) {
+    Color resolvedBg;
+    if (bgColor != null) {
+      resolvedBg = bgColor;
+    } else if (isAccent) {
       resolvedBg = AppColors.primaryOrange;
+    } else if (isOperator) {
+      resolvedBg = isDark
+          ? AppColors.primaryOrange.withOpacity(0.12)
+          : AppColors.primaryOrange.withOpacity(0.08);
+    } else {
+      resolvedBg = isDark ? AppColors.darkSurface : AppColors.lightCardHover;
     }
 
-    Color resolvedText = textColor ?? (isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary);
-    if (isAccent) {
+    Color resolvedText;
+    if (textColor != null) {
+      resolvedText = textColor;
+    } else if (isAccent) {
       resolvedText = Colors.white;
-    } else if (isSpecial) {
+    } else if (isOperator || isSpecial) {
       resolvedText = AppColors.primaryOrange;
+    } else {
+      resolvedText = isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
     }
 
     return Expanded(
+      flex: flex,
       child: Padding(
-        padding: const EdgeInsets.all(4.0),
+        padding: const EdgeInsets.all(3.5),
         child: Material(
           color: resolvedBg,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           child: InkWell(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             onTap: onTap ?? () => _onButtonPressed(text),
             child: Container(
-              height: _isScientific ? 52 : 64,
+              height: _isScientific ? 50 : 62,
               alignment: Alignment.center,
               child: customChild ??
                   Text(
                     text,
                     style: TextStyle(
-                      fontSize: _isScientific ? 18 : 24,
-                      fontWeight: isAccent || isSpecial ? FontWeight.bold : FontWeight.w600,
+                      fontSize: _isScientific ? 16 : 22,
+                      fontWeight: isAccent || isOperator ? FontWeight.bold : FontWeight.w600,
                       color: resolvedText,
                     ),
                   ),
@@ -292,188 +325,214 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Column(
-      children: [
-        // Top Toolbar (History, Mode Indicator)
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              IconButton(
-                tooltip: 'History',
-                icon: const Icon(Icons.history_rounded, size: 24),
-                onPressed: _showHistoryModal,
-              ),
-              if (_isScientific)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryOrange.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    _isDegreeMode ? 'DEG' : 'RAD',
-                    style: const TextStyle(
-                      color: AppColors.primaryOrange,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              IconButton(
-                tooltip: _isScientific ? 'Switch to Basic' : 'Switch to Scientific',
-                icon: Icon(
-                  _isScientific ? Icons.calculate_rounded : Icons.science_outlined,
-                  color: AppColors.primaryOrange,
-                  size: 24,
-                ),
-                onPressed: () {
-                  PreferencesService().triggerHaptic();
-                  setState(() {
-                    _isScientific = !_isScientific;
-                  });
-                },
-              ),
-            ],
-          ),
-        ),
-
-        // Display Area (Spacious & Modern)
-        Expanded(
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            alignment: Alignment.bottomRight,
-            child: SingleChildScrollView(
-              reverse: true,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisSize: MainAxisSize.min,
+    return Scaffold(
+      backgroundColor: isDark ? AppColors.darkBackground : AppColors.lightBackground,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Top Toolbar
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  SelectableText(
-                    _expression.isEmpty ? '0' : _expression,
-                    style: TextStyle(
-                      fontSize: _expression.length > 12 ? 32 : 46,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                  // History
+                  IconButton(
+                    tooltip: 'History',
+                    icon: Icon(
+                      Icons.history_rounded,
+                      size: 22,
+                      color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
                     ),
-                    textAlign: TextAlign.right,
+                    onPressed: _showHistoryModal,
                   ),
-                  const SizedBox(height: 8),
-                  if (_previewResult.isNotEmpty && _previewResult != '0')
-                    Text(
-                      _previewResult,
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.primaryOrange.withOpacity(0.9),
+                  // Mode indicator
+                  if (_isScientific)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryOrange.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      textAlign: TextAlign.right,
+                      child: Text(
+                        _isDegreeMode ? 'DEG' : 'RAD',
+                        style: const TextStyle(
+                          color: AppColors.primaryOrange,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
                     ),
+                  // Scientific toggle
+                  IconButton(
+                    tooltip: _isScientific ? 'Basic mode' : 'Scientific mode',
+                    icon: Icon(
+                      _isScientific ? Icons.calculate_rounded : Icons.science_outlined,
+                      color: AppColors.primaryOrange,
+                      size: 22,
+                    ),
+                    onPressed: () {
+                      PreferencesService().triggerHaptic();
+                      setState(() {
+                        _isScientific = !_isScientific;
+                      });
+                    },
+                  ),
                 ],
               ),
             ),
-          ),
-        ),
 
-        const Divider(height: 1),
+            // Display Area
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                alignment: Alignment.bottomRight,
+                child: SingleChildScrollView(
+                  reverse: true,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Expression
+                      SelectableText(
+                        _expression.isEmpty ? '0' : _expression,
+                        style: TextStyle(
+                          fontSize: _expression.length > 14 ? 30 : 44,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                          height: 1.2,
+                        ),
+                        textAlign: TextAlign.right,
+                      ),
+                      const SizedBox(height: 6),
+                      // Preview
+                      if (_previewResult.isNotEmpty && _previewResult != '0')
+                        Text(
+                          '= $_previewResult',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.primaryOrange.withOpacity(0.8),
+                          ),
+                          textAlign: TextAlign.right,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
 
-        // Keypad Section
-        SafeArea(
-          top: false,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Column(
-              children: [
-                if (_isScientific) ...[
+            // Thin separator
+            Container(
+              height: 0.5,
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+            ),
+
+            // Keypad
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
+              child: Column(
+                children: [
+                  // Scientific rows
+                  if (_isScientific) ...[
+                    Row(
+                      children: [
+                        _buildKeypadButton(
+                          text: _isDegreeMode ? 'deg' : 'rad',
+                          isSpecial: true,
+                        ),
+                        _buildKeypadButton(text: 'sin'),
+                        _buildKeypadButton(text: 'cos'),
+                        _buildKeypadButton(text: 'tan'),
+                        _buildKeypadButton(text: 'π'),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        _buildKeypadButton(text: 'x^y'),
+                        _buildKeypadButton(text: 'lg'),
+                        _buildKeypadButton(text: 'ln'),
+                        _buildKeypadButton(text: '('),
+                        _buildKeypadButton(text: ')'),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        _buildKeypadButton(text: '√'),
+                        _buildKeypadButton(text: 'x!'),
+                        _buildKeypadButton(text: '1/x'),
+                        _buildKeypadButton(text: 'e'),
+                        _buildKeypadButton(text: '%', isSpecial: true),
+                      ],
+                    ),
+                  ],
+
+                  // Main keypad
                   Row(
                     children: [
-                      _buildKeypadButton(text: _isDegreeMode ? 'deg' : 'rad', isSpecial: true),
-                      _buildKeypadButton(text: 'sin'),
-                      _buildKeypadButton(text: 'cos'),
-                      _buildKeypadButton(text: 'tan'),
-                      _buildKeypadButton(text: 'π'),
+                      _buildKeypadButton(text: 'AC', isSpecial: true),
+                      _buildKeypadButton(
+                        text: '⌫',
+                        isSpecial: true,
+                        customChild: Icon(
+                          Icons.backspace_outlined,
+                          size: 20,
+                          color: AppColors.primaryOrange,
+                        ),
+                      ),
+                      if (!_isScientific)
+                        _buildKeypadButton(text: '%', isSpecial: true),
+                      _buildKeypadButton(text: '÷', isOperator: true),
                     ],
                   ),
                   Row(
                     children: [
-                      _buildKeypadButton(text: 'x^y'),
-                      _buildKeypadButton(text: 'lg'),
-                      _buildKeypadButton(text: 'ln'),
-                      _buildKeypadButton(text: '('),
-                      _buildKeypadButton(text: ')'),
+                      _buildKeypadButton(text: '7'),
+                      _buildKeypadButton(text: '8'),
+                      _buildKeypadButton(text: '9'),
+                      _buildKeypadButton(text: '×', isOperator: true),
                     ],
                   ),
                   Row(
                     children: [
-                      _buildKeypadButton(text: '√'),
-                      _buildKeypadButton(text: 'x!'),
-                      _buildKeypadButton(text: '1/x'),
-                      _buildKeypadButton(text: 'e'),
-                      _buildKeypadButton(text: '%', isSpecial: true),
+                      _buildKeypadButton(text: '4'),
+                      _buildKeypadButton(text: '5'),
+                      _buildKeypadButton(text: '6'),
+                      _buildKeypadButton(text: '-', isOperator: true),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      _buildKeypadButton(text: '1'),
+                      _buildKeypadButton(text: '2'),
+                      _buildKeypadButton(text: '3'),
+                      _buildKeypadButton(text: '+', isOperator: true),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      _buildKeypadButton(
+                        text: '⇄',
+                        isSpecial: true,
+                        customChild: Icon(
+                          _isScientific ? Icons.unfold_less_rounded : Icons.science_outlined,
+                          color: AppColors.primaryOrange,
+                          size: 20,
+                        ),
+                      ),
+                      _buildKeypadButton(text: '0'),
+                      _buildKeypadButton(text: '.'),
+                      _buildKeypadButton(text: '=', isAccent: true),
                     ],
                   ),
                 ],
-
-                // Main Keypad Rows
-                Row(
-                  children: [
-                    _buildKeypadButton(text: 'AC', isSpecial: true),
-                    _buildKeypadButton(
-                      text: '⌫',
-                      isSpecial: true,
-                      customChild: const Icon(Icons.backspace_outlined, size: 22, color: AppColors.primaryOrange),
-                    ),
-                    if (!_isScientific) _buildKeypadButton(text: '%', isSpecial: true),
-                    _buildKeypadButton(text: '÷', isSpecial: true),
-                  ],
-                ),
-                Row(
-                  children: [
-                    _buildKeypadButton(text: '7'),
-                    _buildKeypadButton(text: '8'),
-                    _buildKeypadButton(text: '9'),
-                    _buildKeypadButton(text: '×', isSpecial: true),
-                  ],
-                ),
-                Row(
-                  children: [
-                    _buildKeypadButton(text: '4'),
-                    _buildKeypadButton(text: '5'),
-                    _buildKeypadButton(text: '6'),
-                    _buildKeypadButton(text: '-', isSpecial: true),
-                  ],
-                ),
-                Row(
-                  children: [
-                    _buildKeypadButton(text: '1'),
-                    _buildKeypadButton(text: '2'),
-                    _buildKeypadButton(text: '3'),
-                    _buildKeypadButton(text: '+', isSpecial: true),
-                  ],
-                ),
-                Row(
-                  children: [
-                    _buildKeypadButton(
-                      text: '⇄',
-                      isSpecial: true,
-                      customChild: Icon(
-                        _isScientific ? Icons.unfold_less_rounded : Icons.tune_rounded,
-                        color: AppColors.primaryOrange,
-                        size: 22,
-                      ),
-                    ),
-                    _buildKeypadButton(text: '0'),
-                    _buildKeypadButton(text: '.'),
-                    _buildKeypadButton(text: '=', isAccent: true),
-                  ],
-                ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
