@@ -17,10 +17,23 @@ import '../../features/everyday/random_utilities_screen.dart';
 import '../../features/finance/electricity_bill_screen.dart';
 import '../../features/documents/pdf_toolkit_screen.dart';
 import '../../features/documents/document_scanner_screen.dart';
+import '../../features/image_tools/image_toolkit_screen.dart';
+import '../../features/qr_barcode/qr_barcode_toolkit_screen.dart';
+import '../../features/file_tools/file_zip_toolkit_screen.dart';
+import '../../features/ocr_tools/ocr_toolkit_screen.dart';
 import '../../features/health/health_calculator_screen.dart';
 import '../../features/security/password_generator_screen.dart';
 import '../../features/kitchen/kitchen_converter_screen.dart';
 import '../../features/education/gpa_calculator_screen.dart';
+import '../../features/health/health_fitness_toolkit_screen.dart';
+import '../../features/education/academic_toolkit_screen.dart';
+import '../../features/home/home_travel_toolkit_screen.dart';
+import '../../features/image_tools/collage_maker_screen.dart';
+import '../../features/text_tools/text_diff_cleaner_screen.dart';
+import '../../features/text_tools/markdown_editor_screen.dart';
+import '../../features/dev_tools/xml_yaml_formatter_screen.dart';
+import '../../features/file_tools/media_tools_screen.dart';
+import '../../features/device_tools/device_hardware_toolkit_screen.dart';
 
 class ToolRegistry {
   static final List<ToolItem> allTools = [
@@ -133,6 +146,15 @@ class ToolRegistry {
 
     // 5. Health
     ToolItem(
+      id: 'health_fitness_toolkit',
+      title: 'Health & Fitness Suite',
+      description: 'Body-fat %, WHtR, running pace, step-to-distance, HR zones, interval timer, macros & water tracker',
+      category: ToolCategory.health,
+      icon: Icons.fitness_center_rounded,
+      keywords: ['health', 'fitness', 'body fat', 'navy', 'whtr', 'waist', 'running', 'pace', 'speed', 'steps', 'heart rate', 'hr zones', 'hiit', 'tabata', 'timer', 'macros', 'protein', 'water', 'hydration'],
+      builder: (_) => const HealthFitnessToolkitScreen(),
+    ),
+    ToolItem(
       id: 'health_calc',
       title: 'Health & Fitness Calculator',
       description: 'BMI, BMR, ideal body weight & daily calorie requirements',
@@ -144,6 +166,15 @@ class ToolRegistry {
 
     // 6. Education
     ToolItem(
+      id: 'academic_toolkit',
+      title: 'Academic & Education Suite',
+      description: 'Marks percentage, exam targets, attendance eligibility, scientific calc, equations, primes, GCD/LCM, matrix & permutations',
+      category: ToolCategory.education,
+      icon: Icons.school_rounded,
+      keywords: ['marks', 'grade', 'exam', 'attendance', 'scientific', 'calculator', 'equation', 'quadratic', 'prime', 'factorization', 'gcd', 'lcm', 'matrix', 'permutation', 'combination', 'math', 'education'],
+      builder: (_) => const AcademicToolkitScreen(),
+    ),
+    ToolItem(
       id: 'gpa_calc',
       title: 'GPA & CGPA Calculator',
       description: 'Course grade points, weighted credits & percentage scale',
@@ -154,6 +185,15 @@ class ToolRegistry {
     ),
 
     // 7. Home & Travel
+    ToolItem(
+      id: 'home_travel_toolkit',
+      title: 'Home, Construction & Travel Suite',
+      description: 'Fuel cost, EV charging, paint, tile & flooring, concrete, land units, water tank, appliance power, trip splitter & download time',
+      category: ToolCategory.homeTravel,
+      icon: Icons.holiday_village_rounded,
+      keywords: ['fuel', 'mileage', 'trip', 'ev', 'charging', 'paint', 'tile', 'flooring', 'concrete', 'cement', 'land', 'acre', 'cent', 'hectare', 'water tank', 'appliance', 'electricity', 'split', 'download', 'home', 'travel'],
+      builder: (_) => const HomeTravelToolkitScreen(),
+    ),
     ToolItem(
       id: 'electricity_bill',
       title: 'Electricity Bill',
@@ -167,12 +207,75 @@ class ToolRegistry {
     // 8. Files & Text
     ToolItem(
       id: 'pdf_toolkit',
-      title: 'PDF Toolkit',
-      description: 'Images to PDF, Text to PDF, Watermark & Page numbers',
+      title: 'Advanced PDF Toolkit',
+      description: 'Merge, split, organize, compress, protect, PDF to images, sign/stamp, forms & PDF to text',
       category: ToolCategory.filesText,
       icon: Icons.picture_as_pdf_rounded,
-      keywords: ['pdf', 'images to pdf', 'convert', 'merge', 'split', 'watermark', 'pages', 'document', 'text to pdf'],
+      keywords: ['pdf', 'merge', 'split', 'compress', 'encrypt', 'password', 'sign', 'stamp', 'forms', 'ocr', 'images to pdf', 'text to pdf'],
       builder: (_) => const PdfToolkitScreen(),
+    ),
+    ToolItem(
+      id: 'image_toolkit',
+      title: 'Image Toolkit',
+      description: 'Compress, resize/crop, format convert, rotate/flip, combine, Base64, EXIF & passport photos',
+      category: ToolCategory.filesText,
+      icon: Icons.photo_size_select_actual_rounded,
+      keywords: ['image', 'photo', 'compress', 'resize', 'crop', 'jpg', 'png', 'webp', 'rotate', 'flip', 'combine', 'base64', 'exif', 'watermark', 'passport'],
+      builder: (_) => const ImageToolkitScreen(),
+    ),
+    ToolItem(
+      id: 'image_collage_maker',
+      title: 'Image Collage Maker',
+      description: 'Combine multiple photos into customized photo grid collages',
+      category: ToolCategory.filesText,
+      icon: Icons.grid_view_rounded,
+      keywords: ['collage', 'photo', 'grid', 'combine', 'stitch', 'images', 'layout'],
+      builder: (_) => const CollageMakerScreen(),
+    ),
+    ToolItem(
+      id: 'file_zip_toolkit',
+      title: 'File & ZIP Suite',
+      description: 'Archive ZIP, extract, batch rename, size analyzer, hash checksums, duplicate finder & CSV/JSON',
+      category: ToolCategory.filesText,
+      icon: Icons.folder_zip_rounded,
+      keywords: ['zip', 'archive', 'extract', 'rename', 'hash', 'md5', 'sha256', 'duplicate', 'csv', 'json', 'files'],
+      builder: (_) => const FileZipToolkitScreen(),
+    ),
+    ToolItem(
+      id: 'ocr_toolkit',
+      title: 'OCR & Voice Studio',
+      description: 'Extract photo & document text, image tables to CSV, contact extractor, TTS & voice dictation',
+      category: ToolCategory.filesText,
+      icon: Icons.document_scanner_rounded,
+      keywords: ['ocr', 'text', 'photo', 'scanner', 'table', 'csv', 'email', 'phone', 'tts', 'speech', 'voice', 'dictation'],
+      builder: (_) => const OcrToolkitScreen(),
+    ),
+    ToolItem(
+      id: 'text_diff_cleaner',
+      title: 'Text Diff & Cleaner',
+      description: 'Line-by-line difference comparison and duplicate line remover',
+      category: ToolCategory.filesText,
+      icon: Icons.difference_rounded,
+      keywords: ['diff', 'compare', 'difference', 'duplicate', 'remove duplicate', 'dedupe', 'sort', 'lines', 'text'],
+      builder: (_) => const TextDiffCleanerScreen(),
+    ),
+    ToolItem(
+      id: 'markdown_editor',
+      title: 'Markdown Editor & Preview',
+      description: 'Edit, preview, and export rich formatted Markdown documents',
+      category: ToolCategory.filesText,
+      icon: Icons.edit_note_rounded,
+      keywords: ['markdown', 'md', 'editor', 'preview', 'document', 'rich text', 'formatting'],
+      builder: (_) => const MarkdownEditorScreen(),
+    ),
+    ToolItem(
+      id: 'media_tools',
+      title: 'Audio & Video Studio',
+      description: 'Audio trimmer, visual waveform cutter, video compressor & trimmer',
+      category: ToolCategory.filesText,
+      icon: Icons.movie_creation_rounded,
+      keywords: ['audio', 'music', 'sound', 'trim', 'cutter', 'waveform', 'video', 'compress', 'video trimmer', 'bitrate'],
+      builder: (_) => const MediaToolsScreen(),
     ),
     ToolItem(
       id: 'document_scanner',
@@ -194,6 +297,51 @@ class ToolRegistry {
     ),
 
     // 9. Developer
+    ToolItem(
+      id: 'qr_barcode_toolkit',
+      title: 'QR & Barcode Suite',
+      description: 'Live camera & image scanner, Wi-Fi QR, contact cards, barcodes, bulk sheets & scan history',
+      category: ToolCategory.developer,
+      icon: Icons.qr_code_scanner_rounded,
+      keywords: ['qr', 'barcode', 'scan', 'scanner', 'camera', 'wifi', 'vcard', 'contact', 'code128', 'ean13', 'bulk', 'history', 'generator'],
+      builder: (_) => const QrBarcodeToolkitScreen(),
+    ),
+    ToolItem(
+      id: 'xml_yaml_formatter',
+      title: 'XML & YAML Formatter',
+      description: 'Prettify, validate, format, and minify XML and YAML data',
+      category: ToolCategory.developer,
+      icon: Icons.code_rounded,
+      keywords: ['xml', 'yaml', 'format', 'prettify', 'minify', 'validate', 'json', 'developer'],
+      builder: (_) => const XmlYamlFormatterScreen(),
+    ),
+    ToolItem(
+      id: 'device_hardware_toolkit',
+      title: 'Device & Hardware Studio',
+      description: 'Device information viewer, digital compass, spirit level & live sensor tester',
+      category: ToolCategory.developer,
+      icon: Icons.perm_device_information_rounded,
+      keywords: ['device', 'hardware', 'specs', 'system', 'compass', 'level', 'spirit level', 'sensor', 'accelerometer', 'gyroscope', 'magnetometer', 'shake'],
+      builder: (_) => const DeviceHardwareToolkitScreen(),
+    ),
+    ToolItem(
+      id: 'compass_level',
+      title: 'Compass & Spirit Level',
+      description: 'Digital magnetic compass and 2D surface bubble spirit level',
+      category: ToolCategory.moreTools,
+      icon: Icons.explore_rounded,
+      keywords: ['compass', 'spirit level', 'bubble', 'inclinometer', 'heading', 'degrees', 'tilt', 'pitch', 'roll', 'north'],
+      builder: (_) => const DeviceHardwareToolkitScreen(),
+    ),
+    ToolItem(
+      id: 'sensor_tester',
+      title: 'Sensor Tester',
+      description: 'Real-time diagnostic tester for Accelerometer, Gyroscope, and Magnetometer',
+      category: ToolCategory.developer,
+      icon: Icons.sensors_rounded,
+      keywords: ['sensor', 'tester', 'diagnostic', 'accelerometer', 'gyroscope', 'magnetometer', 'shake', 'g-force'],
+      builder: (_) => const DeviceHardwareToolkitScreen(),
+    ),
     ToolItem(
       id: 'dev_tools',
       title: 'Developer Suite',

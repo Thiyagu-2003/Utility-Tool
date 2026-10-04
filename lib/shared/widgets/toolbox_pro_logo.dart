@@ -13,9 +13,9 @@ class ToolBoxProIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final double tileSize = (size * 0.34);
-    final double tileRadius = size * 0.09;
-    final double iconSize = size * 0.20;
+    final double tileSize = (size * 0.28);
+    final double tileRadius = size * 0.08;
+    final double iconSize = size * 0.16;
 
     return SizedBox(
       width: size,
@@ -68,7 +68,7 @@ class ToolBoxProIcon extends StatelessWidget {
                   ),
                 ],
               ),
-              padding: EdgeInsets.all(size * 0.11),
+              padding: EdgeInsets.all(size * 0.08),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [

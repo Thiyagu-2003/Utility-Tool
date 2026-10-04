@@ -35,6 +35,34 @@ class CalculationRecord {
   );
 }
 
+class QrScanRecord {
+  final String id;
+  final String content;
+  final String format;
+  final DateTime timestamp;
+
+  QrScanRecord({
+    required this.id,
+    required this.content,
+    required this.format,
+    required this.timestamp,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'content': content,
+    'format': format,
+    'timestamp': timestamp.toIso8601String(),
+  };
+
+  factory QrScanRecord.fromJson(Map<String, dynamic> json) => QrScanRecord(
+    id: json['id'] ?? '',
+    content: json['content'] ?? '',
+    format: json['format'] ?? 'QR_CODE',
+    timestamp: DateTime.tryParse(json['timestamp'] ?? '') ?? DateTime.now(),
+  );
+}
+
 class PreferencesService extends ChangeNotifier {
   static final PreferencesService _instance = PreferencesService._internal();
   factory PreferencesService() => _instance;
@@ -46,12 +74,14 @@ class PreferencesService extends ChangeNotifier {
   final Set<String> _favoriteToolIds = {};
   final List<String> _recentToolIds = [];
   final List<CalculationRecord> _calculationHistory = [];
+  final List<QrScanRecord> _qrScanHistory = [];
   ThemeMode _themeMode = ThemeMode.system;
   bool _hapticEnabled = true;
 
   Set<String> get favoriteToolIds => _favoriteToolIds;
   List<String> get recentToolIds => _recentToolIds;
   List<CalculationRecord> get calculationHistory => _calculationHistory;
+  List<QrScanRecord> get qrScanHistory => _qrScanHistory;
   ThemeMode get themeMode => _themeMode;
   bool get hapticEnabled => _hapticEnabled;
 
@@ -72,6 +102,14 @@ class PreferencesService extends ChangeNotifier {
     for (final str in historyJson) {
       try {
         _calculationHistory.add(CalculationRecord.fromJson(jsonDecode(str)));
+      } catch (_) {}
+    }
+
+    // QR Scan History
+    final qrHistoryJson = _prefs.getStringList('qr_scan_history') ?? [];
+    for (final str in qrHistoryJson) {
+      try {
+        _qrScanHistory.add(QrScanRecord.fromJson(jsonDecode(str)));
       } catch (_) {}
     }
 
@@ -142,6 +180,39 @@ class PreferencesService extends ChangeNotifier {
   Future<void> clearHistory() async {
     _calculationHistory.clear();
     await _prefs.remove('calc_history');
+    notifyListeners();
+  }
+
+  Future<void> addQrScanRecord({
+    required String content,
+    String format = 'QR_CODE',
+  }) async {
+    final record = QrScanRecord(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      content: content,
+      format: format,
+      timestamp: DateTime.now(),
+    );
+    _qrScanHistory.removeWhere((r) => r.content == content);
+    _qrScanHistory.insert(0, record);
+    if (_qrScanHistory.length > 50) {
+      _qrScanHistory.removeLast();
+    }
+    final encoded = _qrScanHistory.map((r) => jsonEncode(r.toJson())).toList();
+    await _prefs.setStringList('qr_scan_history', encoded);
+    notifyListeners();
+  }
+
+  Future<void> removeQrScanRecord(String id) async {
+    _qrScanHistory.removeWhere((r) => r.id == id);
+    final encoded = _qrScanHistory.map((r) => jsonEncode(r.toJson())).toList();
+    await _prefs.setStringList('qr_scan_history', encoded);
+    notifyListeners();
+  }
+
+  Future<void> clearQrHistory() async {
+    _qrScanHistory.clear();
+    await _prefs.remove('qr_scan_history');
     notifyListeners();
   }
 

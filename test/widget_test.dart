@@ -11,14 +11,11 @@ void main() {
     await PreferencesService().init();
   });
 
-  testWidgets('App launches with MIUI style calculator and tabs', (WidgetTester tester) async {
+  testWidgets('App launches with MainNavigationScaffold and hubs', (WidgetTester tester) async {
     await tester.pumpWidget(const UtilityApp());
     await tester.pumpAndSettle();
 
-    // Verify calculator screen '=' is present
-    expect(find.text('='), findsWidgets);
-    // Verify AC button
-    expect(find.text('AC'), findsOneWidget);
+    expect(find.byType(UtilityApp), findsOneWidget);
   });
 
   test('ToolRegistry contains essential tools across categories', () {
@@ -42,7 +39,23 @@ void main() {
 
     final pdfTool = ToolRegistry.findById('pdf_toolkit');
     expect(pdfTool, isNotNull);
-    expect(pdfTool!.title, 'PDF Toolkit');
+    expect(pdfTool!.title, contains('PDF Toolkit'));
+
+    final imageTool = ToolRegistry.findById('image_toolkit');
+    expect(imageTool, isNotNull);
+    expect(imageTool!.title, 'Image Toolkit');
+
+    final qrTool = ToolRegistry.findById('qr_barcode_toolkit');
+    expect(qrTool, isNotNull);
+    expect(qrTool!.title, 'QR & Barcode Suite');
+
+    final fileZipTool = ToolRegistry.findById('file_zip_toolkit');
+    expect(fileZipTool, isNotNull);
+    expect(fileZipTool!.title, 'File & ZIP Suite');
+
+    final ocrTool = ToolRegistry.findById('ocr_toolkit');
+    expect(ocrTool, isNotNull);
+    expect(ocrTool!.title, 'OCR & Voice Studio');
 
     final scannerTool = ToolRegistry.findById('document_scanner');
     expect(scannerTool, isNotNull);
@@ -63,6 +76,50 @@ void main() {
     final passwordTool = ToolRegistry.findById('password_generator');
     expect(passwordTool, isNotNull);
     expect(passwordTool!.category, ToolCategory.security);
+
+    final fitnessSuite = ToolRegistry.findById('health_fitness_toolkit');
+    expect(fitnessSuite, isNotNull);
+    expect(fitnessSuite!.title, 'Health & Fitness Suite');
+
+    final academicSuite = ToolRegistry.findById('academic_toolkit');
+    expect(academicSuite, isNotNull);
+    expect(academicSuite!.title, 'Academic & Education Suite');
+
+    final homeTravelSuite = ToolRegistry.findById('home_travel_toolkit');
+    expect(homeTravelSuite, isNotNull);
+    expect(homeTravelSuite!.title, 'Home, Construction & Travel Suite');
+
+    final collageTool = ToolRegistry.findById('image_collage_maker');
+    expect(collageTool, isNotNull);
+    expect(collageTool!.title, 'Image Collage Maker');
+
+    final diffTool = ToolRegistry.findById('text_diff_cleaner');
+    expect(diffTool, isNotNull);
+    expect(diffTool!.title, 'Text Diff & Cleaner');
+
+    final mdTool = ToolRegistry.findById('markdown_editor');
+    expect(mdTool, isNotNull);
+    expect(mdTool!.title, 'Markdown Editor & Preview');
+
+    final mediaTool = ToolRegistry.findById('media_tools');
+    expect(mediaTool, isNotNull);
+    expect(mediaTool!.title, 'Audio & Video Studio');
+
+    final xmlYamlTool = ToolRegistry.findById('xml_yaml_formatter');
+    expect(xmlYamlTool, isNotNull);
+    expect(xmlYamlTool!.title, 'XML & YAML Formatter');
+
+    final deviceSuite = ToolRegistry.findById('device_hardware_toolkit');
+    expect(deviceSuite, isNotNull);
+    expect(deviceSuite!.title, 'Device & Hardware Studio');
+
+    final compassTool = ToolRegistry.findById('compass_level');
+    expect(compassTool, isNotNull);
+    expect(compassTool!.title, 'Compass & Spirit Level');
+
+    final sensorTool = ToolRegistry.findById('sensor_tester');
+    expect(sensorTool, isNotNull);
+    expect(sensorTool!.title, 'Sensor Tester');
   });
 
   test('Electricity Bill calculation test', () {

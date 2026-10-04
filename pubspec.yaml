@@ -39,9 +39,23 @@ dependencies:
   math_expressions: ^3.2.0
   shared_preferences: ^2.5.5
   flutter_animate: ^4.5.2
+  flutter_markdown: ^0.7.6+1
   pdf: ^3.12.0
   printing: ^5.14.3
   file_picker: ^13.1.0
+  image: ^4.10.1
+  qr_flutter: ^4.1.0
+  barcode_widget: ^2.0.4
+  syncfusion_flutter_pdf: ^33.2.13
+  mobile_scanner: ^7.4.2
+  archive: ^4.0.9
+  crypto: ^3.0.7
+  csv: ^8.0.0
+  flutter_tts: ^4.2.5
+  speech_to_text: ^7.4.0
+  google_mlkit_text_recognition: ^0.16.0
+  device_info_plus: ^13.3.0
+  sensors_plus: ^7.1.1
 
 dev_dependencies:
   flutter_test:

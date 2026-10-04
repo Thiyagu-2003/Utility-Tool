@@ -16,6 +16,10 @@ class AppColors {
   static const Color catDev = Color(0xFFEC4899); // Pink
   static const Color catEveryday = Color(0xFFF59E0B); // Amber
   static const Color catPdf = Color(0xFFE11D48); // PDF Rose / Crimson
+  static const Color catHealth = Color(0xFFEF4444); // Red / Health
+  static const Color catEducation = Color(0xFF8B5CF6); // Purple / Academic
+  static const Color catHomeTravel = Color(0xFFF59E0B); // Amber / Home & Travel
+  static const Color catImage = Color(0xFFE11D48); // Rose / Image
 
   // Dark Theme Neutral Colors
   static const Color darkBg = Color(0xFF0D0F14);
