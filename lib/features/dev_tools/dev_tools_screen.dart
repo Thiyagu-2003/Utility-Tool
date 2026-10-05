@@ -4,18 +4,20 @@ import 'package:flutter/material.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 
 enum DevToolTab {
-  json('JSON Formatter'),
-  base64('Base64 / URL'),
-  uuid('UUID Generator'),
-  color('Color (HEX/RGB)');
+  json('JSON Formatter', Icons.data_object_rounded),
+  base64('Base64 / URL', Icons.enhanced_encryption_rounded),
+  uuid('UUID Generator', Icons.fingerprint_rounded),
+  color('Color (HEX/RGB)', Icons.palette_rounded);
 
   final String label;
-  const DevToolTab(this.label);
+  final IconData icon;
+  const DevToolTab(this.label, this.icon);
 }
 
 class DevToolsScreen extends StatefulWidget {
@@ -175,33 +177,22 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Sub-tabs
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: DevToolTab.values.map((tab) {
-                final isSelected = tab == _activeTab;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: ChoiceChip(
-                    label: Text(tab.label),
-                    selected: isSelected,
-                    selectedColor: AppColors.catDev,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : null,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    onSelected: (val) {
-                      if (val) {
-                        PreferencesService().triggerHaptic();
-                        setState(() => _activeTab = tab);
-                      }
-                    },
-                  ),
-                );
-              }).toList(),
-            ),
+          FeatureTabSelector<DevToolTab>(
+            tabs: DevToolTab.values
+                .map((tab) => FeatureTabItem(
+                      value: tab,
+                      label: tab.label,
+                      icon: tab.icon,
+                    ))
+                .toList(),
+            activeTab: _activeTab,
+            onTabSelected: (tab) {
+              setState(() => _activeTab = tab);
+            },
+            accentColor: AppColors.catDev,
+            title: 'Developer Tools',
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
 
           // JSON Formatter Tab
           if (_activeTab == DevToolTab.json) ...[

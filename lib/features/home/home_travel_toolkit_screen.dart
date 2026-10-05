@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
@@ -498,37 +499,14 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
   }
 
   Widget _buildTabs(bool isDark) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      physics: const BouncingScrollPhysics(),
-      child: Row(
-        children: HomeTravelTab.values.map((tab) {
-          final isSelected = _activeTab == tab;
-          return Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: ChoiceChip(
-              showCheckmark: false,
-              avatar: Icon(
-                tab.icon,
-                size: 16,
-                color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-              ),
-              label: Text(tab.label),
-              selected: isSelected,
-              selectedColor: AppColors.catHomeTravel,
-              backgroundColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-              labelStyle: TextStyle(
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-              ),
-              onSelected: (_) {
-                PreferencesService().triggerHaptic();
-                setState(() => _activeTab = tab);
-              },
-            ),
-          );
-        }).toList(),
-      ),
+    return FeatureTabSelector<HomeTravelTab>(
+      tabs: HomeTravelTab.values
+          .map((tab) => FeatureTabItem(value: tab, label: tab.label, icon: tab.icon))
+          .toList(),
+      activeTab: _activeTab,
+      accentColor: AppColors.catHomeTravel,
+      title: 'Home & Travel Calculators',
+      onTabSelected: (tab) => setState(() => _activeTab = tab),
     );
   }
 

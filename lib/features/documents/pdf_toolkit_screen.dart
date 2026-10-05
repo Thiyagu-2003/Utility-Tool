@@ -10,6 +10,7 @@ import 'package:syncfusion_flutter_pdf/pdf.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
@@ -923,34 +924,14 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Sub-tabs
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: PdfToolkitTab.values.map((tab) {
-                final isSelected = tab == _activeTab;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: FilterChip(
-                    avatar: Icon(tab.icon, size: 16, color: isSelected ? Colors.white : AppColors.catPdf),
-                    label: Text(tab.label),
-                    selected: isSelected,
-                    selectedColor: AppColors.catPdf,
-                    showCheckmark: false,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : null,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                    onSelected: (val) {
-                      if (val) {
-                        PreferencesService().triggerHaptic();
-                        setState(() => _activeTab = tab);
-                      }
-                    },
-                  ),
-                );
-              }).toList(),
-            ),
+          FeatureTabSelector<PdfToolkitTab>(
+            tabs: PdfToolkitTab.values
+                .map((tab) => FeatureTabItem(value: tab, label: tab.label, icon: tab.icon))
+                .toList(),
+            activeTab: _activeTab,
+            accentColor: AppColors.catPdf,
+            title: 'PDF Studio Tools',
+            onTabSelected: (tab) => setState(() => _activeTab = tab),
           ),
           const SizedBox(height: 20),
 

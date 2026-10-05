@@ -19,6 +19,7 @@ class MarkdownEditorScreen extends StatefulWidget {
 
 class _MarkdownEditorScreenState extends State<MarkdownEditorScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  final ScrollController _toolbarScrollController = ScrollController();
   final TextEditingController _markdownController = TextEditingController(
     text: '''# Markdown Document
 
@@ -55,6 +56,7 @@ void main() {
   @override
   void dispose() {
     _tabController.dispose();
+    _toolbarScrollController.dispose();
     _markdownController.dispose();
     super.dispose();
   }
@@ -123,27 +125,80 @@ void main() {
             ],
           ),
           const SizedBox(height: 12),
-          // Syntax Toolbar
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _toolButton('H1', () => _insertSyntax('# ')),
-                _toolButton('H2', () => _insertSyntax('## ')),
-                _toolButton('H3', () => _insertSyntax('### ')),
-                _toolButton('B', () => _insertSyntax('**', '**'), isBold: true),
-                _toolButton('I', () => _insertSyntax('*', '*'), isItalic: true),
-                _toolButton('Code', () => _insertSyntax('`', '`')),
-                _toolButton('Block', () => _insertSyntax('```\n', '\n```')),
-                _toolButton('Quote', () => _insertSyntax('> ')),
-                _toolButton('• List', () => _insertSyntax('- ')),
-                _toolButton('1. List', () => _insertSyntax('1. ')),
-                _toolButton('[x] Task', () => _insertSyntax('- [ ] ')),
-                _toolButton('Table', () => _insertSyntax('| Header 1 | Header 2 |\n| :--- | :--- |\n| Data 1 | Data 2 |\n')),
-                _toolButton('Link', () => _insertSyntax('[title](', ')')),
-                _toolButton('---', () => _insertSyntax('\n---\n')),
-              ],
-            ),
+          // Syntax Toolbar with quick scroll navigation
+          Row(
+            children: [
+              InkWell(
+                onTap: () {
+                  if (!_toolbarScrollController.hasClients) return;
+                  _toolbarScrollController.animateTo(
+                    (_toolbarScrollController.offset - 160).clamp(0.0, _toolbarScrollController.position.maxScrollExtent),
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeOutCubic,
+                  );
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  height: 32,
+                  width: 24,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                  ),
+                  child: const Icon(Icons.chevron_left_rounded, size: 18),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: _toolbarScrollController,
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _toolButton('H1', () => _insertSyntax('# ')),
+                      _toolButton('H2', () => _insertSyntax('## ')),
+                      _toolButton('H3', () => _insertSyntax('### ')),
+                      _toolButton('B', () => _insertSyntax('**', '**'), isBold: true),
+                      _toolButton('I', () => _insertSyntax('*', '*'), isItalic: true),
+                      _toolButton('Code', () => _insertSyntax('`', '`')),
+                      _toolButton('Block', () => _insertSyntax('```\n', '\n```')),
+                      _toolButton('Quote', () => _insertSyntax('> ')),
+                      _toolButton('• List', () => _insertSyntax('- ')),
+                      _toolButton('1. List', () => _insertSyntax('1. ')),
+                      _toolButton('[x] Task', () => _insertSyntax('- [ ] ')),
+                      _toolButton('Table', () => _insertSyntax('| Header 1 | Header 2 |\n| :--- | :--- |\n| Data 1 | Data 2 |\n')),
+                      _toolButton('Link', () => _insertSyntax('[title](', ')')),
+                      _toolButton('---', () => _insertSyntax('\n---\n')),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              InkWell(
+                onTap: () {
+                  if (!_toolbarScrollController.hasClients) return;
+                  _toolbarScrollController.animateTo(
+                    (_toolbarScrollController.offset + 160).clamp(0.0, _toolbarScrollController.position.maxScrollExtent),
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeOutCubic,
+                  );
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  height: 32,
+                  width: 24,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                  ),
+                  child: const Icon(Icons.chevron_right_rounded, size: 18),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           SizedBox(

@@ -1,19 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../core/models/tool_model.dart';
-import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 
 enum PercentMode {
-  percentOf('What is X% of Y?'),
-  xIsWhatPercentOfY('X is what % of Y?'),
-  percentChange('% Change from X to Y');
+  percentOf('What is X% of Y?', Icons.percent_rounded),
+  xIsWhatPercentOfY('X is what % of Y?', Icons.calculate_rounded),
+  percentChange('% Change from X to Y', Icons.trending_up_rounded);
 
   final String label;
-  const PercentMode(this.label);
+  final IconData icon;
+  const PercentMode(this.label, this.icon);
 }
 
 class PercentageCalculatorScreen extends StatefulWidget {
@@ -121,33 +122,22 @@ class _PercentageCalculatorScreenState extends State<PercentageCalculatorScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Mode Selector
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: PercentMode.values.map((m) {
-                final isSelected = m == _mode;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: ChoiceChip(
-                    label: Text(m.label),
-                    selected: isSelected,
-                    selectedColor: AppColors.catMath,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : null,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    onSelected: (val) {
-                      if (val) {
-                        PreferencesService().triggerHaptic();
-                        setState(() => _mode = m);
-                      }
-                    },
-                  ),
-                );
-              }).toList(),
-            ),
+          FeatureTabSelector<PercentMode>(
+            tabs: PercentMode.values
+                .map((m) => FeatureTabItem(
+                      value: m,
+                      label: m.label,
+                      icon: m.icon,
+                    ))
+                .toList(),
+            activeTab: _mode,
+            onTabSelected: (m) {
+              setState(() => _mode = m);
+            },
+            accentColor: AppColors.catMath,
+            title: 'Calculation Mode',
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
 
           ResultCard(
             title: 'Result',

@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
@@ -171,41 +172,20 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Category selector chips
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: UnitType.values.map((type) {
-                final isSelected = type == _currentType;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: FilterChip(
-                    selected: isSelected,
-                    showCheckmark: false,
-                    avatar: Icon(
-                      type.icon,
-                      size: 16,
-                      color: isSelected ? Colors.white : AppColors.catConverter,
-                    ),
-                    label: Text(type.label),
-                    selectedColor: AppColors.catConverter,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : (isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary),
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                    ),
-                    onSelected: (val) {
-                      if (val) {
-                        PreferencesService().triggerHaptic();
-                        setState(() {
-                          _currentType = type;
-                          _resetUnitsForType();
-                        });
-                      }
-                    },
-                  ),
-                );
-              }).toList(),
-            ),
+          // Category selector
+          FeatureTabSelector<UnitType>(
+            tabs: UnitType.values
+                .map((type) => FeatureTabItem(value: type, label: type.label, icon: type.icon))
+                .toList(),
+            activeTab: _currentType,
+            accentColor: AppColors.catConverter,
+            title: 'Unit Converter Categories',
+            onTabSelected: (type) {
+              setState(() {
+                _currentType = type;
+                _resetUnitsForType();
+              });
+            },
           ),
           const SizedBox(height: 20),
 

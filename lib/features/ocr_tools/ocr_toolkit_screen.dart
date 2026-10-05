@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +12,7 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
@@ -61,7 +61,6 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
 
   bool _isProcessing = false;
   Uint8List? _previewImageBytes;
-  String _extractedText = '';
   final TextEditingController _textEditorController = TextEditingController(
     text: 'Contact our office at info@company.com or support@company.org.\n'
         'Direct phone: +1 (555) 234-5678 or 1800-456-7890.\n'
@@ -156,7 +155,6 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
         }
 
         setState(() {
-          _extractedText = resultText;
           _textEditorController.text = resultText;
           _isProcessing = false;
         });
@@ -317,7 +315,6 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
       onReset: () {
         setState(() {
           _previewImageBytes = null;
-          _extractedText = '';
           _textEditorController.clear();
           _tableCsvResult = '';
           _entities = null;
@@ -327,36 +324,22 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Sub-tabs
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: OcrTab.values.map((tab) {
-                final isSelected = tab == _activeTab;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: FilterChip(
-                    avatar: Icon(tab.icon, size: 16, color: isSelected ? Colors.white : AppColors.catText),
-                    label: Text(tab.label),
-                    selected: isSelected,
-                    selectedColor: AppColors.catText,
-                    showCheckmark: false,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : null,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                    onSelected: (val) {
-                      if (val) {
-                        PreferencesService().triggerHaptic();
-                        setState(() => _activeTab = tab);
-                      }
-                    },
-                  ),
-                );
-              }).toList(),
-            ),
+          FeatureTabSelector<OcrTab>(
+            tabs: OcrTab.values
+                .map((tab) => FeatureTabItem(
+                      value: tab,
+                      label: tab.label,
+                      icon: tab.icon,
+                    ))
+                .toList(),
+            activeTab: _activeTab,
+            onTabSelected: (tab) {
+              setState(() => _activeTab = tab);
+            },
+            accentColor: AppColors.catText,
+            title: 'OCR & Voice Tools',
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
 
           // Overview Header
           ResultCard(

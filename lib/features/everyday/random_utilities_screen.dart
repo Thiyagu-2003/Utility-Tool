@@ -3,17 +3,19 @@ import 'package:flutter/material.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 
 enum EverydayTab {
-  random('Random Number'),
-  dice('Dice Roller'),
-  coin('Coin Toss');
+  random('Random Number', Icons.pin_rounded),
+  dice('Dice Roller', Icons.casino_rounded),
+  coin('Coin Toss', Icons.monetization_on_rounded);
 
   final String label;
-  const EverydayTab(this.label);
+  final IconData icon;
+  const EverydayTab(this.label, this.icon);
 }
 
 class RandomUtilitiesScreen extends StatefulWidget {
@@ -92,33 +94,22 @@ class _RandomUtilitiesScreenState extends State<RandomUtilitiesScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: EverydayTab.values.map((tab) {
-                final isSelected = tab == _activeTab;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: ChoiceChip(
-                    label: Text(tab.label),
-                    selected: isSelected,
-                    selectedColor: AppColors.catEveryday,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : null,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    onSelected: (val) {
-                      if (val) {
-                        PreferencesService().triggerHaptic();
-                        setState(() => _activeTab = tab);
-                      }
-                    },
-                  ),
-                );
-              }).toList(),
-            ),
+          FeatureTabSelector<EverydayTab>(
+            tabs: EverydayTab.values
+                .map((tab) => FeatureTabItem(
+                      value: tab,
+                      label: tab.label,
+                      icon: tab.icon,
+                    ))
+                .toList(),
+            activeTab: _activeTab,
+            onTabSelected: (tab) {
+              setState(() => _activeTab = tab);
+            },
+            accentColor: AppColors.catEveryday,
+            title: 'Everyday Tools',
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
 
           // Random Number Section
           if (_activeTab == EverydayTab.random) ...[

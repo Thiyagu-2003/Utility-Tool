@@ -5,6 +5,7 @@ import 'package:math_expressions/math_expressions.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
@@ -586,37 +587,14 @@ class _AcademicToolkitScreenState extends State<AcademicToolkitScreen> {
   }
 
   Widget _buildTabChips(bool isDark) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      physics: const BouncingScrollPhysics(),
-      child: Row(
-        children: AcademicTab.values.map((tab) {
-          final isSelected = _activeTab == tab;
-          return Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: ChoiceChip(
-              showCheckmark: false,
-              avatar: Icon(
-                tab.icon,
-                size: 16,
-                color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-              ),
-              label: Text(tab.label),
-              selected: isSelected,
-              selectedColor: AppColors.catEducation,
-              backgroundColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-              labelStyle: TextStyle(
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-              ),
-              onSelected: (_) {
-                PreferencesService().triggerHaptic();
-                setState(() => _activeTab = tab);
-              },
-            ),
-          );
-        }).toList(),
-      ),
+    return FeatureTabSelector<AcademicTab>(
+      tabs: AcademicTab.values
+          .map((tab) => FeatureTabItem(value: tab, label: tab.label, icon: tab.icon))
+          .toList(),
+      activeTab: _activeTab,
+      accentColor: AppColors.catEducation,
+      title: 'Academic & Math Toolkit',
+      onTabSelected: (tab) => setState(() => _activeTab = tab),
     );
   }
 

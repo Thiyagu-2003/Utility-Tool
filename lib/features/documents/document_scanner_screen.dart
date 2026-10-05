@@ -9,16 +9,18 @@ import 'package:printing/printing.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 
 enum ScannerMode {
-  document('Multi-Page Document'),
-  idCard('ID Card Front & Back'),
-  signature('Signature Pad');
+  document('Multi-Page Document', Icons.document_scanner_rounded),
+  idCard('ID Card Front & Back', Icons.badge_rounded),
+  signature('Signature Pad', Icons.draw_rounded);
 
   final String label;
-  const ScannerMode(this.label);
+  final IconData icon;
+  const ScannerMode(this.label, this.icon);
 }
 
 enum DocFilter {
@@ -283,33 +285,22 @@ class _DocumentScannerScreenState extends State<DocumentScannerScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Mode Selector
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: ScannerMode.values.map((mode) {
-                final isSelected = mode == _scannerMode;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: ChoiceChip(
-                    label: Text(mode.label),
-                    selected: isSelected,
-                    selectedColor: AppColors.catPdf,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : null,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    onSelected: (val) {
-                      if (val) {
-                        PreferencesService().triggerHaptic();
-                        setState(() => _scannerMode = mode);
-                      }
-                    },
-                  ),
-                );
-              }).toList(),
-            ),
+          FeatureTabSelector<ScannerMode>(
+            tabs: ScannerMode.values
+                .map((mode) => FeatureTabItem(
+                      value: mode,
+                      label: mode.label,
+                      icon: mode.icon,
+                    ))
+                .toList(),
+            activeTab: _scannerMode,
+            onTabSelected: (mode) {
+              setState(() => _scannerMode = mode);
+            },
+            accentColor: AppColors.catPdf,
+            title: 'Scanner Mode',
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
 
           // MODE 1: Multi-Page Document Scanner
           if (_scannerMode == ScannerMode.document) ...[
