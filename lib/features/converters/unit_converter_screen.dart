@@ -223,6 +223,7 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
             label: 'Enter Value',
             controller: _inputController,
             hintText: '1.0',
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             prefixIcon: Icons.edit_note_rounded,
             onChanged: (_) => setState(() {}),
           ),

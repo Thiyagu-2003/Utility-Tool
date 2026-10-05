@@ -26,7 +26,7 @@ class ModernTextField extends StatelessWidget {
     this.prefixText,
     this.suffix,
     this.suffixText,
-    this.keyboardType = const TextInputType.numberWithOptions(decimal: true),
+    this.keyboardType = TextInputType.text,
     this.onChanged,
     this.readOnly = false,
     this.onTap,

@@ -114,6 +114,7 @@ class _DurationConverterScreenState extends State<DurationConverterScreen> {
             label: 'Enter Value',
             controller: _inputController,
             hintText: 'e.g. 200',
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             prefixIcon: Icons.timer_outlined,
             onChanged: (_) => setState(() {}),
             suffix: DropdownButtonHideUnderline(

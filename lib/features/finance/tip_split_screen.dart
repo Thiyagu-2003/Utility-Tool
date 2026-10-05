@@ -93,6 +93,7 @@ class _TipSplitScreenState extends State<TipSplitScreen> {
             label: 'Total Bill Amount',
             controller: _billController,
             hintText: '1200',
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             prefixText: '₹',
             onChanged: (_) => setState(() {}),
           ),

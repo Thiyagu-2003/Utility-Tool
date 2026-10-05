@@ -177,6 +177,7 @@ class _HealthCalculatorScreenState extends State<HealthCalculatorScreen> {
             label: 'Height',
             controller: _heightController,
             hintText: _isCm ? '175' : '5.8',
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             prefixIcon: Icons.height_rounded,
             suffix: Row(
               mainAxisSize: MainAxisSize.min,
@@ -211,6 +212,7 @@ class _HealthCalculatorScreenState extends State<HealthCalculatorScreen> {
                   label: 'Weight (kg)',
                   controller: _weightController,
                   hintText: '70',
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   prefixIcon: Icons.fitness_center_rounded,
                   suffixText: 'kg',
                   onChanged: (_) => setState(() {}),
@@ -222,6 +224,7 @@ class _HealthCalculatorScreenState extends State<HealthCalculatorScreen> {
                   label: 'Age (years)',
                   controller: _ageController,
                   hintText: '25',
+                  keyboardType: TextInputType.number,
                   prefixIcon: Icons.cake_outlined,
                   suffixText: 'yrs',
                   onChanged: (_) => setState(() {}),

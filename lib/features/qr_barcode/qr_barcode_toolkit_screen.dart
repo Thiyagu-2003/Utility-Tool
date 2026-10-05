@@ -652,29 +652,29 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
         ),
         const SizedBox(height: 16),
         if (_contactType == 'URL')
-          ModernTextField(label: 'Website URL', controller: _cUrlController, prefixIcon: Icons.language_rounded, onChanged: (_) => setState(() {})),
+          ModernTextField(label: 'Website URL', controller: _cUrlController, keyboardType: TextInputType.url, prefixIcon: Icons.language_rounded, onChanged: (_) => setState(() {})),
         if (_contactType == 'vCard') ...[
-          ModernTextField(label: 'Full Name', controller: _cNameController, prefixIcon: Icons.person_rounded, onChanged: (_) => setState(() {})),
+          ModernTextField(label: 'Full Name', controller: _cNameController, keyboardType: TextInputType.name, prefixIcon: Icons.person_rounded, onChanged: (_) => setState(() {})),
           const SizedBox(height: 12),
-          ModernTextField(label: 'Phone Number', controller: _cPhoneController, prefixIcon: Icons.phone_rounded, onChanged: (_) => setState(() {})),
+          ModernTextField(label: 'Phone Number', controller: _cPhoneController, keyboardType: TextInputType.phone, prefixIcon: Icons.phone_rounded, onChanged: (_) => setState(() {})),
           const SizedBox(height: 12),
-          ModernTextField(label: 'Email', controller: _cEmailController, prefixIcon: Icons.email_rounded, onChanged: (_) => setState(() {})),
+          ModernTextField(label: 'Email', controller: _cEmailController, keyboardType: TextInputType.emailAddress, prefixIcon: Icons.email_rounded, onChanged: (_) => setState(() {})),
           const SizedBox(height: 12),
           ModernTextField(label: 'Company / Org', controller: _cOrgController, prefixIcon: Icons.business_rounded, onChanged: (_) => setState(() {})),
         ],
         if (_contactType == 'Email') ...[
-          ModernTextField(label: 'Recipient Email', controller: _cEmailController, prefixIcon: Icons.email_rounded, onChanged: (_) => setState(() {})),
+          ModernTextField(label: 'Recipient Email', controller: _cEmailController, keyboardType: TextInputType.emailAddress, prefixIcon: Icons.email_rounded, onChanged: (_) => setState(() {})),
           const SizedBox(height: 12),
           ModernTextField(label: 'Subject', controller: _cSubjectController, prefixIcon: Icons.subject_rounded, onChanged: (_) => setState(() {})),
         ],
         if (_contactType == 'Phone' || _contactType == 'SMS')
-          ModernTextField(label: 'Phone Number', controller: _cPhoneController, prefixIcon: Icons.phone_rounded, onChanged: (_) => setState(() {})),
+          ModernTextField(label: 'Phone Number', controller: _cPhoneController, keyboardType: TextInputType.phone, prefixIcon: Icons.phone_rounded, onChanged: (_) => setState(() {})),
         if (_contactType == 'Location') ...[
           Row(
             children: [
-              Expanded(child: ModernTextField(label: 'Latitude', controller: _cLatController, onChanged: (_) => setState(() {}))),
+              Expanded(child: ModernTextField(label: 'Latitude', controller: _cLatController, keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true), onChanged: (_) => setState(() {}))),
               const SizedBox(width: 12),
-              Expanded(child: ModernTextField(label: 'Longitude', controller: _cLngController, onChanged: (_) => setState(() {}))),
+              Expanded(child: ModernTextField(label: 'Longitude', controller: _cLngController, keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true), onChanged: (_) => setState(() {}))),
             ],
           ),
         ],

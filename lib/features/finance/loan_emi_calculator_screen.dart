@@ -106,6 +106,7 @@ class _LoanEmiCalculatorScreenState extends State<LoanEmiCalculatorScreen> {
             label: 'Loan Principal Amount',
             controller: _principalController,
             hintText: '1000000',
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             prefixText: '₹',
             onChanged: (_) => setState(() {}),
           ),
@@ -114,6 +115,7 @@ class _LoanEmiCalculatorScreenState extends State<LoanEmiCalculatorScreen> {
             label: 'Annual Interest Rate (%)',
             controller: _rateController,
             hintText: '8.5',
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             suffixText: '% p.a.',
             onChanged: (_) => setState(() {}),
           ),
@@ -122,6 +124,7 @@ class _LoanEmiCalculatorScreenState extends State<LoanEmiCalculatorScreen> {
             label: 'Loan Tenure',
             controller: _tenureController,
             hintText: '15',
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             suffix: Row(
               mainAxisSize: MainAxisSize.min,
               children: [

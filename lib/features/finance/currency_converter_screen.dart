@@ -124,6 +124,7 @@ class _CurrencyConverterScreenState extends State<CurrencyConverterScreen> {
             label: 'Enter Amount',
             controller: _amountController,
             hintText: '100',
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             prefixText: _fromCurrency.symbol,
             onChanged: (_) => setState(() {}),
           ),
