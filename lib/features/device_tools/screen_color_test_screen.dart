@@ -56,6 +56,7 @@ class _ScreenColorTestScreenState extends State<ScreenColorTestScreen> {
       title: 'Screen Color & Pixel Test',
       category: ToolCategory.moreTools,
       toolId: 'screen_color_test',
+      isScrollable: false,
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

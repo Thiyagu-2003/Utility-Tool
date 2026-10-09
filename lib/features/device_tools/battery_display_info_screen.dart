@@ -128,6 +128,7 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
       title: 'Battery & Display Diagnostics',
       category: ToolCategory.moreTools,
       toolId: 'battery_display_info',
+      isScrollable: false,
       body: Column(
         children: [
           // Tab Switcher

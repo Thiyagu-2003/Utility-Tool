@@ -159,6 +159,7 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
       title: 'Microphone & Speaker Tester',
       category: ToolCategory.moreTools,
       toolId: 'mic_speaker_tester',
+      isScrollable: false,
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

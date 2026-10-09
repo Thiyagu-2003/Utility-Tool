@@ -130,6 +130,7 @@ class _VibrationTesterScreenState extends State<VibrationTesterScreen> with Sing
       title: 'Vibration & Haptics Tester',
       category: ToolCategory.moreTools,
       toolId: 'vibration_tester',
+      isScrollable: false,
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

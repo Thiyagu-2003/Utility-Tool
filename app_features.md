@@ -442,10 +442,16 @@ Here is the comprehensive list of features currently implemented in the app, cat
 - **Version**: `1.0.84`
 - **Build Number**: `84`
 - **Output Target**: Android Release APKs (`--split-per-abi`)
-  - `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` (44.8 MB - Target: ARM64 devices, Android 10+)
-  - `build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk` (37.8 MB - Target: 32-bit legacy ARM devices)
-  - `build/app/outputs/flutter-apk/app-x86_64-release.apk` (47.7 MB - Target: Emulators & x86 tablets)
+  - `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` (Target: ARM64 devices, Android 10+)
+  - `build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk` (Target: 32-bit legacy ARM devices)
+  - `build/app/outputs/flutter-apk/app-x86_64-release.apk` (Target: Emulators & x86 tablets)
 - **Zero Internet Permissions**: 100% offline security verified in `AndroidManifest.xml`
 - **Test Suite**: 22/22 Unit & Integration tests passing (`flutter test`)
+- **Audit & Bug Fixes (Release 84 - More Tools & Device Diagnostics)**:
+  - Fixed blank white screen bug caused by unbounded flex height constraints in `ToolScaffold`: Added `isScrollable: false` option so screens managing their own `ListView` or `Expanded` containers render without layout exceptions.
+  - Fixed `BatteryDisplayInfoScreen` ("Battery Health" and "Display & Refresh Rate" tabs) layout crash in release mode.
+  - Fixed `TouchscreenTestScreen` touch digitizer matrix aspect-ratio calculation so that touch coordinates align 1:1 with all 160 grid cells across any screen aspect ratio.
+  - Audited and verified all submenus in `ScreenColorTestScreen`, `VibrationTesterScreen`, `MicSpeakerTesterScreen`, `SoundLevelEstimatorScreen`, and `QrContactShareScreen` with zero layout overflows and full offline support.
+
 
 

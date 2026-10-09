@@ -158,6 +158,7 @@ class _QrContactShareScreenState extends State<QrContactShareScreen> {
       title: 'QR Contact Sharing',
       category: ToolCategory.filesText,
       toolId: 'qr_contact_share',
+      isScrollable: false,
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(

@@ -10,6 +10,8 @@ class ToolScaffold extends StatelessWidget {
   final Widget body;
   final VoidCallback? onReset;
   final List<Widget>? actions;
+  final bool isScrollable;
+  final EdgeInsetsGeometry? padding;
 
   const ToolScaffold({
     super.key,
@@ -19,6 +21,8 @@ class ToolScaffold extends StatelessWidget {
     required this.body,
     this.onReset,
     this.actions,
+    this.isScrollable = true,
+    this.padding,
   });
 
   @override
@@ -58,7 +62,7 @@ class ToolScaffold extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: category.color.withOpacity(0.12),
+                color: category.color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
@@ -110,11 +114,16 @@ class ToolScaffold extends StatelessWidget {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 680),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              physics: const BouncingScrollPhysics(),
-              child: body,
-            ),
+            child: isScrollable
+                ? SingleChildScrollView(
+                    padding: padding ?? const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    physics: const BouncingScrollPhysics(),
+                    child: body,
+                  )
+                : Padding(
+                    padding: padding ?? EdgeInsets.zero,
+                    child: body,
+                  ),
           ),
         ),
       ),

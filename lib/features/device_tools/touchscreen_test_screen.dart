@@ -53,6 +53,7 @@ class _TouchscreenTestScreenState extends State<TouchscreenTestScreen> {
       title: 'Touchscreen Digitizer Test',
       category: ToolCategory.moreTools,
       toolId: 'touchscreen_test',
+      isScrollable: false,
       body: Column(
         children: [
           // Control Header
@@ -137,6 +138,9 @@ class _TouchscreenTestScreenState extends State<TouchscreenTestScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = Size(constraints.maxWidth, constraints.maxHeight);
+        final cellW = constraints.maxWidth / _cols;
+        final cellH = constraints.maxHeight / _rows;
+        final cellRatio = cellH > 0 ? (cellW / cellH) : 0.65;
 
         return GestureDetector(
           onPanDown: (details) => _markCellAt(details.localPosition, size),
@@ -146,9 +150,9 @@ class _TouchscreenTestScreenState extends State<TouchscreenTestScreen> {
             child: GridView.builder(
               physics: const NeverScrollableScrollPhysics(),
               itemCount: _totalCells,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: _cols,
-                childAspectRatio: 0.65,
+                childAspectRatio: cellRatio,
               ),
               itemBuilder: (context, index) {
                 final isTested = _testedCells.contains(index);

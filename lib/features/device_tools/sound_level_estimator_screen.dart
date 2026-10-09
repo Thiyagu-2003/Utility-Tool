@@ -138,6 +138,7 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
       title: 'Sound-Level (dB) Estimator',
       category: ToolCategory.moreTools,
       toolId: 'sound_level_estimator',
+      isScrollable: false,
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
