@@ -136,28 +136,47 @@ class SectionDetailScreen extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 10),
               decoration: BoxDecoration(
                 color: isDark ? AppColors.darkSurface : Colors.white,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                  color: tool.color.withValues(alpha: isDark ? 0.35 : 0.22),
+                  width: 1.2,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: tool.color.withValues(alpha: isDark ? 0.08 : 0.06),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
               ),
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(20),
                   onTap: () => _openTool(context, tool),
                   child: Padding(
                     padding: const EdgeInsets.all(14),
                     child: Row(
                       children: [
                         Container(
-                          width: 46,
-                          height: 46,
+                          width: 50,
+                          height: 50,
                           decoration: BoxDecoration(
-                            color: tool.color.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(13),
+                            gradient: LinearGradient(
+                              colors: [
+                                tool.color.withValues(alpha: 0.22),
+                                tool.color.withValues(alpha: 0.08),
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: tool.color.withValues(alpha: 0.35),
+                              width: 1.2,
+                            ),
                           ),
-                          child: Icon(tool.icon, color: tool.color, size: 22),
+                          child: Icon(tool.icon, color: tool.color, size: 24),
                         ),
                         const SizedBox(width: 14),
                         Expanded(
@@ -205,10 +224,17 @@ class SectionDetailScreen extends StatelessWidget {
                           },
                         ),
                         const SizedBox(width: 8),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          size: 18,
-                          color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+                        Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: tool.color.withValues(alpha: 0.10),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.chevron_right_rounded,
+                            size: 16,
+                            color: tool.color,
+                          ),
                         ),
                       ],
                     ),

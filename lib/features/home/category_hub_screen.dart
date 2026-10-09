@@ -377,28 +377,10 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.bold,
-                              letterSpacing: 1.2,
+                              letterSpacing: 1.0,
                               color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
                             ),
                           ),
-                          if (_isEditMode) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: AppColors.primaryOrange.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text(
-                                'DRAG TO REORDER',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.primaryOrange,
-                                ),
-                              ),
-                            ),
-                          ],
                           const Spacer(),
                           if (_isEditMode) ...[
                             TextButton.icon(
@@ -413,26 +395,30 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                                 );
                               },
                               icon: const Icon(Icons.refresh_rounded, size: 14),
-                              label: const Text('Reset', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              label: const Text('Reset', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                               style: TextButton.styleFrom(
                                 foregroundColor: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                             ),
                             const SizedBox(width: 6),
-                            ElevatedButton.icon(
+                            FilledButton.icon(
                               onPressed: () {
                                 PreferencesService().triggerHaptic();
                                 setState(() => _isEditMode = false);
                               },
-                              icon: const Icon(Icons.check_rounded, size: 15),
-                              label: const Text('Done', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                              style: ElevatedButton.styleFrom(
+                              icon: const Icon(Icons.check_rounded, size: 14),
+                              label: const Text('Done', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                              style: FilledButton.styleFrom(
                                 backgroundColor: AppColors.primaryOrange,
                                 foregroundColor: Colors.white,
                                 elevation: 0,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               ),
                             ),
                           ] else ...[

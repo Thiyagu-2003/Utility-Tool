@@ -76,8 +76,8 @@ enum ToolCategory {
   moreTools(
     'More Tools',
     Icons.tune_rounded,
-    Color(0xFF64748B),
-    'Randomizer, dice roller & coin toss',
+    Color(0xFF8B5CF6),
+    'Sensors, hardware diagnostics & decision utilities',
   );
 
   final String label;

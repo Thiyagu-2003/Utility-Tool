@@ -454,7 +454,10 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - Audited and verified all submenus in `ScreenColorTestScreen`, `VibrationTesterScreen`, `MicSpeakerTesterScreen`, `SoundLevelEstimatorScreen`, and `QrContactShareScreen` with zero layout overflows and full offline support.
   - **Hardware Vibration Fix**: Added `<uses-permission android:name="android.permission.VIBRATE"/>` in `AndroidManifest.xml` and native Android `Vibrator` / `VibratorManager` MethodChannel in `MainActivity.kt` via `VibrationService` to ensure 100% physical haptic feedback on all devices.
   - **SOS Morse Text Clarity**: Redesigned SOS Morse pattern card with high-contrast badge (`· · ·   — — —   · · ·`), clear dot/dash breakdown, and high-visibility typography.
-  - **System Navigation Bar Clearance**: Added `SafeArea(top: false, bottom: true)` across `ToolScaffold`, `SectionDetailScreen`, and device test suites to ensure zero overlap with Android 3-button navigation (Back, Home, Recent Apps).
+  - **Toolbox Reorder Done Button & Header Overlap Fix**: Redesigned `CategoryHubScreen` edit header to remove the redundant badge and compact the "Reset" & "Done" action buttons, eliminating horizontal overflow and preventing the checkmark button from being cut off on the screen edge.
+  - **Multilingual Crash Fix**: Integrated `flutter_localizations` with `GlobalMaterialLocalizations`, `GlobalWidgetsLocalizations`, and `GlobalCupertinoLocalizations` delegates for `hi` (Hindi), `ta` (Tamil), `es` (Spanish), resolving the fatal missing `MaterialLocalizations` assertion that caused the grey/black error screen when changing languages.
+  - **Vibrant & Colorful More Tools**: Enhanced `ToolCategory.moreTools` with vibrant violet `Color(0xFF8B5CF6)` and assigned unique rich theme colors (`customColor`) to every single tool in the category (Compass, Randomizer, Battery, Mic/Speaker, Touchscreen, Color Test, Vibration, Refresh Rate, Decibel Meter). Upgraded `SectionDetailScreen` tool cards with gradient icon containers, dynamic border glows, and colorful chevron badges.
+  - **Relevant Runtime Permissions**: Added explicit user disclosure dialogs and permission prompt banners for microphone access in `MicSpeakerTesterScreen` and `SoundLevelEstimatorScreen`.
 
 
 

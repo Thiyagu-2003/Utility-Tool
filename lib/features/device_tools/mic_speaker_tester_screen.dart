@@ -101,6 +101,38 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
     await _tts.speak('This is a $label audio frequency clarity test. Checking phone loudspeaker output.');
   }
 
+  Future<bool> _showMicPermissionDialog() async {
+    final granted = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.mic_rounded, color: AppColors.primaryOrange),
+            SizedBox(width: 10),
+            Text('Microphone Access', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text(
+          'ToolBox Pro requires access to your microphone to perform live speech input diagnostics, voice clarity testing, and hardware loopback.\n\nAll audio is processed 100% locally on your device and is never recorded or uploaded.',
+          style: TextStyle(fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Not Now'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.primaryOrange),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Allow Access'),
+          ),
+        ],
+      ),
+    );
+    return granted == true;
+  }
+
   // --- MIC TESTS ---
   Future<void> _toggleMicListening() async {
     if (_isListening) {
@@ -115,11 +147,19 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
     }
 
     if (!_micAvailable) {
+      final proceed = await _showMicPermissionDialog();
+      if (!proceed) return;
+
       await _initSpeech();
       if (!_micAvailable) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Microphone permission or speech engine not available')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Microphone permission not granted. Please allow in device settings.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
         return;
       }
     }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'core/localization/app_localizations.dart';
 import 'core/services/preferences_service.dart';
 import 'core/theme/app_theme.dart';
@@ -41,8 +42,9 @@ class UtilityApp extends StatelessWidget {
           supportedLocales: AppLocalizations.supportedLocales,
           localizationsDelegates: const [
             AppLocalizationsDelegate(),
-            DefaultMaterialLocalizations.delegate,
-            DefaultWidgetsLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
           ],
           builder: (context, child) {
             return MediaQuery(

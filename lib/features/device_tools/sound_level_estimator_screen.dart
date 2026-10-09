@@ -43,6 +43,8 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
     super.dispose();
   }
 
+  bool _isHardwareMic = false;
+
   Future<void> _startMeasuring() async {
     setState(() => _isMeasuring = true);
 
@@ -53,7 +55,12 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
       micInitialized = false;
     }
 
+    if (mounted) {
+      setState(() => _isHardwareMic = micInitialized);
+    }
+
     if (micInitialized) {
+      _simTimer?.cancel();
       await _speech.listen(
         onSoundLevelChange: (level) {
           if (!mounted || !_isMeasuring) return;
@@ -74,6 +81,41 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
         final sample = (45.0 + variation + _calibrationOffset).clamp(25.0, 115.0);
         _recordSample(sample);
       });
+    }
+  }
+
+  Future<void> _requestMicPermissionDialog() async {
+    final granted = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.mic_rounded, color: AppColors.primaryOrange),
+            SizedBox(width: 10),
+            Text('Microphone Access', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text(
+          'ToolBox Pro requires access to your microphone to measure live physical sound levels and decibel (dB SPL) pressure in real-time.\n\nAll audio processing is done strictly on-device in memory and is never recorded or stored.',
+          style: TextStyle(fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.primaryOrange),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Allow Access'),
+          ),
+        ],
+      ),
+    );
+
+    if (granted == true) {
+      await _startMeasuring();
     }
   }
 
@@ -142,6 +184,33 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (!_isHardwareMic) ...[
+            Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.warning.withValues(alpha: 0.35)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.mic_off_rounded, color: AppColors.warning, size: 20),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Microphone permission not granted (simulated mode).',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _requestMicPermissionDialog,
+                    child: const Text('Allow', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ],
           // Main Decibel Gauge Display Card
           Container(
             padding: const EdgeInsets.all(24),
