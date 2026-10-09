@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'core/localization/app_localizations.dart';
 import 'core/services/preferences_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/home/main_navigation_scaffold.dart';
+import 'features/onboarding/app_onboarding_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,7 +37,24 @@ class UtilityApp extends StatelessWidget {
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
           themeMode: prefs.themeMode,
-          home: const MainNavigationScaffold(),
+          locale: Locale(prefs.appLanguage),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: const [
+            AppLocalizationsDelegate(),
+            DefaultMaterialLocalizations.delegate,
+            DefaultWidgetsLocalizations.delegate,
+          ],
+          builder: (context, child) {
+            return MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                textScaler: TextScaler.linear(prefs.fontScale),
+              ),
+              child: child!,
+            );
+          },
+          home: prefs.hasSeenOnboarding
+              ? const MainNavigationScaffold()
+              : const AppOnboardingScreen(),
         );
       },
     );

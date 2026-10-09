@@ -34,6 +34,13 @@ import '../../features/text_tools/markdown_editor_screen.dart';
 import '../../features/dev_tools/xml_yaml_formatter_screen.dart';
 import '../../features/file_tools/media_tools_screen.dart';
 import '../../features/device_tools/device_hardware_toolkit_screen.dart';
+import '../../features/device_tools/battery_display_info_screen.dart';
+import '../../features/device_tools/mic_speaker_tester_screen.dart';
+import '../../features/device_tools/touchscreen_test_screen.dart';
+import '../../features/device_tools/screen_color_test_screen.dart';
+import '../../features/device_tools/vibration_tester_screen.dart';
+import '../../features/device_tools/sound_level_estimator_screen.dart';
+import '../../features/everyday_tools/qr_contact_share_screen.dart';
 
 class ToolRegistry {
   static final List<ToolItem> allTools = [
@@ -383,6 +390,78 @@ class ToolRegistry {
       icon: Icons.tune_rounded,
       keywords: ['random', 'dice', 'coin', 'flip', 'toss', 'roll', 'decision', 'utilities'],
       builder: (_) => const RandomUtilitiesScreen(),
+    ),
+    ToolItem(
+      id: 'battery_health',
+      title: 'Battery Health & Specs',
+      description: 'Live charge percentage, health status, voltage, temp & power saver',
+      category: ToolCategory.moreTools,
+      icon: Icons.battery_charging_full_rounded,
+      keywords: ['battery', 'health', 'charge', 'power', 'charging', 'voltage', 'saver'],
+      builder: (_) => const BatteryDisplayInfoScreen(initialTabIndex: 0),
+    ),
+    ToolItem(
+      id: 'mic_speaker_tester',
+      title: 'Mic & Speaker Tester',
+      description: 'Loudspeaker stereo channel audio test, frequency pitch & microphone loopback',
+      category: ToolCategory.moreTools,
+      icon: Icons.volume_up_rounded,
+      keywords: ['mic', 'microphone', 'speaker', 'audio', 'sound', 'stereo', 'sound test', 'earpiece'],
+      builder: (_) => const MicSpeakerTesterScreen(),
+    ),
+    ToolItem(
+      id: 'touchscreen_test',
+      title: 'Touchscreen Digitizer Test',
+      description: '160-cell digitizer screen coverage grid test & multi-touch pointer tracker',
+      category: ToolCategory.moreTools,
+      icon: Icons.touch_app_rounded,
+      keywords: ['touch', 'touchscreen', 'digitizer', 'multitouch', 'screen test', 'dead zone', 'fingers'],
+      builder: (_) => const TouchscreenTestScreen(),
+    ),
+    ToolItem(
+      id: 'screen_color_test',
+      title: 'Screen Color & Pixel Test',
+      description: 'Fullscreen dead pixel audit, OLED burn-in check, and RGB pure color patterns',
+      category: ToolCategory.moreTools,
+      icon: Icons.palette_rounded,
+      keywords: ['screen', 'display', 'color', 'pixel', 'dead pixel', 'stuck pixel', 'oled', 'lcd', 'burn in', 'backlight bleed'],
+      builder: (_) => const ScreenColorTestScreen(),
+    ),
+    ToolItem(
+      id: 'vibration_tester',
+      title: 'Vibration & Haptics Tester',
+      description: 'Tactile motor impacts, continuous rhythms, SOS Morse & animated ripple wave',
+      category: ToolCategory.moreTools,
+      icon: Icons.vibration_rounded,
+      keywords: ['vibrate', 'vibration', 'haptic', 'motor', 'buzz', 'rumble', 'shake', 'sos'],
+      builder: (_) => const VibrationTesterScreen(),
+    ),
+    ToolItem(
+      id: 'display_refresh_rate',
+      title: 'Screen Refresh Rate & Specs',
+      description: 'Hardware refresh rate (60/90/120 Hz), live render FPS & screen resolution',
+      category: ToolCategory.moreTools,
+      icon: Icons.speed_rounded,
+      keywords: ['refresh rate', 'hz', 'fps', 'display', 'resolution', 'dpr', 'screen', 'smooth'],
+      builder: (_) => const BatteryDisplayInfoScreen(initialTabIndex: 1),
+    ),
+    ToolItem(
+      id: 'sound_level_estimator',
+      title: 'Sound-Level (dB) Estimator',
+      description: 'Real-time decibel meter, min/avg/peak sound levels & noise safety scale',
+      category: ToolCategory.moreTools,
+      icon: Icons.graphic_eq_rounded,
+      keywords: ['sound', 'noise', 'decibel', 'db', 'spl', 'sound level', 'meter', 'microphone'],
+      builder: (_) => const SoundLevelEstimatorScreen(),
+    ),
+    ToolItem(
+      id: 'qr_contact_share',
+      title: 'QR Contact & vCard Share',
+      description: 'Instant vCard 3.0 & MeCard QR generation for effortless contact sharing',
+      category: ToolCategory.filesText,
+      icon: Icons.contact_page_rounded,
+      keywords: ['qr', 'contact', 'vcard', 'mecard', 'share', 'business card', 'phone', 'address'],
+      builder: (_) => const QrContactShareScreen(),
     ),
   ];
 
