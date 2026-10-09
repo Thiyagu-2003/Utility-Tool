@@ -452,6 +452,9 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - Fixed `BatteryDisplayInfoScreen` ("Battery Health" and "Display & Refresh Rate" tabs) layout crash in release mode.
   - Fixed `TouchscreenTestScreen` touch digitizer matrix aspect-ratio calculation so that touch coordinates align 1:1 with all 160 grid cells across any screen aspect ratio.
   - Audited and verified all submenus in `ScreenColorTestScreen`, `VibrationTesterScreen`, `MicSpeakerTesterScreen`, `SoundLevelEstimatorScreen`, and `QrContactShareScreen` with zero layout overflows and full offline support.
+  - **Hardware Vibration Fix**: Added `<uses-permission android:name="android.permission.VIBRATE"/>` in `AndroidManifest.xml` and native Android `Vibrator` / `VibratorManager` MethodChannel in `MainActivity.kt` via `VibrationService` to ensure 100% physical haptic feedback on all devices.
+  - **SOS Morse Text Clarity**: Redesigned SOS Morse pattern card with high-contrast badge (`· · ·   — — —   · · ·`), clear dot/dash breakdown, and high-visibility typography.
+  - **System Navigation Bar Clearance**: Added `SafeArea(top: false, bottom: true)` across `ToolScaffold`, `SectionDetailScreen`, and device test suites to ensure zero overlap with Android 3-button navigation (Back, Home, Recent Apps).
 
 
 

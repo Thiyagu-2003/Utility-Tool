@@ -109,21 +109,27 @@ class ToolScaffold extends StatelessWidget {
           const SizedBox(width: 8),
         ],
       ),
-      body: GestureDetector(
-        onTap: () => FocusScope.of(context).unfocus(),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 680),
-            child: isScrollable
-                ? SingleChildScrollView(
-                    padding: padding ?? const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                    physics: const BouncingScrollPhysics(),
-                    child: body,
-                  )
-                : Padding(
-                    padding: padding ?? EdgeInsets.zero,
-                    child: body,
-                  ),
+      body: SafeArea(
+        top: false,
+        left: true,
+        right: true,
+        bottom: true,
+        child: GestureDetector(
+          onTap: () => FocusScope.of(context).unfocus(),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 680),
+              child: isScrollable
+                  ? SingleChildScrollView(
+                      padding: padding ?? const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                      physics: const BouncingScrollPhysics(),
+                      child: body,
+                    )
+                  : Padding(
+                      padding: padding ?? const EdgeInsets.only(bottom: 8),
+                      child: body,
+                    ),
+            ),
           ),
         ),
       ),

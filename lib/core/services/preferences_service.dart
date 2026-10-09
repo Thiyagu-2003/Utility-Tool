@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/tool_model.dart';
+import 'vibration_service.dart';
 
 class CalculationRecord {
   final String id;
@@ -462,13 +463,13 @@ class PreferencesService extends ChangeNotifier {
 
   void triggerHaptic() {
     if (_hapticEnabled) {
-      HapticFeedback.lightImpact();
+      VibrationService.lightImpact();
     }
   }
 
   void triggerSelectionHaptic() {
     if (_hapticEnabled) {
-      HapticFeedback.selectionClick();
+      VibrationService.selectionClick();
     }
   }
 }

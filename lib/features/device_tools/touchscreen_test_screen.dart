@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/models/tool_model.dart';
+import '../../core/services/vibration_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 
@@ -38,9 +39,9 @@ class _TouchscreenTestScreenState extends State<TouchscreenTestScreen> {
         _testedCells.add(index);
       });
       if (_testedCells.length == _totalCells) {
-        HapticFeedback.heavyImpact();
+        VibrationService.heavyImpact();
       } else {
-        HapticFeedback.selectionClick();
+        VibrationService.selectionClick();
       }
     }
   }
@@ -187,7 +188,7 @@ class _TouchscreenTestScreenState extends State<TouchscreenTestScreen> {
           _currentTrail = [event.localPosition];
           _drawnTrails.add(_currentTrail);
         });
-        HapticFeedback.selectionClick();
+        VibrationService.selectionClick();
       },
       onPointerMove: (event) {
         setState(() {

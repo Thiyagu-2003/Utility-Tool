@@ -55,8 +55,11 @@ class SectionDetailScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      body: SafeArea(
+        top: false,
+        bottom: true,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 36),
         children: [
           // Hero Header
           Container(
@@ -215,6 +218,7 @@ class SectionDetailScreen extends StatelessWidget {
             );
           }),
         ],
+      ),
       ),
     );
   }
