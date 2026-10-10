@@ -1,7 +1,8 @@
 # App Features & Release Status
 
-> **Release Version**: `1.0.85` (Build `#85`)  
-> **Status**: Production Ready & Fully Tested (33/33 Unit Tests Passing)  
+> **Release Version**: `1.0.88` (Build `#88`)  
+> **Status**: Production Ready & Fully Tested (Pure Offline Client)  
+> **Total Built-in Tools**: 49 Registered Offline Tools  
 > **Architecture**: Pure Offline Flutter Client with Dynamic Scaling & Multi-Language Support (English, தமிழ், हिंदी, Español)
 
 Here is the comprehensive list of features currently implemented in the app, categorized by domain and screen toolkit:
@@ -438,7 +439,71 @@ Here is the comprehensive list of features currently implemented in the app, cat
 
 ---
 
-## 19. App-Wide Improvements
+## 19. Creative Studio & Canvas (Slate)
+- [x] **Slate — Full-Screen Drawing & Writing Canvas** (`SlateScreen`, `SlateService`, `SlateModels`):
+  - **Home Screen Entry**:
+    - **1st Card in Categories Grid**: Prominently pinned as the first category card (`_buildSlateCard`) featuring a 60×60 tile (radius 17) with a solid `#111827` background, a subtle 25% → 0% white top-left gradient overlay, a white 40dp pencil icon (stroke 2.1), 17sp bold title, 13sp secondary description (*"Draw, write & sketch on a full-screen canvas"*), and an orange (`#EA580C`) bold "New" badge.
+    - **Favorites Bar Chip**: 34dp circular `#111827` chip with a white pencil icon and "Slate" label.
+    - **Full-Screen Launch**: Tapping card or chip launches `SlateScreen` covering the bottom navigation bar. Back arrow returns directly to Home.
+  - **Edge-to-Edge Canvas & Layered Overlays**:
+    - Unrestricted full-screen canvas (`Positioned.fill` with `CustomPaint`) supporting finger, stylus, and mouse input.
+    - Non-destructive overlay architecture: Top bar, tools panel, and floating pill sit in a `Stack` over the canvas, guaranteeing that showing, hiding, or resizing panels never resizes the canvas or clears drawing strokes.
+    - Adaptive orientation support: Preserves all strokes and drawings seamlessly across portrait and landscape rotations.
+  - **7 Specialized Drawing Tools**:
+    - **Pen**: Clean solid vector lines with adjustable size and opacity.
+    - **Brush**: Soft-edge brush with 1.5× width multiplier and blur glow effect.
+    - **Marker (Highlighter)**: 3× width multiplier, capped at 40% opacity, with square line caps for clean document highlighting.
+    - **Eraser**: 2× width pixel eraser operating via `BlendMode.clear` inside an isolated canvas layer (`saveLayer`), revealing the underlying paper texture instead of painting white.
+    - **Geometric Shapes**: Line, Rectangle/Box, and Circle tools with live drag preview and release commit.
+  - **Drawing Engine & Smoothing**:
+    - Quadratic midpoint Bézier curve interpolation for fluid, natural penmanship.
+    - Complete current stroke redraw on every move event, preventing marker opacity buildup during a single stroke.
+  - **Paper Backgrounds**:
+    - **Blank**: Pure clean white surface.
+    - **Grid**: 24px grid lines in `#E2E8F0`.
+    - **Lined**: 32px lined notebook paper in `#BFDBFE`.
+    - **Dark**: Deep slate surface in `#1E293B` for dark mode drawing.
+  - **Top Bar (60dp)**:
+    - Back navigation, editable inline slate title (defaults to *"Untitled slate"*), Undo & Redo (30-step history with disabled states), Save to gallery, and `⋯` menu. All touch targets meet 44dp minimum.
+  - **⋯ More Menu Features**:
+    - **Focus Mode**: Hides top bar, panel, and floating pill, leaving only a small 48dp translucent eye button in the top right to restore controls.
+    - **Full Screen (Immersive)**: Toggles Android system status bar and navigation bar visibility (`SystemUiMode.immersiveSticky`).
+    - **Paper Selector**: Interactive background paper switching.
+    - **Clear Screen**: Confirmation dialog (*"Clear the whole slate? Everything on the canvas will be removed. You can still undo right after."*); clearing counts as an undoable step in history.
+    - **My Slates**: Quick-access modal to saved document library.
+  - **Tools Panel & Floating Quick Pill**:
+    - **Portrait**: Bottom sheet (max 62% screen height, scrollable) with rounded top corners.
+    - **Landscape**: 300dp right side panel beneath top bar, wrapping tool buttons into 4 columns.
+    - **Slide Animation (220ms)**: "TOOLS" header with `▾` button slides the panel out of view.
+    - **Floating Pill**: When the panel is hidden, displays a floating pill (bottom-center in portrait, bottom-right in landscape) showing active tool, color dot, and size (e.g., `"Eraser ● 40px"`), tapping which restores the panel.
+  - **Color Palette & Sliders**:
+    - 14 curated color swatches (`#0F172A`, `#E11D48`, `#EA580C`, `#FACC15`, `#16A34A`, `#0D9488`, `#0891B2`, `#2563EB`, `#4F46E5`, `#7C3AED`, `#C026D3`, `#92400E`, `#94A3B8`, `#FFFFFF`) with active selection rings.
+    - Rainbow custom color picker dialog with hex input.
+    - Intelligent switching: Picking a color while the Eraser is active automatically switches back to the Pen.
+    - Size slider (1–40px) with live contrast-outlined preview dot.
+    - Opacity slider (10%–100%) with live percentage readout.
+  - **Save, Auto-Save & Storage**:
+    - **PNG Export**: Exports canvas (with paper background) as a high-resolution PNG to device gallery with a `"Saved to gallery"` toast and platform share sheet.
+    - **Local Auto-Save**: Auto-saves active document to `SharedPreferences` every 2 seconds and on app lifecycle pause.
+    - **My Slates Management**: Document library modal with thumbnail preview, title, date, Open, Duplicate, Rename, Delete (with confirmation), and Share PNG actions.
+
+---
+
+## 20. App-Wide Improvements & UI Modernization
+- [x] **ToolBox Pro Iconography & Branding**:
+  - Official high-resolution ToolBox Pro squircle logo tile (`app_logo.png`) integrated into the Home Header brand row.
+  - Generated crisp Android launcher icon mipmaps (`mdpi`, `hdpi`, `xhdpi`, `xxhdpi`, `xxxhdpi`) from `app_icon.png` (1024×1024) replacing default Flutter assets.
+- [x] **Favorites Strip (Edge-to-Edge)** (`CategoryHubScreen`):
+  - Converted Favorites from a ragged vertical `Wrap` into a sleek horizontal scrolling tray (`ListView(scrollDirection: Axis.horizontal)`).
+  - Eliminates all empty white space on the right, providing a compact 44dp height with smooth bouncing physics.
+- [x] **Category Card Aspect Ratio & Proportions** (`CategoryHubScreen`):
+  - Calibrated grid `childAspectRatio: 1.05` (updated from 0.84) eliminating awkward ~60dp empty bottom voids.
+  - Natural 2-line description wrapping with balanced padding (`EdgeInsets.fromLTRB(14, 12, 14, 12)`).
+- [x] **System Navigation Inset Safety (No Button Overlap)** (`MainNavigationScaffold`):
+  - Removed fixed outer container height, restructuring the bottom bar with `SafeArea(top: false, child: SizedBox(height: 60, child: Row(...)))`.
+  - Android 3-button navigation buttons (`|||`, `⌂`, `<`) and gesture bars are cleanly cushioned with matching background color, guaranteeing the 4 navigation tabs sit 100% above system buttons with zero overlap.
+- [x] **Updated Total Tool Count**:
+  - Updated total registered tool count from 48 to **49 tools** across the header pill and `ToolRegistry`.
 - [x] **Favorites and Pinned Tools** (`PreferencesService`, `CategoryHubScreen`, `SectionDetailScreen`):
   - Quick-pin tools to favorites from Category Hub, Section Details, Search Results, or individual tool toolbars
   - Persistent storage of favorite IDs in `SharedPreferences` (`favorite_tools`)
@@ -528,25 +593,24 @@ Here is the comprehensive list of features currently implemented in the app, cat
 
 ---
 
-## 20. Release Artifacts & Build Configuration
-- **Version**: `1.0.84`
-- **Build Number**: `84`
+## 21. Release Artifacts & Build Configuration
+- **Version**: `1.0.88`
+- **Build Number**: `88`
 - **Output Target**: Android Release APKs (`--split-per-abi`)
   - `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` (Target: ARM64 devices, Android 10+)
   - `build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk` (Target: 32-bit legacy ARM devices)
   - `build/app/outputs/flutter-apk/app-x86_64-release.apk` (Target: Emulators & x86 tablets)
 - **Zero Internet Permissions**: 100% offline security verified in `AndroidManifest.xml`
-- **Test Suite**: 59/59 Unit & Integration tests passing (`flutter test`)
+- **Code Health**: Clean static analysis with `flutter analyze` across all modules
+- **Release 88 Updates (Slate Canvas Studio & UI Modernization)**:
+  - Added **Slate — Full-Screen Drawing & Writing Canvas** (`SlateScreen`, `SlateService`, `SlateModels`) as Tool #49.
+  - Implemented 1st card Category Hub entry, 34dp dark pencil favorite chip, full-screen canvas with non-destructive overlays, 7 drawing tools, quadratic smoothing, paper selector, 14 swatches + custom picker, slide-hide panel, floating pill, focus mode, immersive mode, auto-save, and "My Slates" library.
+  - Integrated official high-resolution ToolBox Pro icon in home header and Android launcher mipmaps.
+  - Redesigned Favorites into a compact edge-to-edge horizontal scrolling strip, eliminating empty space on the right.
+  - Tuned Category grid `childAspectRatio` to `1.05` and removed description stretching to eliminate bottom card empty voids.
+  - Rebuilt bottom navigation bar with `SafeArea(top: false, child: SizedBox(height: 60))` to eliminate all overlap with Android 3-button navigation.
 - **Audit & Bug Fixes (Release 87 - Archive, Diff & Preview Studio)**:
-  - Added **Archive, Diff & Preview Studio** (`ArchivePreviewToolkitScreen` & `ArchiveCompareService`) with all requested features:
-    - **TAR Archiver & Extractor**: Standard POSIX .tar archive packing, permission handling, block extraction, and file manifest inspection.
-    - **GZIP Compression & Extraction**: High-compression `.gz` single file and compound `.tar.gz` / `.tgz` packaging and decompression.
-    - **7z Archive Explorer**: Magic signature validation (`37 7A BC AF 27 1C`), container structure analysis, StartHeader CRC, NextHeader offsets, and stream payload inspection.
-    - **Folder Comparison**: Comprehensive directory tree diffing identifying identical files, modified files, unique files in A, and unique files in B with similarity scores.
-    - **File Content Diff**: Interactive **Side-by-Side** (2-column) and **Unified** line diffing with color highlights (`+` green, `-` red, `~` amber), similarity %, and binary fallback.
-    - **Universal File Previewer**: In-app viewer for Images (PNG, JPG, WEBP, GIF, BMP), Code/Text (with line numbers and word wrap), Markdown, PDF, and 16-byte Hex Dump inspector.
-  - Registered `archive_compare_toolkit` under `ToolCategory.filesText` in `ToolRegistry` and added cross-launch action button in `FileZipToolkitScreen`.
-  - Added 12 new comprehensive unit tests in `test/archive_compare_preview_test.dart` bringing the total passing test suite to 58/58.
+  - Added **Archive, Diff & Preview Studio** (`ArchivePreviewToolkitScreen` & `ArchiveCompareService`) with all requested features.
 - **Audit & Bug Fixes (Release 86 - Productivity & Personal Organization Suite)**:
   - Added **Productivity & Organization Suite** (`ProductivityToolkitScreen`, `ProductivityService`, `ProductivityModels`) with all 6 requested features.
 - **Audit & Bug Fixes (Release 85 - Photo Studio & Advanced Office PDF Suites)**:

@@ -82,12 +82,11 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        // App logo tile 48x48, radius 14, dark #0F172A, with a white 2x2 grid icon
+                        // App logo tile 48x48, radius 14, with ToolBox Pro icon
                         Container(
                           width: 48,
                           height: 48,
                           decoration: BoxDecoration(
-                            color: const Color(0xFF0F172A),
                             borderRadius: BorderRadius.circular(14),
                             boxShadow: [
                               BoxShadow(
@@ -97,11 +96,23 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                               ),
                             ],
                           ),
-                          alignment: Alignment.center,
-                          child: const Icon(
-                            Icons.grid_view_rounded,
-                            color: Colors.white,
-                            size: 26,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: Image.asset(
+                              'assets/images/app_logo.png',
+                              width: 48,
+                              height: 48,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Container(
+                                color: const Color(0xFF0F172A),
+                                alignment: Alignment.center,
+                                child: const Icon(
+                                  Icons.construction_rounded,
+                                  color: Colors.white,
+                                  size: 26,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -394,46 +405,54 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                         ],
                       ),
                       const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          _buildFavoriteChip(
-                            title: 'Slate',
-                            toolId: 'slate',
-                            circleColor: const Color(0xFF111827),
-                            icon: Icons.edit_outlined,
-                            isDark: isDark,
-                          ),
-                          _buildFavoriteChip(
-                            title: 'Age',
-                            toolId: 'age_calc',
-                            circleColor: const Color(0xFF7C3AED),
-                            icon: Icons.cake_outlined,
-                            isDark: isDark,
-                          ),
-                          _buildFavoriteChip(
-                            title: 'GST Calculator',
-                            toolId: 'gst_calc',
-                            circleColor: const Color(0xFF16A34A),
-                            icon: Icons.receipt_long_outlined,
-                            isDark: isDark,
-                          ),
-                          _buildFavoriteChip(
-                            title: 'Discount Calculator',
-                            toolId: 'discount_calc',
-                            circleColor: const Color(0xFFE11D48),
-                            icon: Icons.local_offer_outlined,
-                            isDark: isDark,
-                          ),
-                          _buildFavoriteChip(
-                            title: 'Unit Converter',
-                            toolId: 'unit_converter',
-                            circleColor: const Color(0xFF0891B2),
-                            icon: Icons.swap_horiz_rounded,
-                            isDark: isDark,
-                          ),
-                        ],
+                      SizedBox(
+                        height: 44,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          physics: const BouncingScrollPhysics(),
+                          clipBehavior: Clip.none,
+                          children: [
+                            _buildFavoriteChip(
+                              title: 'Slate',
+                              toolId: 'slate',
+                              circleColor: const Color(0xFF111827),
+                              icon: Icons.edit_outlined,
+                              isDark: isDark,
+                            ),
+                            const SizedBox(width: 8),
+                            _buildFavoriteChip(
+                              title: 'Age',
+                              toolId: 'age_calc',
+                              circleColor: const Color(0xFF7C3AED),
+                              icon: Icons.cake_outlined,
+                              isDark: isDark,
+                            ),
+                            const SizedBox(width: 8),
+                            _buildFavoriteChip(
+                              title: 'GST Calculator',
+                              toolId: 'gst_calc',
+                              circleColor: const Color(0xFF16A34A),
+                              icon: Icons.receipt_long_outlined,
+                              isDark: isDark,
+                            ),
+                            const SizedBox(width: 8),
+                            _buildFavoriteChip(
+                              title: 'Discount Calculator',
+                              toolId: 'discount_calc',
+                              circleColor: const Color(0xFFE11D48),
+                              icon: Icons.local_offer_outlined,
+                              isDark: isDark,
+                            ),
+                            const SizedBox(width: 8),
+                            _buildFavoriteChip(
+                              title: 'Unit Converter',
+                              toolId: 'unit_converter',
+                              circleColor: const Color(0xFF0891B2),
+                              icon: Icons.swap_horiz_rounded,
+                              isDark: isDark,
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -704,7 +723,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                         crossAxisCount: 2,
                         mainAxisSpacing: 12,
                         crossAxisSpacing: 12,
-                        childAspectRatio: 0.84,
+                        childAspectRatio: 1.05,
                       ),
                       delegate: SliverChildBuilderDelegate(
                         (context, index) {
@@ -825,7 +844,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               // Title "Slate" (17sp bold)
               Text(
                 'Slate',
@@ -840,18 +859,16 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
               ),
               const SizedBox(height: 4),
               // Description "Draw, write & sketch on a full-screen canvas" (13sp, #475569, up to 2 lines)
-              Expanded(
-                child: Text(
-                  'Draw, write & sketch on a full-screen canvas',
-                  style: GoogleFonts.outfit(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
-                    height: 1.25,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+              Text(
+                'Draw, write & sketch on a full-screen canvas',
+                style: GoogleFonts.outfit(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                  height: 1.25,
                 ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -1054,7 +1071,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               // Below: title 17sp bold #0F172A
               Text(
                 category.label,
@@ -1069,18 +1086,16 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
               ),
               const SizedBox(height: 4),
               // Description: 13sp #475569, up to 2 lines (do NOT truncate with ellipsis on one line)
-              Expanded(
-                child: Text(
-                  category.description,
-                  style: GoogleFonts.outfit(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
-                    height: 1.25,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+              Text(
+                category.description,
+                style: GoogleFonts.outfit(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                  height: 1.25,
                 ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),

@@ -41,7 +41,6 @@ class _MainNavigationScaffoldState extends State<MainNavigationScaffold> {
         children: _pages,
       ),
       bottomNavigationBar: Container(
-        height: 84,
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1E293B) : Colors.white,
           border: Border(
@@ -60,33 +59,36 @@ class _MainNavigationScaffoldState extends State<MainNavigationScaffold> {
         ),
         child: SafeArea(
           top: false,
-          child: Row(
-            children: [
-              _buildNavItem(
-                index: 0,
-                icon: Icons.grid_view_rounded,
-                label: 'Tools',
-                isDark: isDark,
-              ),
-              _buildNavItem(
-                index: 1,
-                icon: Icons.calculate_outlined,
-                label: 'Calculator',
-                isDark: isDark,
-              ),
-              _buildNavItem(
-                index: 2,
-                icon: Icons.account_balance_wallet_outlined,
-                label: 'Finance',
-                isDark: isDark,
-              ),
-              _buildNavItem(
-                index: 3,
-                icon: Icons.settings_outlined,
-                label: 'Settings',
-                isDark: isDark,
-              ),
-            ],
+          child: SizedBox(
+            height: 60,
+            child: Row(
+              children: [
+                _buildNavItem(
+                  index: 0,
+                  icon: Icons.grid_view_rounded,
+                  label: 'Tools',
+                  isDark: isDark,
+                ),
+                _buildNavItem(
+                  index: 1,
+                  icon: Icons.calculate_outlined,
+                  label: 'Calculator',
+                  isDark: isDark,
+                ),
+                _buildNavItem(
+                  index: 2,
+                  icon: Icons.account_balance_wallet_outlined,
+                  label: 'Finance',
+                  isDark: isDark,
+                ),
+                _buildNavItem(
+                  index: 3,
+                  icon: Icons.settings_outlined,
+                  label: 'Settings',
+                  isDark: isDark,
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -107,35 +109,38 @@ class _MainNavigationScaffoldState extends State<MainNavigationScaffold> {
     return Expanded(
       child: InkWell(
         onTap: () => _onTabTapped(index),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Active item sits in a 60x34 pill (#FFEDD5)
-            Container(
-              width: 60,
-              height: 34,
-              decoration: BoxDecoration(
-                color: isSelected ? activePillColor : Colors.transparent,
-                borderRadius: BorderRadius.circular(17),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Active item sits in a 56x30 pill (#FFEDD5)
+              Container(
+                width: 56,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: isSelected ? activePillColor : Colors.transparent,
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  icon,
+                  size: 22,
+                  color: isSelected ? activeTextColor : inactiveTextColor,
+                ),
               ),
-              alignment: Alignment.center,
-              child: Icon(
-                icon,
-                size: 24,
-                color: isSelected ? activeTextColor : inactiveTextColor,
+              const SizedBox(height: 2),
+              Text(
+                label,
+                style: TextStyle(
+                  fontFamily: 'Outfit',
+                  fontSize: 11,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                  color: isSelected ? activeTextColor : inactiveTextColor,
+                ),
               ),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: TextStyle(
-                fontFamily: 'Outfit',
-                fontSize: 12,
-                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-                color: isSelected ? activeTextColor : inactiveTextColor,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
