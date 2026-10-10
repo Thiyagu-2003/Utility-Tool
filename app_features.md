@@ -242,10 +242,11 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - **GZIP Compression & Extraction**:
     - High-efficiency GZIP compression for single files (`.gz`) and compound archives (`.tar.gz` / `.tgz`)
     - Transparent decompression and instant file extraction
-  - **7z Archive Support**:
+  - **7z & RAR Archive Support**:
     - Container verification for 7-Zip archives (`37 7A BC AF 27 1C` magic signature validation)
+    - Container verification for RAR archives (RAR 5.0+ `52 61 72 21 1A 07 01 00` and RAR 4.x `52 61 72 21 1A 07 00` magic signatures)
     - Major/minor version extraction, StartHeader CRC, NextHeader offset & size inspection
-    - Embedded stream analysis and container structure validation
+    - Multi-volume detection, solid archive detection, and container structure validation
   - **Folder Comparison**:
     - Full directory tree diffing comparing Folder A vs. Folder B
     - Status breakdown: Identical files, Modified files, Only in Folder A, Only in Folder B
@@ -528,14 +529,14 @@ Here is the comprehensive list of features currently implemented in the app, cat
 ---
 
 ## 20. Release Artifacts & Build Configuration
-- **Version**: `1.0.87`
-- **Build Number**: `87`
+- **Version**: `1.0.84`
+- **Build Number**: `84`
 - **Output Target**: Android Release APKs (`--split-per-abi`)
   - `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` (Target: ARM64 devices, Android 10+)
   - `build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk` (Target: 32-bit legacy ARM devices)
   - `build/app/outputs/flutter-apk/app-x86_64-release.apk` (Target: Emulators & x86 tablets)
 - **Zero Internet Permissions**: 100% offline security verified in `AndroidManifest.xml`
-- **Test Suite**: 58/58 Unit & Integration tests passing (`flutter test`)
+- **Test Suite**: 59/59 Unit & Integration tests passing (`flutter test`)
 - **Audit & Bug Fixes (Release 87 - Archive, Diff & Preview Studio)**:
   - Added **Archive, Diff & Preview Studio** (`ArchivePreviewToolkitScreen` & `ArchiveCompareService`) with all requested features:
     - **TAR Archiver & Extractor**: Standard POSIX .tar archive packing, permission handling, block extraction, and file manifest inspection.

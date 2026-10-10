@@ -62,6 +62,29 @@ class SevenZipInfo {
   });
 }
 
+/// RAR Archive Inspection Data
+class RarArchiveInfo {
+  final bool isValidRar;
+  final String version;
+  final int formatVersion;
+  final bool isSolid;
+  final bool isMultiVolume;
+  final bool isEncrypted;
+  final String status;
+  final Map<String, dynamic> metadata;
+
+  RarArchiveInfo({
+    required this.isValidRar,
+    required this.version,
+    required this.formatVersion,
+    required this.isSolid,
+    required this.isMultiVolume,
+    required this.isEncrypted,
+    required this.status,
+    required this.metadata,
+  });
+}
+
 /// Diff status for folder comparison
 enum FolderEntryStatus {
   identical('Identical', 0xFF10B981),
@@ -362,6 +385,97 @@ class ArchiveCompareService {
       rawFileSize: bytes.length,
       extractedFiles: extracted,
       status: status,
+      metadata: meta,
+    );
+  }
+
+  // --- 3B. RAR ARCHIVE SUPPORT ---
+
+  /// Inspects and parses a RAR archive (RAR 4.x or RAR 5.x)
+  static RarArchiveInfo inspectRarArchive(Uint8List bytes) {
+    if (bytes.length < 8) {
+      return RarArchiveInfo(
+        isValidRar: false,
+        version: 'Unknown',
+        formatVersion: 0,
+        isSolid: false,
+        isMultiVolume: false,
+        isEncrypted: false,
+        status: 'File too small to be a valid RAR archive.',
+        metadata: {},
+      );
+    }
+
+    // Check for RAR 5.0 signature: 52 61 72 21 1A 07 01 00
+    final isRar5 = bytes.length >= 8 &&
+        bytes[0] == 0x52 &&
+        bytes[1] == 0x61 &&
+        bytes[2] == 0x72 &&
+        bytes[3] == 0x21 &&
+        bytes[4] == 0x1A &&
+        bytes[5] == 0x07 &&
+        bytes[6] == 0x01 &&
+        bytes[7] == 0x00;
+
+    // Check for RAR 1.5 - 4.x signature: 52 61 72 21 1A 07 00
+    final isRar4 = bytes.length >= 7 &&
+        bytes[0] == 0x52 &&
+        bytes[1] == 0x61 &&
+        bytes[2] == 0x72 &&
+        bytes[3] == 0x21 &&
+        bytes[4] == 0x1A &&
+        bytes[5] == 0x07 &&
+        bytes[6] == 0x00;
+
+    if (!isRar5 && !isRar4) {
+      return RarArchiveInfo(
+        isValidRar: false,
+        version: 'Invalid',
+        formatVersion: 0,
+        isSolid: false,
+        isMultiVolume: false,
+        isEncrypted: false,
+        status: 'Invalid RAR signature. Expected "Rar!" header.',
+        metadata: {},
+      );
+    }
+
+    final formatVer = isRar5 ? 5 : 4;
+    final verString = isRar5 ? 'RAR 5.0+' : 'RAR 4.x / Legacy';
+
+    // Parse archive header flags if present
+    bool isVolume = false;
+    bool isSolid = false;
+    bool isLocked = false;
+    if (isRar4 && bytes.length >= 13) {
+      final flags = bytes[10] | (bytes[11] << 8);
+      isVolume = (flags & 0x0001) != 0;
+      isSolid = (flags & 0x0008) != 0;
+      isLocked = (flags & 0x0004) != 0;
+    } else if (isRar5 && bytes.length >= 12) {
+      final flags = bytes[10];
+      isVolume = (flags & 0x0001) != 0;
+      isSolid = (flags & 0x0004) != 0;
+    }
+
+    final meta = <String, dynamic>{
+      'Format': 'RAR Archive ($verString)',
+      'FormatVersion': 'v$formatVer',
+      'MultiVolume': isVolume ? 'Yes (Split volume)' : 'No (Single archive)',
+      'SolidArchive': isSolid ? 'Yes' : 'No',
+      'Locked': isLocked ? 'Yes' : 'No',
+      'SignatureHex': isRar5 ? '52 61 72 21 1A 07 01 00' : '52 61 72 21 1A 07 00',
+      'TotalArchiveSize': '${(bytes.length / 1024).toStringAsFixed(1)} KB (${bytes.length} bytes)',
+    };
+
+    return RarArchiveInfo(
+      isValidRar: true,
+      version: verString,
+      formatVersion: formatVer,
+      isSolid: isSolid,
+      isMultiVolume: isVolume,
+      isEncrypted: false,
+      status: 'Valid $verString archive container verified.',
       metadata: meta,
     );
   }

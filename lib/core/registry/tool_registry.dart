@@ -273,19 +273,19 @@ class ToolRegistry {
     ToolItem(
       id: 'file_zip_toolkit',
       title: 'File & ZIP Suite',
-      description: 'Archive ZIP, extract, batch rename, size analyzer, hash checksums, duplicate finder & CSV/JSON',
+      description: 'Create ZIP (compress all), extract archives, batch rename, size analyzer, hash checksums & duplicate finder',
       category: ToolCategory.filesText,
       icon: Icons.folder_zip_rounded,
-      keywords: ['zip', 'archive', 'extract', 'rename', 'hash', 'md5', 'sha256', 'duplicate', 'csv', 'json', 'files'],
+      keywords: ['zip', 'rar', 'archive', 'extract', 'compress', 'compress all', 'unzip', 'rename', 'hash', 'md5', 'sha256', 'duplicate', 'csv', 'json', 'files'],
       builder: (_) => const FileZipToolkitScreen(),
     ),
     ToolItem(
       id: 'archive_compare_toolkit',
       title: 'Archive, Diff & Preview Studio',
-      description: 'TAR & GZIP archiver, 7z explorer, folder comparison, visual file diff & universal previewer',
+      description: 'TAR & GZIP archiver, 7z & RAR explorer, folder comparison, visual file diff & universal previewer',
       category: ToolCategory.filesText,
       icon: Icons.archive_rounded,
-      keywords: ['tar', 'gzip', 'gz', '7z', 'archive', 'extract', 'folder compare', 'diff', 'compare', 'file preview', 'hex dump'],
+      keywords: ['tar', 'gzip', 'gz', '7z', 'rar', 'archive', 'extract', 'compress all', 'unrar', 'folder compare', 'diff', 'compare', 'file preview', 'hex dump'],
       builder: (_) => const ArchivePreviewToolkitScreen(),
     ),
     ToolItem(

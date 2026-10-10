@@ -13,7 +13,7 @@ import 'archive_compare_service.dart';
 
 enum ArchivePreviewTab {
   tarGzip('TAR & GZIP', Icons.archive_rounded),
-  sevenZip('7z Explorer', Icons.folder_zip_rounded),
+  sevenZip('7z & RAR Explorer', Icons.folder_zip_rounded),
   folderCompare('Folder Compare', Icons.compare_arrows_rounded),
   fileDiff('File Diff', Icons.difference_rounded),
   filePreview('File Previewer', Icons.preview_rounded);
@@ -43,8 +43,9 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
   String? _selectedArchiveName;
   int _selectedArchiveSize = 0;
 
-  // 2. 7z Explorer State
+  // 2. 7z & RAR Explorer State
   SevenZipInfo? _sevenZipInfo;
+  RarArchiveInfo? _rarInfo;
   String? _sevenZipFileName;
 
   // 3. Folder Compare State
@@ -551,19 +552,19 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
   }
 
   // ==========================================
-  // TAB 2: 7Z ARCHIVE EXPLORER
+  // TAB 2: 7Z & RAR ARCHIVE EXPLORER
   // ==========================================
   Widget _buildSevenZipTab() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildSectionCard(
-          title: '7-Zip (7z) Archive Inspector',
+          title: '7-Zip (7z) & RAR Archive Inspector',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'Inspect 7z archives, verify magic signatures (37 7A BC AF 27 1C), parse start header CRCs, NextHeader offsets, and extract embedded payload streams.',
+                'Inspect 7z and RAR archives, verify magic signatures (7z: 37 7A BC AF 27 1C, RAR: 52 61 72 21 1A 07), parse headers, multi-volume flags, and format versions.',
                 style: TextStyle(fontSize: 13, color: Colors.grey),
               ),
               const SizedBox(height: 16),
@@ -572,14 +573,19 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                   Expanded(
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.folder_zip_rounded),
-                      label: const Text('Open .7z Archive File'),
+                      label: const Text('Open .7z / .rar Archive'),
                       onPressed: _pickSevenZipFile,
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
                   ElevatedButton(
                     onPressed: _loadDemoSevenZip,
-                    child: const Text('Load 7z Sample'),
+                    child: const Text('Sample 7z'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _loadDemoRar,
+                    child: const Text('Sample RAR'),
                   ),
                 ],
               ),
@@ -693,6 +699,80 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                   ),
                 ],
               ],
+              if (_rarInfo != null) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: (_rarInfo!.isValidRar ? AppColors.catPdf : Colors.redAccent).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: (_rarInfo!.isValidRar ? AppColors.catPdf : Colors.redAccent).withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            _rarInfo!.isValidRar ? Icons.verified_rounded : Icons.warning_rounded,
+                            color: _rarInfo!.isValidRar ? Colors.green : Colors.redAccent,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _sevenZipFileName ?? 'RAR Archive',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: _rarInfo!.isValidRar ? Colors.green.withValues(alpha: 0.2) : Colors.red.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              _rarInfo!.isValidRar ? 'VALID ${_rarInfo!.version.toUpperCase()}' : 'INVALID',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: _rarInfo!.isValidRar ? Colors.green : Colors.red,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(_rarInfo!.status, style: const TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text('RAR Container Diagnostics', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.withValues(alpha: 0.2)),
+                  ),
+                  child: Column(
+                    children: _rarInfo!.metadata.entries.map((entry) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(entry.key, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            Text(entry.value.toString(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -706,45 +786,82 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
       if (files.isNotEmpty) {
         final f = files.first;
         final bytes = await f.readAsBytes();
-        final info = ArchiveCompareService.inspect7zArchive(bytes);
-        setState(() {
-          _sevenZipFileName = f.name;
-          _sevenZipInfo = info;
-        });
-        _showToast(info.isValid7z ? '7z Archive parsed successfully' : 'Warning: Not a valid 7z archive');
+        final lower = f.name.toLowerCase();
+
+        // Check if RAR or 7z
+        final isRar = lower.endsWith('.rar') ||
+            (bytes.length >= 7 && bytes[0] == 0x52 && bytes[1] == 0x61 && bytes[2] == 0x72);
+
+        if (isRar) {
+          final rarInfo = ArchiveCompareService.inspectRarArchive(bytes);
+          setState(() {
+            _sevenZipFileName = f.name;
+            _rarInfo = rarInfo;
+            _sevenZipInfo = null;
+          });
+          _showToast(rarInfo.isValidRar ? 'RAR Archive parsed successfully' : 'Warning: Not a valid RAR archive');
+        } else {
+          final info = ArchiveCompareService.inspect7zArchive(bytes);
+          setState(() {
+            _sevenZipFileName = f.name;
+            _sevenZipInfo = info;
+            _rarInfo = null;
+          });
+          _showToast(info.isValid7z ? '7z Archive parsed successfully' : 'Warning: Not a valid 7z archive');
+        }
       }
     } catch (e) {
-      _showToast('Error reading 7z file: $e');
+      _showToast('Error reading archive file: $e');
     }
   }
 
   void _loadDemoSevenZip() {
     // Generate valid 7z header (32 bytes) with magic bytes
     final bytes = Uint8List(64);
-    // Magic: 0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C
     bytes[0] = 0x37;
     bytes[1] = 0x7A;
     bytes[2] = 0xBC;
     bytes[3] = 0xAF;
     bytes[4] = 0x27;
     bytes[5] = 0x1C;
-    // Version 0.4
     bytes[6] = 0;
     bytes[7] = 4;
-    // StartHeaderCRC
     bytes[8] = 0x12;
     bytes[9] = 0x34;
     bytes[10] = 0x56;
     bytes[11] = 0x78;
-    // NextHeaderOffset = 32
     bytes[12] = 32;
 
     final info = ArchiveCompareService.inspect7zArchive(bytes);
     setState(() {
       _sevenZipFileName = 'sample_container.7z';
       _sevenZipInfo = info;
+      _rarInfo = null;
     });
     _showToast('Loaded sample 7z archive specification');
+  }
+
+  void _loadDemoRar() {
+    // Generate valid RAR 5.0 header (8 bytes magic) + flags
+    final bytes = Uint8List(32);
+    // 52 61 72 21 1A 07 01 00
+    bytes[0] = 0x52;
+    bytes[1] = 0x61;
+    bytes[2] = 0x72;
+    bytes[3] = 0x21;
+    bytes[4] = 0x1A;
+    bytes[5] = 0x07;
+    bytes[6] = 0x01;
+    bytes[7] = 0x00;
+    bytes[10] = 0x04; // solid archive
+
+    final rarInfo = ArchiveCompareService.inspectRarArchive(bytes);
+    setState(() {
+      _sevenZipFileName = 'sample_backup.rar';
+      _rarInfo = rarInfo;
+      _sevenZipInfo = null;
+    });
+    _showToast('Loaded sample RAR 5.0 archive specification');
   }
 
   // ==========================================

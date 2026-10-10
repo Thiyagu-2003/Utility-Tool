@@ -106,6 +106,43 @@ void main() {
       expect(info.metadata.containsKey('StartHeaderCRC'), isTrue);
       expect(info.metadata['SignatureHex'], '37 7A BC AF 27 1C');
     });
+
+    test('inspectRarArchive validates RAR 5.0 and RAR 4.x signatures correctly', () {
+      final rar5 = Uint8List(32);
+      // 52 61 72 21 1A 07 01 00
+      rar5[0] = 0x52;
+      rar5[1] = 0x61;
+      rar5[2] = 0x72;
+      rar5[3] = 0x21;
+      rar5[4] = 0x1A;
+      rar5[5] = 0x07;
+      rar5[6] = 0x01;
+      rar5[7] = 0x00;
+
+      final info5 = ArchiveCompareService.inspectRarArchive(rar5);
+      expect(info5.isValidRar, isTrue);
+      expect(info5.formatVersion, 5);
+      expect(info5.version, 'RAR 5.0+');
+
+      final rar4 = Uint8List(32);
+      // 52 61 72 21 1A 07 00
+      rar4[0] = 0x52;
+      rar4[1] = 0x61;
+      rar4[2] = 0x72;
+      rar4[3] = 0x21;
+      rar4[4] = 0x1A;
+      rar4[5] = 0x07;
+      rar4[6] = 0x00;
+
+      final info4 = ArchiveCompareService.inspectRarArchive(rar4);
+      expect(info4.isValidRar, isTrue);
+      expect(info4.formatVersion, 4);
+      expect(info4.version, 'RAR 4.x / Legacy');
+
+      final invalid = Uint8List.fromList([1, 2, 3, 4, 5, 6, 7, 8]);
+      final infoInv = ArchiveCompareService.inspectRarArchive(invalid);
+      expect(infoInv.isValidRar, isFalse);
+    });
   });
 
   group('Folder Comparison Tests', () {
