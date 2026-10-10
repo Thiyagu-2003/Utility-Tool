@@ -24,7 +24,6 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
   BatteryState _batteryState = BatteryState.unknown;
   bool _isInSaveMode = false;
   StreamSubscription<BatteryState>? _batterySub;
-  bool _isLoadingBattery = true;
 
   // Display State
   double _refreshRate = 60.0;
@@ -59,7 +58,6 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
           _batteryLevel = lvl;
           _batteryState = state;
           _isInSaveMode = isSave;
-          _isLoadingBattery = false;
         });
       }
 
@@ -67,9 +65,7 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
         if (!mounted) return;
         setState(() => _batteryState = state);
       });
-    } catch (_) {
-      if (mounted) setState(() => _isLoadingBattery = false);
-    }
+    } catch (_) {}
   }
 
   void _initDisplayAndFps() {
@@ -107,7 +103,6 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
       case BatteryState.connectedNotCharging:
         return 'Connected (Not Charging)';
       case BatteryState.unknown:
-      default:
         return 'Battery Power Normal';
     }
   }

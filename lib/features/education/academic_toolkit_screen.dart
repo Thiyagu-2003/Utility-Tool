@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:math_expressions/math_expressions.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
@@ -92,11 +91,11 @@ class _AcademicToolkitScreenState extends State<AcademicToolkitScreen> {
   // 8. MATRIX CALCULATOR
   int _matrixSize = 2; // 2 or 3
   // 2x2 matrices
-  List<TextEditingController> _matA2 = List.generate(4, (i) => TextEditingController(text: '${i + 1}'));
-  List<TextEditingController> _matB2 = List.generate(4, (i) => TextEditingController(text: '${4 - i}'));
+  final List<TextEditingController> _matA2 = List.generate(4, (i) => TextEditingController(text: '${i + 1}'));
+  final List<TextEditingController> _matB2 = List.generate(4, (i) => TextEditingController(text: '${4 - i}'));
   // 3x3 matrices
-  List<TextEditingController> _matA3 = List.generate(9, (i) => TextEditingController(text: '${i + 1}'));
-  List<TextEditingController> _matB3 = List.generate(9, (i) => TextEditingController(text: '${9 - i}'));
+  final List<TextEditingController> _matA3 = List.generate(9, (i) => TextEditingController(text: '${i + 1}'));
+  final List<TextEditingController> _matB3 = List.generate(9, (i) => TextEditingController(text: '${9 - i}'));
 
   // 9. PERMUTATION & COMBINATION
   final _permNCtrl = TextEditingController(text: '8');
@@ -347,7 +346,7 @@ class _AcademicToolkitScreenState extends State<AcademicToolkitScreen> {
         steps += 'Two complex conjugate roots: Δ < 0';
       }
 
-      return {'title': 'Quadratic: ${a}x² + (${b})x + (${c}) = 0', 'res': res, 'steps': steps};
+      return {'title': 'Quadratic: ${a}x² + ($b)x + ($c) = 0', 'res': res, 'steps': steps};
     } else {
       // 2x2 System
       final a1 = double.tryParse(_sysA1Ctrl.text) ?? 2;

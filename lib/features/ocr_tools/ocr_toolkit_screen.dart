@@ -82,7 +82,7 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
   bool _isSpeaking = false;
   double _ttsRate = 0.5;
   double _ttsPitch = 1.0;
-  String _ttsLanguage = 'en-US';
+  final String _ttsLanguage = 'en-US';
 
   // STT state
   bool _isListening = false;

@@ -45,7 +45,9 @@ class _CollageMakerScreenState extends State<CollageMakerScreen> {
         _renderCollage();
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error picking images: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error picking images: $e')));
+      }
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
@@ -117,8 +119,6 @@ class _CollageMakerScreenState extends State<CollageMakerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
     return ToolScaffold(
       title: 'Image Collage Maker',
       category: ToolCategory.filesText,

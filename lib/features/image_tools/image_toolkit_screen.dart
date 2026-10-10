@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +11,7 @@ import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
+import 'photo_editor_screen.dart';
 
 enum ImageToolkitTab {
   compress('Compress', Icons.compress_rounded),
@@ -691,6 +691,38 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          InkWell(
+            onTap: () {
+              PreferencesService().triggerHaptic();
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PhotoEditorScreen()));
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: [
+                  AppColors.catImage.withValues(alpha: 0.15),
+                  AppColors.catImage.withValues(alpha: 0.05),
+                ]),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.catImage.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.auto_fix_high_rounded, color: AppColors.catImage, size: 20),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Looking for Photo Editing? Open Photo Studio & Editor (Background Removal, Censor, Filters & Draw)',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.catImage),
+                ],
+              ),
+            ),
+          ),
           // Navigation Chips
           FeatureTabSelector<ImageToolkitTab>(
             tabs: ImageToolkitTab.values

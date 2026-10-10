@@ -1,5 +1,4 @@
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img_lib;
@@ -67,7 +66,7 @@ class _DocumentScannerScreenState extends State<DocumentScannerScreen> {
   final List<List<Offset>> _signatureStrokes = [];
   List<Offset> _currentStroke = [];
   Color _penColor = Colors.black;
-  double _strokeWidth = 3.0;
+  final double _strokeWidth = 3.0;
 
   Future<void> _addDocumentPage() async {
     PreferencesService().triggerHaptic();

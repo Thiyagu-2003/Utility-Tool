@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../core/models/tool_model.dart';
-import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
@@ -371,7 +370,7 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
     final yearlyCost = dailyCost * 365;
 
     return {
-      'monthlyCost': '\$${monthlyCost.toStringAsFixed(2)} / month',
+      'monthlyCost': '\$${monthlyCost.toStringAsFixed(2)} / month (${monthlyKwh.toStringAsFixed(1)} kWh)',
       'daily': '\$${dailyCost.toStringAsFixed(2)} / day (${dailyKwh.toStringAsFixed(2)} kWh)',
       'yearly': '\$${yearlyCost.toStringAsFixed(2)} / year (${(dailyKwh * 365).toStringAsFixed(0)} kWh)',
     };

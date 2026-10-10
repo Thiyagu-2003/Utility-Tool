@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +6,7 @@ import 'package:pdf/pdf.dart' as pw_format;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'office_pdf_toolkit_screen.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
@@ -124,7 +124,6 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
 
   // 9. Sign & Stamp
   PdfFileItem? _signPdf;
-  final List<SignaturePoint?> _signaturePoints = [];
   final TextEditingController _stampTextController = TextEditingController(text: 'APPROVED');
   int _stampPage = 1;
   String _stampPosition = 'Bottom Right';
@@ -923,6 +922,38 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          InkWell(
+            onTap: () {
+              PreferencesService().triggerHaptic();
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const OfficePdfToolkitScreen()));
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: [
+                  AppColors.catPdf.withValues(alpha: 0.15),
+                  AppColors.catPdf.withValues(alpha: 0.05),
+                ]),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.catPdf.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.snippet_folder_rounded, color: AppColors.catPdf, size: 20),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Need Office tools? Open Office & Advanced PDF Suite (Word, Excel, PPT, OCR & Compare)',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.catPdf),
+                ],
+              ),
+            ),
+          ),
           // Sub-tabs
           FeatureTabSelector<PdfToolkitTab>(
             tabs: PdfToolkitTab.values
@@ -1770,7 +1801,9 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
         ResultCard(
           title: 'PDF Text Extractor',
           primaryResult: _extractedText.isNotEmpty ? '${_extractedText.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).length} Words' : 'Select a PDF',
-          subtitle: _matchCount > 0 ? '$_matchCount search matches found' : 'Extracts all machine-readable text into plain text',
+          subtitle: _matchCount > 0
+              ? '$_matchCount search matches found'
+              : (_pdfToTextSource != null ? '${_pdfToTextSource!.name} (${_pdfToTextSource!.pageCount} pages)' : 'Extracts all machine-readable text into plain text'),
           accentColor: AppColors.catPdf,
         ),
         const SizedBox(height: 20),

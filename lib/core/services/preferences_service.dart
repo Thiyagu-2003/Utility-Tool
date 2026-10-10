@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/tool_model.dart';
 import 'vibration_service.dart';
@@ -428,9 +427,13 @@ class PreferencesService extends ChangeNotifier {
     // Theme Mode
     if (data['theme_mode'] is String) {
       final themeStr = data['theme_mode'] as String;
-      if (themeStr == 'light') _themeMode = ThemeMode.light;
-      else if (themeStr == 'dark') _themeMode = ThemeMode.dark;
-      else _themeMode = ThemeMode.system;
+      if (themeStr == 'light') {
+        _themeMode = ThemeMode.light;
+      } else if (themeStr == 'dark') {
+        _themeMode = ThemeMode.dark;
+      } else {
+        _themeMode = ThemeMode.system;
+      }
       await _prefs.setString('theme_mode', themeStr);
     }
 

@@ -54,7 +54,9 @@ class _MediaToolsScreenState extends State<MediaToolsScreen> {
         });
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Pick file: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Pick file: $e')));
+      }
     }
   }
 
@@ -71,7 +73,9 @@ class _MediaToolsScreenState extends State<MediaToolsScreen> {
         });
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Pick file: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Pick file: $e')));
+      }
     }
   }
 

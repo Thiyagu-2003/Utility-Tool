@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../core/models/tool_model.dart';
-import '../../core/services/preferences_service.dart';
 import '../../core/services/vibration_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../shared/widgets/tool_scaffold.dart';
@@ -154,7 +153,6 @@ class _VibrationTesterScreenState extends State<VibrationTesterScreen> with Sing
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final prefs = PreferencesService();
 
     return ToolScaffold(
       title: 'Vibration & Haptics Tester',

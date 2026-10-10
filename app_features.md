@@ -1,7 +1,7 @@
 # App Features & Release Status
 
-> **Release Version**: `1.0.84` (Build `#84`)  
-> **Status**: Production Ready & Fully Tested (22/22 Unit Tests Passing)  
+> **Release Version**: `1.0.85` (Build `#85`)  
+> **Status**: Production Ready & Fully Tested (33/33 Unit Tests Passing)  
 > **Architecture**: Pure Offline Flutter Client with Dynamic Scaling & Multi-Language Support (English, தமிழ், हिंदी, Español)
 
 Here is the comprehensive list of features currently implemented in the app, categorized by domain and screen toolkit:
@@ -154,6 +154,29 @@ Here is the comprehensive list of features currently implemented in the app, cat
 ---
 
 ## 8. Files, Text & Media Tools
+- [x] **Photo Studio & Editor** (`PhotoEditorScreen`, `PhotoEditorService`):
+  - **Remove Image Background**: Pure offline chroma and border flood-fill eraser with adjustable tolerance threshold (5-80%) and sample background color presets
+  - **Change Image Background Color**: Replace transparent cutouts with solid studio colors or designer linear gradients (Sunset Glow, Ocean Blue, Neon Dusk, Mint Fresh, Dark Metal, Golden Sun)
+  - **Brightness, Contrast, Saturation & Sharpness Editor**: Fine-tuned image adjustments: Brightness (-100% to +100%), Contrast, Saturation, Sharpness (via unsharp convolution kernel), Exposure/Gamma, and Vignette lens
+  - **Photo Filters & Effects**: 12 cinematic grading presets (Original, Vintage 70s, Sepia, B&W Monochrome, Film Noir, Warm Sun, Cool Ice, Cyberpunk Neon, Emerald Forest, HDR Pop, Pixelate, Invert Negative)
+  - **Blur Faces or Selected Area**: Interactive privacy & censorship tool with Gaussian Blur or Mosaic Pixelate boxes, adjustable blur intensity, and multi-box placement
+  - **Draw and Annotate Image**: Freehand drawing canvas with Pen, Highlighter, Arrow with arrowhead, Rectangle, Circle, Line, color palette, adjustable stroke width, Undo, Redo, Clear, and high-res export
+  - **Add Text and Custom Logos**: Draggable typography with font size slider, color picker, and background badge; overlay PNG watermark logos with scale factor, opacity, and 9-grid position anchors
+
+- [x] **Office & Advanced PDF Suite** (`OfficePdfToolkitScreen`, `OfficeDocumentService`):
+  - **Word to PDF**: Convert `.docx` Word documents into styled, paginated PDF documents with headings, paragraphs, and page numbers
+  - **Excel to PDF**: Convert `.xlsx`, `.csv`, or tabular spreadsheets into landscape PDF tables with zebra striping and custom headers
+  - **PowerPoint to PDF**: Convert `.pptx` presentation slide decks into landscape 16:9 PDF presentation slides
+  - **PDF to Word**: Extract structured PDF text and layout into valid OpenXML `.docx` files ready for Microsoft Word & Google Docs
+  - **PDF to Excel**: Automatically extract tabular rows and delimited invoice/report columns into downloadable CSV spreadsheets
+  - **PDF to PowerPoint**: Convert multi-page PDF documents into editable `.pptx` presentation slide decks
+  - **Searchable PDF with OCR Text Layer**: Composite scanned document photos with an embedded invisible, searchable & selectable text layer
+  - **PDF Metadata Viewer and Editor**: Inspect and modify Title, Author, Subject, Keywords, Creator, and Producer metadata tags
+  - **PDF Page Extraction to Separate Files**: Extract chosen pages (e.g. `1, 3, 5-8`) into individual standalone single-page PDF files bundled in a ZIP archive
+  - **PDF Bookmarks & Table-of-Contents Manager**: Add, view, edit, and save interactive navigation outline bookmarks with target pages
+  - **PDF Form Flattening**: Permanently flatten interactive AcroForm fields into static page graphics for tamper-proof archiving
+  - **PDF Comparison Tool**: Side-by-side comparison of Document A and Document B with page count diff, line-by-line revision tracking (+ added, - removed), and similarity % score
+
 - [x] **Advanced PDF Toolkit** (`PdfToolkitScreen`):
   - **Images to PDF**: Convert multi-image selections into clean PDFs with page format (A4, Letter, Legal), portrait/landscape, custom page numbers, and naming
   - **Text to PDF**: Multi-page flowing text document generator with custom title, author, and diagonal confidentiality watermark
@@ -212,6 +235,34 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - **Duplicate File Finder**: Identify duplicate files via byte-level cryptographic checksum matches
   - **File Metadata Inspector**: Inspect file headers, magic bytes, file extensions, MIME types, and sizes
   - **CSV ⇄ JSON Converter**: Two-way converter between tabular CSV and JSON arrays with custom indent formatting
+- [x] **Archive, Diff & Preview Studio** (`ArchivePreviewToolkitScreen` & `ArchiveCompareService`):
+  - **TAR Archive Creation & Extraction**:
+    - Package multiple files into standard POSIX `.tar` archives with permission preservation
+    - Extract `.tar` archives, unpack files, and inspect manifest names, sizes, and SHA-256 hashes
+  - **GZIP Compression & Extraction**:
+    - High-efficiency GZIP compression for single files (`.gz`) and compound archives (`.tar.gz` / `.tgz`)
+    - Transparent decompression and instant file extraction
+  - **7z Archive Support**:
+    - Container verification for 7-Zip archives (`37 7A BC AF 27 1C` magic signature validation)
+    - Major/minor version extraction, StartHeader CRC, NextHeader offset & size inspection
+    - Embedded stream analysis and container structure validation
+  - **Folder Comparison**:
+    - Full directory tree diffing comparing Folder A vs. Folder B
+    - Status breakdown: Identical files, Modified files, Only in Folder A, Only in Folder B
+    - Tree similarity percentage calculation and SHA-256 hash match validation
+    - Direct "Compare in Diff View" shortcut for modified files
+  - **File Content Comparison & Visual Diff**:
+    - Dual viewing modes: **Side-by-Side** (split 2 columns) and **Unified** (single combined column)
+    - Visual color-coded line diffs: Additions (`+` green), Deletions (`-` red), Modifications (`~` amber)
+    - Line number alignment, change statistics (Additions, Deletions, Modifications, Unchanged), and similarity %
+    - Binary file diff comparison fallback with size differences and SHA-256 hash validation
+  - **Universal File Previewer**:
+    - In-app preview for common file formats:
+      - **Images**: PNG, JPG, JPEG, WEBP, GIF, BMP, ICO with zoom and dimension display
+      - **Code & Text**: TXT, DART, JS, TS, HTML, CSS, PY, JSON, XML, YAML, SQL, LOG with line numbers, search, and word wrap
+      - **Markdown**: Formatted rich preview via `flutter_markdown`
+      - **PDF Documents**: Document preview via Flutter Printing layout engine
+      - **Binary / Hex Dump**: 16-byte formatted hexadecimal dump with byte offsets and ASCII representation column
 - [x] **Text & Words Analyzer** (`TextAnalyzerScreen`):
   - Real-time metrics: words, total characters, characters without spaces, sentences, paragraphs
   - Estimated reading time computation (~200 wpm)
@@ -292,6 +343,44 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - Haptic feedback toggle (selection & impact haptics)
   - Calculation history tracking with one-tap clear history action
   - Persistent storage via `SharedPreferences`
+
+---
+
+## 14. Productivity & Personal Organization
+- [x] **Productivity & Organization Suite** (`ProductivityToolkitScreen` & `ProductivityService`):
+  - **Notes with Categories and Search**:
+    - Categorized note organization: General, Personal, Work, Ideas, and Urgent
+    - Real-time search query filtering over note titles and content
+    - Visual color-tag palette (Blue, Emerald, Purple, Amber, Rose, Cyan)
+    - Pin-to-top prioritization keeping urgent notes anchored at the top
+    - Copy note to clipboard and 1-tap PDF formatted print/export via `Printing.layoutPdf`
+  - **Calendar and Event Reminders**:
+    - Interactive monthly visual calendar grid with dot markers on days with scheduled events
+    - Day selection inspection with chronological event timeline
+    - Event attributes: Title, time/all-day badge, location/meeting URL, category, and 3-level priority (Low, Medium, High)
+    - One-tap "Print Schedule" generating formatted daily agenda PDF
+  - **Subscription Renewal Reminders**:
+    - Centralized recurring subscription tracker with real-time countdown badge ("Due in X days" / "Renews today")
+    - Normalized financial spend analysis: Total Monthly Spend card and Annual Projected Spend card
+    - Active vs. Paused subscription toggles with automatic expense recalculation
+    - Billing cycles: Monthly or Yearly with renewal alert intervals
+  - **Bill Due-Date Reminders**:
+    - Comprehensive bill manager tracking Utilities, Rent, Credit Card, Internet, and Insurance
+    - Automatic overdue calculation and urgent red banner alert showing overdue bill count
+    - Total unpaid bills outstanding balance summary card
+    - Payee details, due dates, amounts, and one-tap "Mark as Paid / Unpaid" toggle
+  - **Work-Hours Tracker & Punch Clock**:
+    - Live punch clock stopwatch (Clock In / Clock Out) with active elapsed seconds display and pulse indicator
+    - Configurable hourly billing rate and unpaid break duration deduction (minutes)
+    - Automatic earnings and billable hours calculation
+    - Detailed work session log with task description, start/end timestamps, net hours, and total payout
+  - **To-Do Lists and Checklists**:
+    - High-efficiency task manager with completion rate progress bar (%) and remaining count badge
+    - Status filtering tabs: All, Active, and Completed
+    - Tasks with priority tags (Low, Medium, High), due dates, and nested subtasks checklist
+    - Instant checkbox toggle with strikethrough animation and one-tap "Clear Completed" action
+  - **100% Offline Persistence**:
+    - Complete local offline data persistence via `SharedPreferences` with zero cloud or network dependencies
 
 ---
 
@@ -439,25 +528,29 @@ Here is the comprehensive list of features currently implemented in the app, cat
 ---
 
 ## 20. Release Artifacts & Build Configuration
-- **Version**: `1.0.84`
-- **Build Number**: `84`
+- **Version**: `1.0.87`
+- **Build Number**: `87`
 - **Output Target**: Android Release APKs (`--split-per-abi`)
   - `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` (Target: ARM64 devices, Android 10+)
   - `build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk` (Target: 32-bit legacy ARM devices)
   - `build/app/outputs/flutter-apk/app-x86_64-release.apk` (Target: Emulators & x86 tablets)
 - **Zero Internet Permissions**: 100% offline security verified in `AndroidManifest.xml`
-- **Test Suite**: 22/22 Unit & Integration tests passing (`flutter test`)
-- **Audit & Bug Fixes (Release 84 - More Tools & Device Diagnostics)**:
-  - Fixed blank white screen bug caused by unbounded flex height constraints in `ToolScaffold`: Added `isScrollable: false` option so screens managing their own `ListView` or `Expanded` containers render without layout exceptions.
-  - Fixed `BatteryDisplayInfoScreen` ("Battery Health" and "Display & Refresh Rate" tabs) layout crash in release mode.
-  - Fixed `TouchscreenTestScreen` touch digitizer matrix aspect-ratio calculation so that touch coordinates align 1:1 with all 160 grid cells across any screen aspect ratio.
-  - Audited and verified all submenus in `ScreenColorTestScreen`, `VibrationTesterScreen`, `MicSpeakerTesterScreen`, `SoundLevelEstimatorScreen`, and `QrContactShareScreen` with zero layout overflows and full offline support.
-  - **Hardware Vibration Fix**: Added `<uses-permission android:name="android.permission.VIBRATE"/>` in `AndroidManifest.xml` and native Android `Vibrator` / `VibratorManager` MethodChannel in `MainActivity.kt` via `VibrationService` to ensure 100% physical haptic feedback on all devices.
-  - **SOS Morse Text Clarity**: Redesigned SOS Morse pattern card with high-contrast badge (`· · ·   — — —   · · ·`), clear dot/dash breakdown, and high-visibility typography.
-  - **Toolbox Reorder Done Button & Header Overlap Fix**: Redesigned `CategoryHubScreen` edit header to remove the redundant badge and compact the "Reset" & "Done" action buttons, eliminating horizontal overflow and preventing the checkmark button from being cut off on the screen edge.
-  - **Multilingual Crash Fix**: Integrated `flutter_localizations` with `GlobalMaterialLocalizations`, `GlobalWidgetsLocalizations`, and `GlobalCupertinoLocalizations` delegates for `hi` (Hindi), `ta` (Tamil), `es` (Spanish), resolving the fatal missing `MaterialLocalizations` assertion that caused the grey/black error screen when changing languages.
-  - **Vibrant & Colorful More Tools**: Enhanced `ToolCategory.moreTools` with vibrant violet `Color(0xFF8B5CF6)` and assigned unique rich theme colors (`customColor`) to every single tool in the category (Compass, Randomizer, Battery, Mic/Speaker, Touchscreen, Color Test, Vibration, Refresh Rate, Decibel Meter). Upgraded `SectionDetailScreen` tool cards with gradient icon containers, dynamic border glows, and colorful chevron badges.
-  - **Relevant Runtime Permissions**: Added explicit user disclosure dialogs and permission prompt banners for microphone access in `MicSpeakerTesterScreen` and `SoundLevelEstimatorScreen`.
+- **Test Suite**: 58/58 Unit & Integration tests passing (`flutter test`)
+- **Audit & Bug Fixes (Release 87 - Archive, Diff & Preview Studio)**:
+  - Added **Archive, Diff & Preview Studio** (`ArchivePreviewToolkitScreen` & `ArchiveCompareService`) with all requested features:
+    - **TAR Archiver & Extractor**: Standard POSIX .tar archive packing, permission handling, block extraction, and file manifest inspection.
+    - **GZIP Compression & Extraction**: High-compression `.gz` single file and compound `.tar.gz` / `.tgz` packaging and decompression.
+    - **7z Archive Explorer**: Magic signature validation (`37 7A BC AF 27 1C`), container structure analysis, StartHeader CRC, NextHeader offsets, and stream payload inspection.
+    - **Folder Comparison**: Comprehensive directory tree diffing identifying identical files, modified files, unique files in A, and unique files in B with similarity scores.
+    - **File Content Diff**: Interactive **Side-by-Side** (2-column) and **Unified** line diffing with color highlights (`+` green, `-` red, `~` amber), similarity %, and binary fallback.
+    - **Universal File Previewer**: In-app viewer for Images (PNG, JPG, WEBP, GIF, BMP), Code/Text (with line numbers and word wrap), Markdown, PDF, and 16-byte Hex Dump inspector.
+  - Registered `archive_compare_toolkit` under `ToolCategory.filesText` in `ToolRegistry` and added cross-launch action button in `FileZipToolkitScreen`.
+  - Added 12 new comprehensive unit tests in `test/archive_compare_preview_test.dart` bringing the total passing test suite to 58/58.
+- **Audit & Bug Fixes (Release 86 - Productivity & Personal Organization Suite)**:
+  - Added **Productivity & Organization Suite** (`ProductivityToolkitScreen`, `ProductivityService`, `ProductivityModels`) with all 6 requested features.
+- **Audit & Bug Fixes (Release 85 - Photo Studio & Advanced Office PDF Suites)**:
+  - Added **Photo Studio & Editor** (`PhotoEditorScreen` & `PhotoEditorService`) with all 7 requested features.
+  - Added **Office & Advanced PDF Suite** (`OfficePdfToolkitScreen` & `OfficeDocumentService`) with all 12 requested features.
 
 
 

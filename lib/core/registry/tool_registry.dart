@@ -41,6 +41,10 @@ import '../../features/device_tools/screen_color_test_screen.dart';
 import '../../features/device_tools/vibration_tester_screen.dart';
 import '../../features/device_tools/sound_level_estimator_screen.dart';
 import '../../features/everyday_tools/qr_contact_share_screen.dart';
+import '../../features/image_tools/photo_editor_screen.dart';
+import '../../features/documents/office_pdf_toolkit_screen.dart';
+import '../../features/productivity/productivity_toolkit_screen.dart';
+import '../../features/file_tools/archive_preview_toolkit_screen.dart';
 
 class ToolRegistry {
   static final List<ToolItem> allTools = [
@@ -93,6 +97,15 @@ class ToolRegistry {
       icon: Icons.hourglass_bottom_rounded,
       keywords: ['duration', 'hours', 'days', 'minutes', 'seconds', 'converter', 'time'],
       builder: (_) => const DurationConverterScreen(),
+    ),
+    ToolItem(
+      id: 'productivity_toolkit',
+      title: 'Productivity & Organization Suite',
+      description: 'Notes with categories, calendar & events, subscriptions, bills, work-hours tracker & to-do checklists',
+      category: ToolCategory.dateTime,
+      icon: Icons.task_alt_rounded,
+      keywords: ['productivity', 'notes', 'calendar', 'events', 'reminders', 'subscription', 'bill', 'due date', 'work hours', 'timesheet', 'todo', 'checklist', 'tasks', 'organization'],
+      builder: (_) => const ProductivityToolkitScreen(),
     ),
 
     // 4. Finance
@@ -222,6 +235,15 @@ class ToolRegistry {
       builder: (_) => const PdfToolkitScreen(),
     ),
     ToolItem(
+      id: 'office_doc_pdf_suite',
+      title: 'Office & Advanced PDF Suite',
+      description: 'Word/Excel/PPT to PDF, PDF to Word/Excel/PPT, Searchable OCR, metadata editor, extract pages, bookmarks & compare',
+      category: ToolCategory.filesText,
+      icon: Icons.snippet_folder_rounded,
+      keywords: ['word', 'docx', 'excel', 'xlsx', 'csv', 'powerpoint', 'pptx', 'ocr', 'metadata', 'bookmarks', 'flatten', 'compare', 'extract', 'pdf'],
+      builder: (_) => const OfficePdfToolkitScreen(),
+    ),
+    ToolItem(
       id: 'image_toolkit',
       title: 'Image Toolkit',
       description: 'Compress, resize/crop, format convert, rotate/flip, combine, Base64, EXIF & passport photos',
@@ -229,6 +251,15 @@ class ToolRegistry {
       icon: Icons.photo_size_select_actual_rounded,
       keywords: ['image', 'photo', 'compress', 'resize', 'crop', 'jpg', 'png', 'webp', 'rotate', 'flip', 'combine', 'base64', 'exif', 'watermark', 'passport'],
       builder: (_) => const ImageToolkitScreen(),
+    ),
+    ToolItem(
+      id: 'photo_editor_studio',
+      title: 'Photo Studio & Editor',
+      description: 'Remove background, change BG color, adjustments, filters, censor blur, annotate & text/logo watermark',
+      category: ToolCategory.filesText,
+      icon: Icons.auto_fix_high_rounded,
+      keywords: ['photo', 'editor', 'remove bg', 'background', 'filter', 'blur', 'censor', 'draw', 'annotate', 'logo', 'watermark', 'brightness', 'contrast'],
+      builder: (_) => const PhotoEditorScreen(),
     ),
     ToolItem(
       id: 'image_collage_maker',
@@ -247,6 +278,15 @@ class ToolRegistry {
       icon: Icons.folder_zip_rounded,
       keywords: ['zip', 'archive', 'extract', 'rename', 'hash', 'md5', 'sha256', 'duplicate', 'csv', 'json', 'files'],
       builder: (_) => const FileZipToolkitScreen(),
+    ),
+    ToolItem(
+      id: 'archive_compare_toolkit',
+      title: 'Archive, Diff & Preview Studio',
+      description: 'TAR & GZIP archiver, 7z explorer, folder comparison, visual file diff & universal previewer',
+      category: ToolCategory.filesText,
+      icon: Icons.archive_rounded,
+      keywords: ['tar', 'gzip', 'gz', '7z', 'archive', 'extract', 'folder compare', 'diff', 'compare', 'file preview', 'hex dump'],
+      builder: (_) => const ArchivePreviewToolkitScreen(),
     ),
     ToolItem(
       id: 'ocr_toolkit',

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:barcode_widget/barcode_widget.dart' as bc;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -50,8 +49,8 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
   // Standard QR Generator state
   final TextEditingController _qrTextController = TextEditingController(text: 'https://github.com');
   Color _qrColor = Colors.black;
-  Color _qrBgColor = Colors.white;
-  int _qrErrorLevel = QrErrorCorrectLevel.M;
+  final Color _qrBgColor = Colors.white;
+  final int _qrErrorLevel = QrErrorCorrectLevel.M;
 
   // Wi-Fi QR state
   final TextEditingController _wifiSsidController = TextEditingController(text: 'Home_WiFi');
@@ -74,7 +73,7 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
   // Barcode Generator state
   final TextEditingController _barcodeDataController = TextEditingController(text: '978020137962');
   String _barcodeType = 'EAN-13'; // Code 128, EAN-13, EAN-8, UPC-A, Code 39, ISBN, PDF417, Aztec
-  double _barcodeHeight = 80;
+  final double _barcodeHeight = 80;
 
   // Bulk QR state
   final TextEditingController _bulkInputController = TextEditingController(

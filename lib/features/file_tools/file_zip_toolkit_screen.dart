@@ -13,6 +13,7 @@ import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
+import 'archive_preview_toolkit_screen.dart';
 
 enum FileZipTab {
   createZip('Create ZIP', Icons.folder_zip_rounded),
@@ -468,6 +469,16 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
       title: 'File & ZIP Suite',
       category: ToolCategory.filesText,
       toolId: 'file_zip_toolkit',
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.archive_rounded),
+          tooltip: 'TAR, 7z & Diff Studio',
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const ArchivePreviewToolkitScreen()),
+          ),
+        ),
+      ],
       onReset: () {
         setState(() {
           _zipFiles.clear();
