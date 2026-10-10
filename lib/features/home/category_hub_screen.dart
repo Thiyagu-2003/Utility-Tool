@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/registry/tool_registry.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/services/search_calculator_service.dart';
 import '../../core/theme/app_colors.dart';
-import '../../shared/widgets/toolbox_pro_logo.dart';
 import '../history/calculation_history_screen.dart';
+import '../slate/slate_screen.dart';
 import 'section_detail_screen.dart';
 
 class CategoryHubScreen extends StatefulWidget {
@@ -65,7 +66,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
     final searchResults = isSearching ? ToolRegistry.searchTools(_searchQuery) : <ToolItem>[];
 
     return Scaffold(
-      backgroundColor: isDark ? AppColors.darkBackground : AppColors.lightBackground,
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
       body: SafeArea(
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
@@ -73,88 +74,186 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
             // Header + Search
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Brand Header Row: Logo + Offline Badge + History Shortcut
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        const ToolBoxProLogo(iconSize: 32),
-                        const Spacer(),
+                        // App logo tile 48x48, radius 14, dark #0F172A, with a white 2x2 grid icon
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          width: 48,
+                          height: 48,
                           decoration: BoxDecoration(
-                            color: const Color(0xFF10B981).withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3)),
+                            color: const Color(0xFF0F172A),
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(isDark ? 0.35 : 0.1),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
                           ),
-                          child: const Row(
+                          alignment: Alignment.center,
+                          child: const Icon(
+                            Icons.grid_view_rounded,
+                            color: Colors.white,
+                            size: 26,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        // Title "ToolBox" in #0F172A + "Pro" in #0369A1, 21sp bold; tagline 13sp #475569
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.shield_rounded, size: 12, color: Color(0xFF10B981)),
-                              SizedBox(width: 4),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'ToolBox',
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 21,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: -0.4,
+                                      color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    'Pro',
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 21,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: -0.4,
+                                      color: const Color(0xFF0369A1),
+                                    ),
+                                  ),
+                                ],
+                              ),
                               Text(
-                                '100% Offline',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF10B981),
+                                'All Your Tools. One App.',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
                                 ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ],
                           ),
                         ),
                         const SizedBox(width: 6),
-                        IconButton(
-                          tooltip: 'Calculation History',
-                          icon: Icon(
-                            Icons.history_rounded,
-                            size: 22,
-                            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                        // "100% Offline" pill: bg #CCFBF1, 1.5 border #0D9488, text #115E59 bold 13sp
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF042F2E) : const Color(0xFFCCFBF1),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: const Color(0xFF0D9488),
+                              width: 1.5,
+                            ),
                           ),
-                          onPressed: () {
-                            PreferencesService().triggerHaptic();
-                            Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const CalculationHistoryScreen()),
-                            );
-                          },
+                          child: Text(
+                            '100% Offline',
+                            style: GoogleFonts.outfit(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: isDark ? const Color(0xFF5EEAD4) : const Color(0xFF115E59),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // History button: 44x44 circle, white, 1.5 border #CBD5E1, bold clock-history icon
+                        Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              PreferencesService().triggerHaptic();
+                              Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const CalculationHistoryScreen()),
+                              );
+                            },
+                            customBorder: const CircleBorder(),
+                            child: Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                border: Border.all(
+                                  color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                                  width: 1.5,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(isDark ? 0.2 : 0.04),
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(
+                                Icons.history_rounded,
+                                size: 24,
+                                color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                              ),
+                            ),
+                          ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    // Search Bar
+                    const SizedBox(height: 14),
+                    // SEARCH BAR: Height 52, radius 16, white, 1.5 border #CBD5E1
                     Container(
+                      height: 52,
                       decoration: BoxDecoration(
-                        color: isDark ? AppColors.darkSurface : Colors.white,
+                        color: isDark ? const Color(0xFF1E293B) : Colors.white,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                          color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                          width: 1.5,
                         ),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withOpacity(isDark ? 0.15 : 0.04),
-                            blurRadius: 12,
-                            offset: const Offset(0, 3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
                           ),
                         ],
                       ),
+                      alignment: Alignment.center,
                       child: TextField(
                         controller: _searchController,
                         onChanged: (val) => setState(() => _searchQuery = val),
+                        style: GoogleFonts.outfit(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                        ),
                         decoration: InputDecoration(
+                          isDense: true,
                           hintText: 'Search tools, math (e.g. 25 * 40), or units...',
-                          hintStyle: TextStyle(
+                          hintStyle: GoogleFonts.outfit(
                             fontSize: 13,
-                            color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+                            fontWeight: FontWeight.w400,
+                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
                           ),
                           prefixIcon: Icon(
                             Icons.search_rounded,
-                            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                            size: 24,
+                            color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
                           ),
                           suffixIcon: _searchQuery.isNotEmpty
                               ? IconButton(
-                                  icon: const Icon(Icons.clear_rounded, size: 18),
+                                  icon: const Icon(Icons.clear_rounded, size: 20),
                                   onPressed: () {
                                     setState(() {
                                       _searchController.clear();
@@ -164,7 +263,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                                 )
                               : null,
                           border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                         ),
                       ),
                     ),
@@ -271,87 +370,75 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                 },
               ),
 
-            // Pinned Favorites (only when not searching and enabled)
-            if (!isSearching) ...[
-              AnimatedBuilder(
-                animation: prefs,
-                builder: (context, _) {
-                  if (!prefs.showFavorites) return const SliverToBoxAdapter(child: SizedBox.shrink());
-
-                  final favTools = prefs.favoriteToolIds
-                      .map((id) => ToolRegistry.findById(id))
-                      .whereType<ToolItem>()
-                      .toList();
-
-                  if (favTools.isEmpty) return const SliverToBoxAdapter(child: SizedBox.shrink());
-
-                  return SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+            // FAVORITES
+            if (!isSearching)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
                         children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.star_rounded, size: 16, color: AppColors.primaryOrange),
-                              const SizedBox(width: 6),
-                              Text(
-                                'FAVORITES',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 1.0,
-                                  color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: favTools.map((tool) {
-                              return Material(
-                                color: isDark ? AppColors.darkSurface : Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(12),
-                                  onTap: () => _openTool(context, tool),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: tool.color.withOpacity(0.3),
-                                      ),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(tool.icon, size: 16, color: tool.color),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          tool.title,
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 12,
-                                            color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }).toList(),
+                          const Icon(Icons.star_rounded, size: 18, color: Color(0xFFEA580C)),
+                          const SizedBox(width: 6),
+                          Text(
+                            'FAVORITES',
+                            style: GoogleFonts.outfit(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 14 * 0.08,
+                              color: isDark ? const Color(0xFFFB923C) : const Color(0xFF9A3412),
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                  );
-                },
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          _buildFavoriteChip(
+                            title: 'Slate',
+                            toolId: 'slate',
+                            circleColor: const Color(0xFF111827),
+                            icon: Icons.edit_outlined,
+                            isDark: isDark,
+                          ),
+                          _buildFavoriteChip(
+                            title: 'Age',
+                            toolId: 'age_calc',
+                            circleColor: const Color(0xFF7C3AED),
+                            icon: Icons.cake_outlined,
+                            isDark: isDark,
+                          ),
+                          _buildFavoriteChip(
+                            title: 'GST Calculator',
+                            toolId: 'gst_calc',
+                            circleColor: const Color(0xFF16A34A),
+                            icon: Icons.receipt_long_outlined,
+                            isDark: isDark,
+                          ),
+                          _buildFavoriteChip(
+                            title: 'Discount Calculator',
+                            toolId: 'discount_calc',
+                            circleColor: const Color(0xFFE11D48),
+                            icon: Icons.local_offer_outlined,
+                            isDark: isDark,
+                          ),
+                          _buildFavoriteChip(
+                            title: 'Unit Converter',
+                            toolId: 'unit_converter',
+                            circleColor: const Color(0xFF0891B2),
+                            icon: Icons.swap_horiz_rounded,
+                            isDark: isDark,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ],
 
             // Section header
             if (!isSearching)
@@ -360,25 +447,25 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                   animation: prefs,
                   builder: (context, _) {
                     return Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                      padding: const EdgeInsets.fromLTRB(16, 18, 16, 12),
                       child: Row(
                         children: [
                           Container(
                             width: 4,
                             height: 18,
                             decoration: BoxDecoration(
-                              color: AppColors.primaryOrange,
+                              color: const Color(0xFFEA580C),
                               borderRadius: BorderRadius.circular(2),
                             ),
                           ),
                           const SizedBox(width: 8),
                           Text(
                             _isEditMode ? 'CUSTOMIZE TOOLBOX' : 'CATEGORIES',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1.0,
-                              color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                            style: GoogleFonts.outfit(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                              letterSpacing: 0.5,
                             ),
                           ),
                           const Spacer(),
@@ -397,7 +484,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                               icon: const Icon(Icons.refresh_rounded, size: 14),
                               label: const Text('Reset', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                               style: TextButton.styleFrom(
-                                foregroundColor: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                                foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                                 minimumSize: Size.zero,
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -412,7 +499,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                               icon: const Icon(Icons.check_rounded, size: 14),
                               label: const Text('Done', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                               style: FilledButton.styleFrom(
-                                backgroundColor: AppColors.primaryOrange,
+                                backgroundColor: const Color(0xFFEA580C),
                                 foregroundColor: Colors.white,
                                 elevation: 0,
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -431,23 +518,24 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                 decoration: BoxDecoration(
-                                  color: isDark ? AppColors.darkSurface : Colors.white,
+                                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
                                   borderRadius: BorderRadius.circular(10),
                                   border: Border.all(
-                                    color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                                    color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                                    width: 1.2,
                                   ),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.tune_rounded, size: 13, color: AppColors.primaryOrange),
+                                    const Icon(Icons.tune_rounded, size: 13, color: Color(0xFFEA580C)),
                                     const SizedBox(width: 5),
                                     Text(
                                       'Edit',
-                                      style: TextStyle(
+                                      style: GoogleFonts.outfit(
                                         fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                                        fontWeight: FontWeight.w700,
+                                        color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
                                       ),
                                     ),
                                   ],
@@ -455,18 +543,19 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                               ),
                             ),
                             const SizedBox(width: 8),
+                            // "49 tools" pill: bg #FFEDD5, text #9A3412
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
-                                color: AppColors.primaryOrange.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
+                                color: isDark ? const Color(0xFF7C2D12) : const Color(0xFFFFEDD5),
+                                borderRadius: BorderRadius.circular(16),
                               ),
                               child: Text(
                                 '${ToolRegistry.allTools.length} tools',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.primaryOrange.withOpacity(0.8),
+                                style: GoogleFonts.outfit(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: isDark ? const Color(0xFFFFEDD5) : const Color(0xFF9A3412),
                                 ),
                               ),
                             ),
@@ -613,16 +702,19 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                     sliver: SliverGrid(
                       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 2,
-                        mainAxisSpacing: 10,
-                        crossAxisSpacing: 10,
-                        childAspectRatio: 1.2,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: 0.84,
                       ),
                       delegate: SliverChildBuilderDelegate(
                         (context, index) {
-                          final category = categories[index];
+                          if (index == 0) {
+                            return _buildSlateCard(context, isDark);
+                          }
+                          final category = categories[index - 1];
                           return _buildSectionCard(context, category, isDark, prefs);
                         },
-                        childCount: categories.length,
+                        childCount: categories.length + 1,
                       ),
                     ),
                   );
@@ -632,6 +724,213 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
 
             const SliverToBoxAdapter(child: SizedBox(height: 24)),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSlateCard(BuildContext context, bool isDark) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () {
+          PreferencesService().triggerHaptic();
+          PreferencesService().addRecent('slate');
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const SlateScreen()),
+          );
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(isDark ? 0.2 : 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Top row: 60x60 tile on left, orange "New" badge on right
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF111827),
+                      borderRadius: BorderRadius.circular(17),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF111827).withOpacity(0.35),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Stack(
+                      children: [
+                        Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(17),
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Colors.white.withOpacity(0.25),
+                                Colors.white.withOpacity(0.0),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const Center(
+                          child: Icon(
+                            Icons.edit_outlined,
+                            color: Colors.white,
+                            size: 40,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Orange (#EA580C) "New" badge with white text instead of a count
+                  Container(
+                    constraints: const BoxConstraints(minHeight: 26, minWidth: 26),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEA580C),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      'New',
+                      style: GoogleFonts.outfit(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // Title "Slate" (17sp bold)
+              Text(
+                'Slate',
+                style: GoogleFonts.outfit(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                  height: 1.2,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              // Description "Draw, write & sketch on a full-screen canvas" (13sp, #475569, up to 2 lines)
+              Expanded(
+                child: Text(
+                  'Draw, write & sketch on a full-screen canvas',
+                  style: GoogleFonts.outfit(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                    height: 1.25,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFavoriteChip({
+    required String title,
+    required String toolId,
+    required Color circleColor,
+    required IconData icon,
+    required bool isDark,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          if (toolId == 'slate') {
+            PreferencesService().triggerHaptic();
+            PreferencesService().addRecent('slate');
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SlateScreen()),
+            );
+            return;
+          }
+          final tool = ToolRegistry.findById(toolId);
+          if (tool != null) {
+            _openTool(context, tool);
+          }
+        },
+        borderRadius: BorderRadius.circular(22),
+        child: Container(
+          height: 44,
+          padding: const EdgeInsets.only(left: 5, right: 14),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(isDark ? 0.15 : 0.03),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: circleColor,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  icon,
+                  size: 22,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: GoogleFonts.outfit(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -649,7 +948,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         onTap: () => _openSection(context, category),
         onLongPress: () {
           PreferencesService().triggerHaptic();
@@ -661,7 +960,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
               behavior: SnackBarBehavior.floating,
               action: SnackBarAction(
                 label: 'Move to Top',
-                textColor: AppColors.primaryOrange,
+                textColor: const Color(0xFFEA580C),
                 onPressed: () {
                   prefs.moveCategoryToTop(category);
                 },
@@ -671,88 +970,117 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
         },
         child: Container(
           decoration: BoxDecoration(
-            color: isDark ? AppColors.darkSurface : Colors.white,
-            borderRadius: BorderRadius.circular(16),
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-              width: 0.8,
+              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+              width: 1.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: category.color.withOpacity(isDark ? 0.06 : 0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
+                color: Colors.black.withOpacity(isDark ? 0.2 : 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
               ),
             ],
           ),
           padding: const EdgeInsets.all(14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Top: Icon + Count
+              // Top row: icon tile on the left, count badge on the right
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // 60x60, radius 17, SOLID saturated colour with subtle top-left light-to-transparent gradient overlay (white 25% -> 0%)
+                  // White icon 40dp inside 60dp tile (tight padding), stroke 2.1
                   Container(
-                    width: 40,
-                    height: 40,
+                    width: 60,
+                    height: 60,
                     decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          category.color.withOpacity(0.2),
-                          category.color.withOpacity(0.08),
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(12),
+                      color: category.color,
+                      borderRadius: BorderRadius.circular(17),
+                      boxShadow: [
+                        BoxShadow(
+                          color: category.color.withOpacity(0.35),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
                     ),
-                    child: Icon(category.icon, color: category.color, size: 20),
+                    child: Stack(
+                      children: [
+                        Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(17),
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Colors.white.withOpacity(0.25),
+                                Colors.white.withOpacity(0.0),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Center(
+                          child: Icon(
+                            category.icon,
+                            color: Colors.white,
+                            size: 38,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
+                  // Count badge: min 26dp tall, pill, bg #0F172A, white bold 13sp number
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    constraints: const BoxConstraints(minHeight: 26, minWidth: 26),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: category.color.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
+                      color: isDark ? const Color(0xFF334155) : const Color(0xFF0F172A),
+                      borderRadius: BorderRadius.circular(13),
                     ),
+                    alignment: Alignment.center,
                     child: Text(
                       '$count',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: category.color,
+                      style: GoogleFonts.outfit(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
                       ),
                     ),
                   ),
                 ],
               ),
-
-              // Bottom: Title + Subtitle
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    category.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                      color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
-                    ),
+              const SizedBox(height: 12),
+              // Below: title 17sp bold #0F172A
+              Text(
+                category.label,
+                style: GoogleFonts.outfit(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                  height: 1.2,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              // Description: 13sp #475569, up to 2 lines (do NOT truncate with ellipsis on one line)
+              Expanded(
+                child: Text(
+                  category.description,
+                  style: GoogleFonts.outfit(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                    height: 1.25,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    category.description,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
-                    ),
-                  ),
-                ],
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ],
           ),

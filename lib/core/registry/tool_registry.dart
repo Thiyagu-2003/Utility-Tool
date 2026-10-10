@@ -45,9 +45,21 @@ import '../../features/image_tools/photo_editor_screen.dart';
 import '../../features/documents/office_pdf_toolkit_screen.dart';
 import '../../features/productivity/productivity_toolkit_screen.dart';
 import '../../features/file_tools/archive_preview_toolkit_screen.dart';
+import '../../features/slate/slate_screen.dart';
 
 class ToolRegistry {
   static final List<ToolItem> allTools = [
+    // Slate Full-Screen Canvas
+    ToolItem(
+      id: 'slate',
+      title: 'Slate',
+      description: 'Draw, write & sketch on a full-screen canvas',
+      category: ToolCategory.moreTools,
+      icon: Icons.edit_outlined,
+      keywords: ['slate', 'draw', 'sketch', 'paint', 'canvas', 'write', 'whiteboard', 'doodle', 'drawing'],
+      builder: (_) => const SlateScreen(),
+    ),
+
     // 1. Calculate
     ToolItem(
       id: 'percentage_calc',
