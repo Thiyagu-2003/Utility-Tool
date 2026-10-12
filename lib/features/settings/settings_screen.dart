@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../core/utils/share_utils.dart';
 import '../../core/localization/app_localizations.dart';
 import '../../core/services/backup_service.dart';
 import '../../core/services/preferences_service.dart';
@@ -17,7 +19,18 @@ class SettingsScreen extends StatelessWidget {
       builder: (context) {
         return AlertDialog(
           title: const Text('Select Language / மொழி'),
-          content: Column(
+          content: RadioGroup<String>(
+            groupValue: prefs.appLanguage,
+            onChanged: (val) {
+              if (val == null) return;
+              prefs.setAppLanguage(val);
+              Navigator.pop(context);
+              final name = AppLocalizations.languageNames[val] ?? val;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Language changed to $name')),
+              );
+            },
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             children: AppLocalizations.supportedLocales.map((loc) {
               final code = loc.languageCode;
@@ -27,19 +40,10 @@ class SettingsScreen extends StatelessWidget {
               return RadioListTile<String>(
                 title: Text(name, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
                 value: code,
-                groupValue: prefs.appLanguage,
                 activeColor: AppColors.primaryOrange,
-                onChanged: (val) {
-                  if (val != null) {
-                    prefs.setAppLanguage(val);
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Language changed to $name')),
-                    );
-                  }
-                },
               );
             }).toList(),
+          ),
           ),
           actions: [
             TextButton(
@@ -64,7 +68,14 @@ class SettingsScreen extends StatelessWidget {
       builder: (context) {
         return AlertDialog(
           title: const Text('Dynamic Font Sizing'),
-          content: Column(
+          content: RadioGroup<double>(
+            groupValue: scales.map((s) => s["scale"] as double).firstWhere((s) => (prefs.fontScale - s).abs() < 0.05, orElse: () => 1.0),
+            onChanged: (val) {
+              if (val == null) return;
+              prefs.setFontScale(val);
+              Navigator.pop(context);
+            },
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             children: scales.map((item) {
               final scale = item['scale'] as double;
@@ -76,16 +87,10 @@ class SettingsScreen extends StatelessWidget {
                 title: Text(label, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
                 subtitle: Text(sub, style: const TextStyle(fontSize: 12)),
                 value: scale,
-                groupValue: prefs.fontScale,
                 activeColor: AppColors.primaryOrange,
-                onChanged: (val) {
-                  if (val != null) {
-                    prefs.setFontScale(val);
-                    Navigator.pop(context);
-                  }
-                },
               );
             }).toList(),
+          ),
           ),
           actions: [
             TextButton(
@@ -226,7 +231,7 @@ class SettingsScreen extends StatelessWidget {
             children: [
               // Appearance Section
               Text(
-                'APPEARANCE & THEME',
+                loc.tr('appearance').toUpperCase(),
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
@@ -235,50 +240,46 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              Container(
-                decoration: BoxDecoration(
-                  color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+              // Material (not a decorated Container) so the tiles' ink splashes stay visible.
+              Material(
+                color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+                shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                  side: BorderSide(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
                 ),
-                child: Column(
+                clipBehavior: Clip.antiAlias,
+                child: RadioGroup<ThemeMode>(
+                  groupValue: prefs.themeMode,
+                  onChanged: (val) {
+                    if (val != null) prefs.setThemeMode(val);
+                  },
+                  child: Column(
                   children: [
                     RadioListTile<ThemeMode>(
-                      title: const Text('System Default', style: TextStyle(fontWeight: FontWeight.w600)),
+                      title: Text(loc.tr('system_mode'), style: const TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: const Text('Automatically adapt to device settings'),
                       secondary: const Icon(Icons.brightness_auto_rounded),
                       value: ThemeMode.system,
-                      groupValue: prefs.themeMode,
                       activeColor: AppColors.primaryOrange,
-                      onChanged: (val) {
-                        if (val != null) prefs.setThemeMode(val);
-                      },
                     ),
                     const Divider(height: 1),
                     RadioListTile<ThemeMode>(
-                      title: const Text('Light Mode', style: TextStyle(fontWeight: FontWeight.w600)),
+                      title: Text(loc.tr('light_mode'), style: const TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: const Text('Clean high-contrast daytime interface'),
                       secondary: const Icon(Icons.wb_sunny_rounded),
                       value: ThemeMode.light,
-                      groupValue: prefs.themeMode,
                       activeColor: AppColors.primaryOrange,
-                      onChanged: (val) {
-                        if (val != null) prefs.setThemeMode(val);
-                      },
                     ),
                     const Divider(height: 1),
                     RadioListTile<ThemeMode>(
-                      title: const Text('Dark Mode', style: TextStyle(fontWeight: FontWeight.w600)),
+                      title: Text(loc.tr('dark_mode'), style: const TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: const Text('Sleek dark theme easy on the eyes'),
                       secondary: const Icon(Icons.nightlight_round),
                       value: ThemeMode.dark,
-                      groupValue: prefs.themeMode,
                       activeColor: AppColors.primaryOrange,
-                      onChanged: (val) {
-                        if (val != null) prefs.setThemeMode(val);
-                      },
                     ),
                   ],
+                ),
                 ),
               ),
               const SizedBox(height: 24),
@@ -294,17 +295,19 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              Container(
-                decoration: BoxDecoration(
-                  color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+              // Material (not a decorated Container) so the tiles' ink splashes stay visible.
+              Material(
+                color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+                shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                  side: BorderSide(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
                 ),
+                clipBehavior: Clip.antiAlias,
                 child: Column(
                   children: [
                     ListTile(
                       leading: const Icon(Icons.translate_rounded, color: AppColors.catText),
-                      title: const Text('App Language / மொழி', style: TextStyle(fontWeight: FontWeight.w600)),
+                      title: Text(loc.tr('language'), style: const TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: Text(curLangName, style: const TextStyle(fontSize: 13)),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () => _showLanguageDialog(context, prefs),
@@ -312,7 +315,7 @@ class SettingsScreen extends StatelessWidget {
                     const Divider(height: 1),
                     ListTile(
                       leading: const Icon(Icons.format_size_rounded, color: AppColors.catTime),
-                      title: const Text('Dynamic Font Sizing', style: TextStyle(fontWeight: FontWeight.w600)),
+                      title: Text(loc.tr('font_size'), style: const TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: Text(
                         prefs.fontScale >= 1.25
                             ? 'Extra Large (1.30x)'
@@ -338,12 +341,14 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              Container(
-                decoration: BoxDecoration(
-                  color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+              // Material (not a decorated Container) so the tiles' ink splashes stay visible.
+              Material(
+                color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+                shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                  side: BorderSide(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
                 ),
+                clipBehavior: Clip.antiAlias,
                 child: Column(
                   children: [
                     SwitchListTile(
@@ -351,7 +356,7 @@ class SettingsScreen extends StatelessWidget {
                       title: const Text('Show Favorites Tray', style: TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: Text('${prefs.favoriteToolIds.length} tools pinned for quick access'),
                       value: prefs.showFavorites,
-                      activeColor: AppColors.primaryOrange,
+                      activeThumbColor: AppColors.primaryOrange,
                       onChanged: (val) => prefs.toggleShowFavorites(val),
                     ),
                     const Divider(height: 1),
@@ -360,13 +365,13 @@ class SettingsScreen extends StatelessWidget {
                       title: const Text('Show Recently Used Tools', style: TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: Text('${prefs.recentToolIds.length} recently opened tools tracked'),
                       value: prefs.showRecents,
-                      activeColor: AppColors.primaryOrange,
+                      activeThumbColor: AppColors.primaryOrange,
                       onChanged: (val) => prefs.toggleShowRecents(val),
                     ),
                     const Divider(height: 1),
                     ListTile(
                       leading: const Icon(Icons.restart_alt_rounded, color: AppColors.primaryOrange),
-                      title: const Text('Reset Category Ordering', style: TextStyle(fontWeight: FontWeight.w600)),
+                      title: Text(loc.tr('reset_order'), style: const TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: const Text('Restore default layout for categories'),
                       onTap: () {
                         prefs.resetCategoryOrder();
@@ -391,18 +396,20 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              Container(
-                decoration: BoxDecoration(
-                  color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+              // Material (not a decorated Container) so the tiles' ink splashes stay visible.
+              Material(
+                color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+                shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                  side: BorderSide(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
                 ),
+                clipBehavior: Clip.antiAlias,
                 child: SwitchListTile(
                   secondary: const Icon(Icons.vibration_rounded),
-                  title: const Text('Haptic Vibration Feedback', style: TextStyle(fontWeight: FontWeight.w600)),
+                  title: Text(loc.tr('haptics'), style: const TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: const Text('Tactile buzz on keypads, toggles and button presses'),
                   value: prefs.hapticEnabled,
-                  activeColor: AppColors.primaryOrange,
+                  activeThumbColor: AppColors.primaryOrange,
                   onChanged: (val) => prefs.toggleHaptics(val),
                 ),
               ),
@@ -419,17 +426,19 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              Container(
-                decoration: BoxDecoration(
-                  color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+              // Material (not a decorated Container) so the tiles' ink splashes stay visible.
+              Material(
+                color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+                shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                  side: BorderSide(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
                 ),
+                clipBehavior: Clip.antiAlias,
                 child: Column(
                   children: [
                     ListTile(
                       leading: const Icon(Icons.receipt_long_rounded, color: AppColors.catFinance),
-                      title: const Text('View Calculation History', style: TextStyle(fontWeight: FontWeight.w600)),
+                      title: Text(loc.tr('calculation_history'), style: const TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: Text('${prefs.calculationHistory.length} saved computations with filters & search'),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () {
@@ -462,34 +471,45 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              Container(
-                decoration: BoxDecoration(
-                  color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+              // Material (not a decorated Container) so the tiles' ink splashes stay visible.
+              Material(
+                color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+                shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                  side: BorderSide(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
                 ),
+                clipBehavior: Clip.antiAlias,
                 child: Column(
                   children: [
                     ListTile(
                       leading: const Icon(Icons.file_upload_outlined, color: AppColors.catFinance),
-                      title: const Text('Export JSON Backup', style: TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: const Text('Copy full preferences, favorites and history backup'),
-                      trailing: const Icon(Icons.copy_rounded, size: 20),
-                      onTap: () {
+                      title: Text(loc.tr('export_backup'), style: const TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: const Text('Share a backup file of preferences, favorites and history'),
+                      trailing: const Icon(Icons.ios_share_rounded, size: 20),
+                      onTap: () async {
+                        final messenger = ScaffoldMessenger.of(context);
                         final json = BackupService.exportBackupJson(prefs);
-                        Clipboard.setData(ClipboardData(text: json));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Backup data copied to clipboard (${json.length} characters)'),
-                            backgroundColor: AppColors.success,
-                          ),
-                        );
+                        try {
+                          await shareFileBytes(
+                            Uint8List.fromList(utf8.encode(json)),
+                            'toolbox_pro_backup_${DateTime.now().millisecondsSinceEpoch ~/ 1000}.json',
+                          );
+                        } catch (_) {
+                          // Sharing unavailable: fall back to the clipboard.
+                          await Clipboard.setData(ClipboardData(text: json));
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text('Sharing failed; backup copied to clipboard (${json.length} characters)'),
+                              backgroundColor: AppColors.success,
+                            ),
+                          );
+                        }
                       },
                     ),
                     const Divider(height: 1),
                     ListTile(
                       leading: const Icon(Icons.file_download_outlined, color: AppColors.catConverter),
-                      title: const Text('Restore from Backup', style: TextStyle(fontWeight: FontWeight.w600)),
+                      title: Text(loc.tr('import_backup'), style: const TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: const Text('Import saved backup payload with verification'),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () => _showImportBackupDialog(context, prefs),
@@ -510,12 +530,14 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              Container(
-                decoration: BoxDecoration(
-                  color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+              // Material (not a decorated Container) so the tiles' ink splashes stay visible.
+              Material(
+                color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+                shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                  side: BorderSide(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
                 ),
+                clipBehavior: Clip.antiAlias,
                 child: ListTile(
                   leading: const Icon(Icons.auto_stories_rounded, color: AppColors.primaryOrange),
                   title: const Text('Replay App Onboarding Tour', style: TextStyle(fontWeight: FontWeight.w600)),
@@ -524,7 +546,8 @@ class SettingsScreen extends StatelessWidget {
                   onTap: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const AppOnboardingScreen()),
+                      // isReplay pops back here; otherwise finishing pushes a second MainNavigationScaffold.
+                      MaterialPageRoute(builder: (_) => const AppOnboardingScreen(isReplay: true)),
                     );
                   },
                 ),

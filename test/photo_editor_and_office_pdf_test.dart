@@ -200,7 +200,7 @@ void main() {
       );
 
       expect(tool.title, 'Photo Studio & Editor');
-      expect(tool.category, ToolCategory.filesText);
+      expect(tool.category, ToolCategory.imagePhoto);
       expect(tool.keywords.contains('remove bg'), isTrue);
       expect(tool.keywords.contains('blur'), isTrue);
       expect(tool.keywords.contains('filter'), isTrue);
@@ -213,7 +213,7 @@ void main() {
       );
 
       expect(tool.title, 'Office & Advanced PDF Suite');
-      expect(tool.category, ToolCategory.filesText);
+      expect(tool.category, ToolCategory.pdfDocuments);
       expect(tool.keywords.contains('word'), isTrue);
       expect(tool.keywords.contains('excel'), isTrue);
       expect(tool.keywords.contains('compare'), isTrue);

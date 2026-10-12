@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/registry/tool_registry.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../shared/widgets/toolbox_pro_logo.dart';
@@ -56,7 +57,7 @@ class _AppOnboardingScreenState extends State<AppOnboardingScreen> {
       badge: 'CUSTOMIZABLE WORKSPACE',
       title: 'Drag & Reorder Your Categories',
       subtitle:
-          'Want Kitchen or Finance at the top? Simply long-press and drag any category to customize your home layout, or tap the Edit Toolbox button.',
+          'Want Kitchen or Finance at the top? Simply long-press and drag any category to customize your home layout, or tap the Edit button next to Categories.',
     ),
     OnboardingSlide(
       icon: Icons.shield_rounded,
@@ -67,6 +68,12 @@ class _AppOnboardingScreenState extends State<AppOnboardingScreen> {
           'All PDF processing, OCR text extraction, document scans, and calculation history remain strictly on your device. Zero internet tracking.',
     ),
   ];
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
 
   void _finishOnboarding() {
     PreferencesService().triggerHaptic();
@@ -119,10 +126,12 @@ class _AppOnboardingScreenState extends State<AppOnboardingScreen> {
                 onPageChanged: (i) => setState(() => _currentPage = i),
                 itemBuilder: (context, index) {
                   final slide = _slides[index];
-                  return Padding(
+                  // Scrollable so small screens / 1.3x font scale don't overflow the slide.
+                  return Center(
+                    child: SingleChildScrollView(
                     padding: const EdgeInsets.symmetric(horizontal: 28),
                     child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         // Giant Feature Icon Container
                         Container(
@@ -131,20 +140,20 @@ class _AppOnboardingScreenState extends State<AppOnboardingScreen> {
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               colors: [
-                                slide.color.withOpacity(0.25),
-                                slide.color.withOpacity(0.08),
+                                slide.color.withValues(alpha: 0.25),
+                                slide.color.withValues(alpha: 0.08),
                               ],
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             ),
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: slide.color.withOpacity(0.4),
+                              color: slide.color.withValues(alpha: 0.4),
                               width: 2,
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: slide.color.withOpacity(0.2),
+                                color: slide.color.withValues(alpha: 0.2),
                                 blurRadius: 24,
                                 offset: const Offset(0, 8),
                               ),
@@ -158,11 +167,11 @@ class _AppOnboardingScreenState extends State<AppOnboardingScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: slide.color.withOpacity(0.12),
+                            color: slide.color.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
-                            slide.badge,
+                            index == 0 ? '${ToolRegistry.allTools.length} POWERFUL TOOLS' : slide.badge,
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
@@ -196,6 +205,7 @@ class _AppOnboardingScreenState extends State<AppOnboardingScreen> {
                           ),
                         ),
                       ],
+                    ),
                     ),
                   );
                 },

@@ -61,14 +61,14 @@ class SearchCalculatorService {
             .replaceAll('×', '*')
             .replaceAll('x', '*')
             .replaceAll('÷', '/')
-            .replaceAll('%', '*0.01');
+            // Trailing "%" means percent ("200+10%"); "%" between operands stays modulo ("10%3").
+            .replaceAll(RegExp(r'%(?!\s*[\d.(])'), '*0.01');
 
         final parser = GrammarParser();
         final exp = parser.parse(parsed);
-        final cm = ContextModel();
-        final eval = exp.evaluate(EvaluationType.REAL, cm);
+        final eval = RealEvaluator(ContextModel()).evaluate(exp);
 
-        if (eval is num && !eval.isNaN && !eval.isInfinite) {
+        if (!eval.isNaN && !eval.isInfinite) {
           final resStr = _formatter.format(eval);
           return QuickCalcResult(
             expression: query.trim(),

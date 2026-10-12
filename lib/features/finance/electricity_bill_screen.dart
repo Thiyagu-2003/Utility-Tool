@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/validation_utils.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
@@ -58,18 +59,18 @@ class _ElectricityBillScreenState extends State<ElectricityBillScreen> {
   ];
 
   Map<String, double> _calculateBill() {
-    final ratePerUnit = double.tryParse(_ratePerUnitController.text.trim()) ?? 0;
-    final fixedCharge = double.tryParse(_fixedChargesController.text.trim()) ?? 0;
-    final taxPercent = double.tryParse(_taxPercentController.text.trim()) ?? 0;
+    final ratePerUnit = ValidationUtils.safeParseDouble(_ratePerUnitController.text);
+    final fixedCharge = ValidationUtils.safeParseDouble(_fixedChargesController.text);
+    final taxPercent = ValidationUtils.safeParseDouble(_taxPercentController.text);
 
     double monthlyKwh = 0;
 
     if (_mode == CalculationMode.byUnits) {
-      monthlyKwh = double.tryParse(_unitsController.text.trim()) ?? 0;
+      monthlyKwh = ValidationUtils.safeParseDouble(_unitsController.text);
     } else {
-      final watts = double.tryParse(_applianceWattController.text.trim()) ?? 0;
-      final hours = double.tryParse(_hoursPerDayController.text.trim()) ?? 0;
-      final qty = double.tryParse(_quantityController.text.trim()) ?? 1;
+      final watts = ValidationUtils.safeParseDouble(_applianceWattController.text);
+      final hours = ValidationUtils.safeParseDouble(_hoursPerDayController.text);
+      final qty = ValidationUtils.safeParseDouble(_quantityController.text, defaultValue: 1);
 
       // kWh per day = (Watts * hours * qty) / 1000
       final dailyKwh = (watts * hours * qty) / 1000.0;

@@ -31,8 +31,15 @@ class _DurationConverterScreenState extends State<DurationConverterScreen> {
   DurationInputUnit _selectedUnit = DurationInputUnit.hours;
 
   Map<String, dynamic> _computeDuration() {
-    final double rawVal = double.tryParse(_inputController.text.trim()) ?? 0;
-    final totalSeconds = (rawVal * _selectedUnit.toSeconds).round();
+    final double parsed = double.tryParse(_inputController.text.trim()) ?? 0;
+    // Infinity/NaN would throw in round(); negatives would break ~/ and %.
+    final double rawVal = parsed.isFinite ? parsed : 0;
+    final isNegative = rawVal < 0;
+    // Capped (about 285 million years) so huge input can't overflow to Infinity.
+    final seconds0 = rawVal.abs() * _selectedUnit.toSeconds;
+    final tooLarge = !seconds0.isFinite || seconds0 > 9e15;
+    final totalSeconds = (tooLarge ? 9e15 : seconds0).round();
+    final sign = isNegative ? -1 : 1;
 
     final days = totalSeconds ~/ 86400;
     final remainingAfterDays = totalSeconds % 86400;
@@ -53,11 +60,12 @@ class _DurationConverterScreenState extends State<DurationConverterScreen> {
     final totalMinutes = totalSeconds / 60.0;
 
     return {
-      'formatted': parts.join(', '),
-      'totalDays': totalDays,
-      'totalHours': totalHours,
-      'totalMinutes': totalMinutes,
-      'totalSeconds': totalSeconds,
+      'formatted': '${isNegative ? '-' : ''}${parts.join(', ')}',
+      'tooLarge': tooLarge,
+      'totalDays': totalDays * sign,
+      'totalHours': totalHours * sign,
+      'totalMinutes': totalMinutes * sign,
+      'totalSeconds': totalSeconds * sign,
     };
   }
 
@@ -88,7 +96,7 @@ class _DurationConverterScreenState extends State<DurationConverterScreen> {
           ResultCard(
             title: 'Decomposed Duration',
             primaryResult: data['formatted'],
-            subtitle: 'Equivalent duration breakdown',
+            subtitle: data['tooLarge'] == true ? 'Value too large, capped at the maximum shown' : 'Equivalent duration breakdown',
             accentColor: AppColors.catTime,
             breakdowns: [
               BreakdownItem(

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/validation_utils.dart';
 import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
@@ -23,6 +24,26 @@ enum HomeTravelTab {
   final IconData icon;
   const HomeTravelTab(this.label, this.icon);
 }
+
+/// Square feet in one of each land unit. Bigha differs by state, so the
+/// regional values are listed separately (figures from the Bigha article on
+/// Wikipedia); the generic 27,000 sq ft entry is kept as the default.
+const Map<String, double> landUnitSqFt = {
+  'Acres': 43560,
+  'Cents': 435.6,
+  'Hectares': 107639,
+  'Square Feet': 1,
+  'Square Meters': 10.7639,
+  'Guntha': 1089,
+  'Ground': 2400,
+  'Bigha (varies by state, 27,000)': 27000,
+  'Bigha: UP east / Bihar / Rajasthan pucca (27,225)': 27225,
+  'Bigha: West Bengal / Assam (14,400)': 14400,
+  'Bigha: Rajasthan kaccha (17,424)': 17424,
+  'Bigha: Himachal Pradesh (8,712)': 8712,
+};
+
+double landToSqFt(double value, String unit) => value * (landUnitSqFt[unit] ?? 1);
 
 class TripExpenseItem {
   final String title;
@@ -156,10 +177,10 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
 
   // 1. Fuel Trip Cost
   Map<String, dynamic> _calcFuel() {
-    final dist = double.tryParse(_fuelDistCtrl.text) ?? 350;
-    final mileage = double.tryParse(_fuelMileageCtrl.text) ?? 15;
-    final price = double.tryParse(_fuelPriceCtrl.text) ?? 1.45;
-    final pax = int.tryParse(_fuelPaxCtrl.text) ?? 1;
+    final dist = ValidationUtils.safeParseDouble(_fuelDistCtrl.text);
+    final mileage = ValidationUtils.safeParseDouble(_fuelMileageCtrl.text);
+    final price = ValidationUtils.safeParseDouble(_fuelPriceCtrl.text);
+    final pax = ValidationUtils.safeParseInt(_fuelPaxCtrl.text);
 
     if (dist <= 0 || mileage <= 0 || price <= 0 || pax <= 0) {
       return {'total': '\$0.00', 'perPerson': '\$0.00', 'fuelNeeded': '0 L'};
@@ -172,17 +193,17 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
     return {
       'total': '\$${totalCost.toStringAsFixed(2)}',
       'perPerson': '\$${costPerPerson.toStringAsFixed(2)} per person',
-      'fuelNeeded': '${fuelNeeded.toStringAsFixed(1)} Liters / Gallons',
+      'fuelNeeded': '${fuelNeeded.toStringAsFixed(1)} (L or gal)',
     };
   }
 
   // 2. EV Charging
   Map<String, dynamic> _calcEv() {
-    final capacity = double.tryParse(_evCapacityCtrl.text) ?? 60;
-    final curPct = double.tryParse(_evCurrentPctCtrl.text) ?? 20;
-    final targetPct = double.tryParse(_evTargetPctCtrl.text) ?? 80;
-    final rate = double.tryParse(_evRateCtrl.text) ?? 0.18;
-    final powerKw = double.tryParse(_evPowerCtrl.text) ?? 7.4;
+    final capacity = ValidationUtils.safeParseDouble(_evCapacityCtrl.text);
+    final curPct = ValidationUtils.safeParseDouble(_evCurrentPctCtrl.text).clamp(0.0, 100.0);
+    final targetPct = ValidationUtils.safeParseDouble(_evTargetPctCtrl.text).clamp(0.0, 100.0);
+    final rate = ValidationUtils.safeParseDouble(_evRateCtrl.text);
+    final powerKw = ValidationUtils.safeParseDouble(_evPowerCtrl.text);
 
     if (targetPct <= curPct || capacity <= 0 || powerKw <= 0) {
       return {'cost': '\$0.00', 'time': '0h 0m', 'energy': '0 kWh'};
@@ -191,8 +212,9 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
     final energyNeededKwh = ((targetPct - curPct) / 100.0) * capacity / 0.90; // 90% charging efficiency
     final cost = energyNeededKwh * rate;
     final hoursNeeded = energyNeededKwh / powerKw;
-    final hh = hoursNeeded.floor();
-    final mm = ((hoursNeeded - hh) * 60).round();
+    final totalMinutes = (hoursNeeded * 60).round(); // round once so we never show "1h 60m"
+    final hh = totalMinutes ~/ 60;
+    final mm = totalMinutes % 60;
 
     return {
       'cost': '\$${cost.toStringAsFixed(2)}',
@@ -203,12 +225,12 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
 
   // 3. Paint Calculator
   Map<String, dynamic> _calcPaint() {
-    final l = double.tryParse(_paintLengthCtrl.text) ?? 14;
-    final w = double.tryParse(_paintWidthCtrl.text) ?? 12;
-    final h = double.tryParse(_paintHeightCtrl.text) ?? 9;
-    final doors = int.tryParse(_paintDoorsCtrl.text) ?? 2;
-    final windows = int.tryParse(_paintWindowsCtrl.text) ?? 2;
-    final coats = int.tryParse(_paintCoatsCtrl.text) ?? 2;
+    final l = ValidationUtils.safeParseDouble(_paintLengthCtrl.text);
+    final w = ValidationUtils.safeParseDouble(_paintWidthCtrl.text);
+    final h = ValidationUtils.safeParseDouble(_paintHeightCtrl.text);
+    final doors = ValidationUtils.safeParseInt(_paintDoorsCtrl.text);
+    final windows = ValidationUtils.safeParseInt(_paintWindowsCtrl.text);
+    final coats = ValidationUtils.safeParseInt(_paintCoatsCtrl.text);
 
     final grossArea = 2 * (l + w) * h;
     final deductions = (doors * 21.0) + (windows * 12.0); // standard door 21 sq.ft, window 12 sq.ft
@@ -228,12 +250,12 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
 
   // 4. Flooring & Tile
   Map<String, dynamic> _calcFlooring() {
-    final roomL = double.tryParse(_floorRoomLCtrl.text) ?? 5; // meters
-    final roomW = double.tryParse(_floorRoomWCtrl.text) ?? 4;
-    final tileL = (double.tryParse(_floorTileLCtrl.text) ?? 60) / 100.0; // cm to m
-    final tileW = (double.tryParse(_floorTileWCtrl.text) ?? 60) / 100.0;
-    final wastage = (double.tryParse(_floorWastageCtrl.text) ?? 10) / 100.0;
-    final perBox = int.tryParse(_floorPerBoxCtrl.text) ?? 4;
+    final roomL = ValidationUtils.safeParseDouble(_floorRoomLCtrl.text); // meters
+    final roomW = ValidationUtils.safeParseDouble(_floorRoomWCtrl.text);
+    final tileL = (ValidationUtils.safeParseDouble(_floorTileLCtrl.text)) / 100.0; // cm to m
+    final tileW = (ValidationUtils.safeParseDouble(_floorTileWCtrl.text)) / 100.0;
+    final wastage = (ValidationUtils.safeParseDouble(_floorWastageCtrl.text)) / 100.0;
+    final perBox = ValidationUtils.safeParseInt(_floorPerBoxCtrl.text);
 
     final roomArea = roomL * roomW;
     final tileArea = tileL * tileW;
@@ -254,17 +276,17 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
 
   // 5. Concrete Estimator
   Map<String, dynamic> _calcConcrete() {
-    final l = double.tryParse(_concLCtrl.text) ?? 6;
-    final w = double.tryParse(_concWCtrl.text) ?? 4;
-    final d = double.tryParse(_concDCtrl.text) ?? 0.15;
+    final l = ValidationUtils.safeParseDouble(_concLCtrl.text);
+    final w = ValidationUtils.safeParseDouble(_concWCtrl.text);
+    final d = ValidationUtils.safeParseDouble(_concDCtrl.text);
 
     final wetVol = l * w * d;
     final dryVol = wetVol * 1.54; // dry shrinkage factor
 
-    int cRatio = 1, sRatio = 2, aRatio = 4;
+    double cRatio = 1, sRatio = 2, aRatio = 4;
     if (_concMix.contains('1:1.5:3')) {
       cRatio = 1;
-      sRatio = 2; // ~1.5
+      sRatio = 1.5;
       aRatio = 3;
     } else if (_concMix.contains('1:3:6')) {
       cRatio = 1;
@@ -289,60 +311,31 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
 
   // 6. Land Area Converter
   Map<String, String> _calcLand() {
-    final val = double.tryParse(_landInputCtrl.text) ?? 1;
-
-    // Base unit: Square Feet
-    double sqFt = 0;
-    switch (_landFromUnit) {
-      case 'Acres':
-        sqFt = val * 43560;
-        break;
-      case 'Cents':
-        sqFt = val * 435.6;
-        break;
-      case 'Hectares':
-        sqFt = val * 107639;
-        break;
-      case 'Square Feet':
-        sqFt = val;
-        break;
-      case 'Square Meters':
-        sqFt = val * 10.7639;
-        break;
-      case 'Guntha':
-        sqFt = val * 1089;
-        break;
-      case 'Ground':
-        sqFt = val * 2400;
-        break;
-      case 'Bigha (Standard)':
-        sqFt = val * 27000;
-        break;
+    final sqFt = landToSqFt(ValidationUtils.safeParseDouble(_landInputCtrl.text), _landFromUnit);
+    final out = <String, String>{};
+    for (final entry in landUnitSqFt.entries) {
+      final v = sqFt / entry.value;
+      out[entry.key] = switch (entry.key) {
+        'Acres' || 'Hectares' => v.toStringAsFixed(4),
+        'Square Feet' => v.toStringAsFixed(1),
+        'Cents' || 'Square Meters' || 'Guntha' || 'Ground' => v.toStringAsFixed(2),
+        _ => v.toStringAsFixed(3),
+      };
     }
-
-    return {
-      'Acres': (sqFt / 43560).toStringAsFixed(4),
-      'Cents': (sqFt / 435.6).toStringAsFixed(2),
-      'Hectares': (sqFt / 107639).toStringAsFixed(4),
-      'Square Feet': sqFt.toStringAsFixed(1),
-      'Square Meters': (sqFt / 10.7639).toStringAsFixed(2),
-      'Guntha': (sqFt / 1089).toStringAsFixed(2),
-      'Ground': (sqFt / 2400).toStringAsFixed(2),
-      'Bigha': (sqFt / 27000).toStringAsFixed(3),
-    };
+    return out;
   }
 
   // 7. Water Tank Capacity
   Map<String, dynamic> _calcTank() {
     double volM3 = 0;
     if (_isRectTank) {
-      final l = double.tryParse(_tankLCtrl.text) ?? 2.5;
-      final w = double.tryParse(_tankWCtrl.text) ?? 2.0;
-      final h = double.tryParse(_tankHCtrl.text) ?? 1.5;
+      final l = ValidationUtils.safeParseDouble(_tankLCtrl.text);
+      final w = ValidationUtils.safeParseDouble(_tankWCtrl.text);
+      final h = ValidationUtils.safeParseDouble(_tankHCtrl.text);
       volM3 = l * w * h;
     } else {
-      final diam = double.tryParse(_tankDiamCtrl.text) ?? 1.8;
-      final h = double.tryParse(_tankHCtrl.text) ?? 1.5;
+      final diam = ValidationUtils.safeParseDouble(_tankDiamCtrl.text);
+      final h = ValidationUtils.safeParseDouble(_tankHCtrl.text);
       final radius = diam / 2.0;
       volM3 = math.pi * radius * radius * h;
     }
@@ -359,9 +352,9 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
 
   // 8. Appliance Consumption
   Map<String, dynamic> _calcAppliance() {
-    final watts = double.tryParse(_appPowerCtrl.text) ?? 1500;
-    final hours = double.tryParse(_appHoursCtrl.text) ?? 6;
-    final rate = double.tryParse(_appRateCtrl.text) ?? 0.15;
+    final watts = ValidationUtils.safeParseDouble(_appPowerCtrl.text);
+    final hours = ValidationUtils.safeParseDouble(_appHoursCtrl.text);
+    final rate = ValidationUtils.safeParseDouble(_appRateCtrl.text);
 
     final dailyKwh = (watts * hours) / 1000.0;
     final monthlyKwh = dailyKwh * 30;
@@ -431,10 +424,34 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
     };
   }
 
+  void _addMember() {
+    final name = _newMemberCtrl.text.trim();
+    if (name.isEmpty || _tripMembers.any((m) => m.toLowerCase() == name.toLowerCase())) return;
+    setState(() {
+      _tripMembers.add(name);
+      _newMemberCtrl.clear();
+    });
+  }
+
+  void _removeMember(String name) {
+    if (_tripExpenses.any((e) => e.paidBy == name)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Delete $name\'s expenses before removing them.')),
+      );
+      return;
+    }
+    setState(() {
+      _tripMembers.remove(name);
+      if (!_tripMembers.contains(_newExpPayer)) {
+        _newExpPayer = _tripMembers.isEmpty ? '' : _tripMembers.first;
+      }
+    });
+  }
+
   // 10. Download Time
   Map<String, dynamic> _calcDownloadTime() {
-    final sizeVal = double.tryParse(_dlSizeCtrl.text) ?? 45;
-    final speedVal = double.tryParse(_dlSpeedCtrl.text) ?? 100;
+    final sizeVal = ValidationUtils.safeParseDouble(_dlSizeCtrl.text);
+    final speedVal = ValidationUtils.safeParseDouble(_dlSpeedCtrl.text);
 
     if (sizeVal <= 0 || speedVal <= 0) {
       return {'time': '0s', 'desc': 'Invalid inputs'};
@@ -450,7 +467,11 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
     if (_dlSpeedUnit == 'MBps' || _dlSpeedUnit == 'MB/s') speedMbps = speedVal * 8;
     if (_dlSpeedUnit == 'Gbps') speedMbps = speedVal * 1000;
 
-    final totalSeconds = (sizeMegabits / speedMbps).round();
+    final seconds = sizeMegabits / speedMbps;
+    if (!seconds.isFinite || seconds > 3.15e10) {
+      return {'time': 'Over 1,000 years', 'desc': 'Check the file size and speed values'};
+    }
+    final totalSeconds = seconds.round();
     final dd = totalSeconds ~/ 86400;
     final hh = (totalSeconds % 86400) ~/ 3600;
     final mm = (totalSeconds % 3600) ~/ 60;
@@ -523,15 +544,15 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
         const SizedBox(height: 16),
         Row(
           children: [
-            Expanded(child: ModernTextField(label: 'Trip Distance (km/mi)', controller: _fuelDistCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Trip Distance (km/mi)', controller: _fuelDistCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 10),
-            Expanded(child: ModernTextField(label: 'Mileage (km/L or MPG)', controller: _fuelMileageCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Mileage (km/L or MPG)', controller: _fuelMileageCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
           ],
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: ModernTextField(label: 'Fuel Price / Unit', controller: _fuelPriceCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Fuel Price / Unit', controller: _fuelPriceCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 10),
             Expanded(child: ModernTextField(label: 'Passengers Count', controller: _fuelPaxCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
           ],
@@ -554,19 +575,19 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
         const SizedBox(height: 16),
         Row(
           children: [
-            Expanded(child: ModernTextField(label: 'Battery Size (kWh)', controller: _evCapacityCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Battery Size (kWh)', controller: _evCapacityCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 10),
-            Expanded(child: ModernTextField(label: 'Electricity Rate (\$/kWh)', controller: _evRateCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Electricity Rate (\$/kWh)', controller: _evRateCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
           ],
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: ModernTextField(label: 'Start Charge %', controller: _evCurrentPctCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Start Charge %', controller: _evCurrentPctCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 8),
-            Expanded(child: ModernTextField(label: 'Target Charge %', controller: _evTargetPctCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Target Charge %', controller: _evTargetPctCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 8),
-            Expanded(child: ModernTextField(label: 'Charger (kW)', controller: _evPowerCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Charger (kW)', controller: _evPowerCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
           ],
         ),
       ],
@@ -587,11 +608,11 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
         const SizedBox(height: 16),
         Row(
           children: [
-            Expanded(child: ModernTextField(label: 'Length (ft)', controller: _paintLengthCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Length (ft)', controller: _paintLengthCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 8),
-            Expanded(child: ModernTextField(label: 'Width (ft)', controller: _paintWidthCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Width (ft)', controller: _paintWidthCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 8),
-            Expanded(child: ModernTextField(label: 'Height (ft)', controller: _paintHeightCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Height (ft)', controller: _paintHeightCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
           ],
         ),
         const SizedBox(height: 12),
@@ -622,21 +643,23 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
         const SizedBox(height: 16),
         Row(
           children: [
-            Expanded(child: ModernTextField(label: 'Room Length (m)', controller: _floorRoomLCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Room Length (m)', controller: _floorRoomLCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 10),
-            Expanded(child: ModernTextField(label: 'Room Width (m)', controller: _floorRoomWCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Room Width (m)', controller: _floorRoomWCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
           ],
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: ModernTextField(label: 'Tile Length (cm)', controller: _floorTileLCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Tile Length (cm)', controller: _floorTileLCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 8),
-            Expanded(child: ModernTextField(label: 'Tile Width (cm)', controller: _floorTileWCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Tile Width (cm)', controller: _floorTileWCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 8),
-            Expanded(child: ModernTextField(label: 'Wastage %', controller: _floorWastageCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Wastage %', controller: _floorWastageCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
           ],
         ),
+        const SizedBox(height: 12),
+        ModernTextField(label: 'Tiles per Box', controller: _floorPerBoxCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {})),
       ],
     );
   }
@@ -655,15 +678,16 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
         const SizedBox(height: 16),
         Row(
           children: [
-            Expanded(child: ModernTextField(label: 'Length (m)', controller: _concLCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Length (m)', controller: _concLCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 8),
-            Expanded(child: ModernTextField(label: 'Width (m)', controller: _concWCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Width (m)', controller: _concWCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 8),
-            Expanded(child: ModernTextField(label: 'Thickness (m)', controller: _concDCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Thickness (m)', controller: _concDCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
           ],
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
+          isExpanded: true,
           initialValue: _concMix,
           decoration: InputDecoration(labelText: 'Mix Ratio', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
           items: ['1:2:4 (M15 General)', '1:1.5:3 (M20 Structural / Slab)', '1:3:6 (M10 Foundation Footing)']
@@ -688,7 +712,7 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
               child: ModernTextField(
                 label: 'Land Quantity',
                 controller: _landInputCtrl,
-                keyboardType: TextInputType.number,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 onChanged: (_) => setState(() {}),
               ),
             ),
@@ -696,10 +720,11 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
             Expanded(
               flex: 2,
               child: DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: _landFromUnit,
                 decoration: InputDecoration(labelText: 'Unit', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
-                items: ['Acres', 'Cents', 'Hectares', 'Square Feet', 'Square Meters', 'Guntha', 'Ground', 'Bigha (Standard)']
-                    .map((u) => DropdownMenuItem(value: u, child: Text(u, style: const TextStyle(fontSize: 13))))
+                items: landUnitSqFt.keys
+                    .map((u) => DropdownMenuItem(value: u, child: Text(u, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13))))
                     .toList(),
                 onChanged: (v) => setState(() => _landFromUnit = v ?? _landFromUnit),
               ),
@@ -708,6 +733,8 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
         ),
         const SizedBox(height: 16),
         const Text('Converted Land Units', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        const Text('The size of a bigha varies by state, so pick the regional value that matches your land records.', style: TextStyle(fontSize: 12, color: Colors.grey)),
         const SizedBox(height: 8),
         ...res.entries.map((e) {
           return Container(
@@ -720,7 +747,8 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(e.key, style: const TextStyle(fontWeight: FontWeight.w600)),
+                Expanded(child: Text(e.key, style: const TextStyle(fontWeight: FontWeight.w600))),
+                const SizedBox(width: 8),
                 Text(e.value, style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.catHomeTravel)),
               ],
             ),
@@ -742,31 +770,34 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
           accentColor: AppColors.catHomeTravel,
         ),
         const SizedBox(height: 16),
-        SegmentedButton<bool>(
-          segments: const [
-            ButtonSegment(value: true, label: Text('Rectangular Tank')),
-            ButtonSegment(value: false, label: Text('Cylindrical Tank')),
-          ],
-          selected: {_isRectTank},
-          onSelectionChanged: (set) => setState(() => _isRectTank = set.first),
+        SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(value: true, label: Text('Rectangular')),
+              ButtonSegment(value: false, label: Text('Cylindrical')),
+            ],
+            selected: {_isRectTank},
+            onSelectionChanged: (set) => setState(() => _isRectTank = set.first),
+          ),
         ),
         const SizedBox(height: 16),
         if (_isRectTank) ...[
           Row(
             children: [
-              Expanded(child: ModernTextField(label: 'Length (m)', controller: _tankLCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+              Expanded(child: ModernTextField(label: 'Length (m)', controller: _tankLCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
               const SizedBox(width: 8),
-              Expanded(child: ModernTextField(label: 'Width (m)', controller: _tankWCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+              Expanded(child: ModernTextField(label: 'Width (m)', controller: _tankWCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
               const SizedBox(width: 8),
-              Expanded(child: ModernTextField(label: 'Height (m)', controller: _tankHCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+              Expanded(child: ModernTextField(label: 'Height (m)', controller: _tankHCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             ],
           ),
         ] else ...[
           Row(
             children: [
-              Expanded(child: ModernTextField(label: 'Diameter (m)', controller: _tankDiamCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+              Expanded(child: ModernTextField(label: 'Diameter (m)', controller: _tankDiamCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
               const SizedBox(width: 10),
-              Expanded(child: ModernTextField(label: 'Height (m)', controller: _tankHCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+              Expanded(child: ModernTextField(label: 'Height (m)', controller: _tankHCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             ],
           ),
         ],
@@ -788,16 +819,16 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
         const SizedBox(height: 16),
         Row(
           children: [
-            Expanded(child: ModernTextField(label: 'Power Rating (Watts)', controller: _appPowerCtrl, keyboardType: TextInputType.number, hintText: 'e.g. 1500 (AC/Heater)', onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Power Rating (Watts)', controller: _appPowerCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), hintText: 'e.g. 1500 (AC/Heater)', onChanged: (_) => setState(() {}))),
             const SizedBox(width: 10),
-            Expanded(child: ModernTextField(label: 'Hours Used / Day', controller: _appHoursCtrl, keyboardType: TextInputType.number, hintText: 'e.g. 8', onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Hours Used / Day', controller: _appHoursCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), hintText: 'e.g. 8', onChanged: (_) => setState(() {}))),
           ],
         ),
         const SizedBox(height: 12),
         ModernTextField(
           label: 'Electricity Tariff (\$/kWh)',
           controller: _appRateCtrl,
-          keyboardType: TextInputType.number,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
           hintText: 'e.g. 0.15',
           onChanged: (_) => setState(() {}),
         ),
@@ -836,10 +867,65 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
                   children: [
                     const Icon(Icons.arrow_forward_rounded, size: 16, color: AppColors.catHomeTravel),
                     const SizedBox(width: 8),
-                    Text(s, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    Expanded(child: Text(s, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
                   ],
                 ),
               )),
+        const SizedBox(height: 16),
+        const Text('Travelers', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            for (final m in _tripMembers)
+              InputChip(
+                label: Text(m),
+                onDeleted: () => _removeMember(m),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(child: ModernTextField(label: 'Add traveler', controller: _newMemberCtrl, hintText: 'Name')),
+            const SizedBox(width: 8),
+            IconButton.filledTonal(
+              tooltip: 'Add traveler',
+              icon: const Icon(Icons.person_add_alt_1_rounded),
+              onPressed: _addMember,
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        const Text('Expenses', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        if (_tripExpenses.isEmpty) const Text('No expenses yet.', style: TextStyle(color: Colors.grey)),
+        for (var i = 0; i < _tripExpenses.length; i++)
+          Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.only(left: 12),
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${_tripExpenses[i].title}  (paid by ${_tripExpenses[i].paidBy})',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+                Text('\$${_tripExpenses[i].amount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                IconButton(
+                  tooltip: 'Delete expense',
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  onPressed: () => setState(() => _tripExpenses.removeAt(i)),
+                ),
+              ],
+            ),
+          ),
         const SizedBox(height: 16),
         Row(
           children: [
@@ -849,7 +935,11 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: ModernTextField(label: 'Amount (\$)', controller: _newExpAmtCtrl, keyboardType: TextInputType.number),
+              child: ModernTextField(
+                label: 'Amount (\$)',
+                controller: _newExpAmtCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
             ),
           ],
         ),
@@ -858,9 +948,11 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
           children: [
             Expanded(
               child: DropdownButtonFormField<String>(
-                initialValue: _newExpPayer,
+                key: ValueKey('payer-$_newExpPayer-${_tripMembers.length}'),
+                isExpanded: true,
+                initialValue: _tripMembers.contains(_newExpPayer) ? _newExpPayer : null,
                 decoration: InputDecoration(labelText: 'Paid By', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
-                items: _tripMembers.map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+                items: _tripMembers.map((m) => DropdownMenuItem(value: m, child: Text(m, overflow: TextOverflow.ellipsis))).toList(),
                 onChanged: (v) => setState(() => _newExpPayer = v ?? _newExpPayer),
               ),
             ),
@@ -875,8 +967,8 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
               ),
               onPressed: () {
                 final title = _newExpTitleCtrl.text.trim();
-                final amt = double.tryParse(_newExpAmtCtrl.text) ?? 0;
-                if (title.isNotEmpty && amt > 0) {
+                final amt = ValidationUtils.safeParseDouble(_newExpAmtCtrl.text);
+                if (title.isNotEmpty && amt > 0 && _tripMembers.contains(_newExpPayer)) {
                   setState(() {
                     _tripExpenses.add(TripExpenseItem(title: title, amount: amt, paidBy: _newExpPayer));
                     _newExpTitleCtrl.clear();
@@ -907,11 +999,12 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
           children: [
             Expanded(
               flex: 2,
-              child: ModernTextField(label: 'File Size', controller: _dlSizeCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {})),
+              child: ModernTextField(label: 'File Size', controller: _dlSizeCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {})),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: _dlSizeUnit,
                 decoration: InputDecoration(labelText: 'Unit', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                 items: ['MB', 'GB', 'TB'].map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
@@ -925,11 +1018,12 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
           children: [
             Expanded(
               flex: 2,
-              child: ModernTextField(label: 'Internet Speed', controller: _dlSpeedCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {})),
+              child: ModernTextField(label: 'Internet Speed', controller: _dlSpeedCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {})),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: _dlSpeedUnit,
                 decoration: InputDecoration(labelText: 'Unit', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                 items: ['Mbps', 'MB/s', 'Gbps'].map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),

@@ -68,6 +68,19 @@ class ContactInfo {
 }
 
 class VCardUtils {
+  /// Escapes a vCard TEXT value per RFC 2426 section 4: backslash, comma,
+  /// semicolon and newlines.
+  static String escapeVCardText(String value) => value
+      .replaceAll(r'\', r'\\')
+      .replaceAll(',', r'\,')
+      .replaceAll(';', r'\;')
+      .replaceAll(RegExp(r'\r\n|\r|\n'), r'\n');
+
+  /// Escapes a MeCard field value: backslash, semicolon, comma, colon and quote.
+  static String escapeMeCardText(String value) => value
+      .replaceAllMapped(RegExp(r'[\\;,:"]'), (m) => '\\${m[0]}')
+      .replaceAll(RegExp(r'\r\n|\r|\n'), ' ');
+
   /// Generates a RFC 2426 compliant vCard 3.0 formatted string.
   static String generateVCard(ContactInfo contact) {
     final buffer = StringBuffer();
@@ -76,17 +89,17 @@ class VCardUtils {
 
     final lName = contact.lastName.trim();
     final fName = contact.firstName.trim();
-    buffer.writeln('N:$lName;$fName;;;');
+    buffer.writeln('N:${escapeVCardText(lName)};${escapeVCardText(fName)};;;');
 
     final fn = contact.displayName;
-    buffer.writeln('FN:$fn');
+    buffer.writeln('FN:${escapeVCardText(fn)}');
 
     if (contact.organization.trim().isNotEmpty) {
-      buffer.writeln('ORG:${contact.organization.trim()}');
+      buffer.writeln('ORG:${escapeVCardText(contact.organization.trim())}');
     }
 
     if (contact.jobTitle.trim().isNotEmpty) {
-      buffer.writeln('TITLE:${contact.jobTitle.trim()}');
+      buffer.writeln('TITLE:${escapeVCardText(contact.jobTitle.trim())}');
     }
 
     if (contact.phoneMobile.trim().isNotEmpty) {
@@ -102,8 +115,7 @@ class VCardUtils {
     }
 
     if (contact.address.trim().isNotEmpty) {
-      // Escape commas and semicolons in address
-      final safeAddr = contact.address.trim().replaceAll(';', r'\;').replaceAll(',', r'\,');
+      final safeAddr = escapeVCardText(contact.address.trim());
       buffer.writeln('ADR;TYPE=HOME:;;$safeAddr;;;;');
     }
 
@@ -116,7 +128,7 @@ class VCardUtils {
     }
 
     if (contact.note.trim().isNotEmpty) {
-      buffer.writeln('NOTE:${contact.note.trim()}');
+      buffer.writeln('NOTE:${escapeVCardText(contact.note.trim())}');
     }
 
     buffer.write('END:VCARD');
@@ -127,15 +139,15 @@ class VCardUtils {
   static String generateMeCard(ContactInfo contact) {
     final buffer = StringBuffer('MECARD:');
 
-    final name = [contact.lastName.trim(), contact.firstName.trim()].where((s) => s.isNotEmpty).join(',');
+    final name = [contact.lastName.trim(), contact.firstName.trim()].where((s) => s.isNotEmpty).map(escapeMeCardText).join(',');
     if (name.isNotEmpty) buffer.write('N:$name;');
 
-    if (contact.organization.trim().isNotEmpty) buffer.write('ORG:${contact.organization.trim()};');
-    if (contact.phoneMobile.trim().isNotEmpty) buffer.write('TEL:${contact.phoneMobile.trim()};');
-    if (contact.email.trim().isNotEmpty) buffer.write('EMAIL:${contact.email.trim()};');
-    if (contact.address.trim().isNotEmpty) buffer.write('ADR:${contact.address.trim()};');
-    if (contact.website.trim().isNotEmpty) buffer.write('URL:${contact.website.trim()};');
-    if (contact.note.trim().isNotEmpty) buffer.write('NOTE:${contact.note.trim()};');
+    if (contact.organization.trim().isNotEmpty) buffer.write('ORG:${escapeMeCardText(contact.organization.trim())};');
+    if (contact.phoneMobile.trim().isNotEmpty) buffer.write('TEL:${escapeMeCardText(contact.phoneMobile.trim())};');
+    if (contact.email.trim().isNotEmpty) buffer.write('EMAIL:${escapeMeCardText(contact.email.trim())};');
+    if (contact.address.trim().isNotEmpty) buffer.write('ADR:${escapeMeCardText(contact.address.trim())};');
+    if (contact.website.trim().isNotEmpty) buffer.write('URL:${escapeMeCardText(contact.website.trim())};');
+    if (contact.note.trim().isNotEmpty) buffer.write('NOTE:${escapeMeCardText(contact.note.trim())};');
 
     buffer.write(';');
     return buffer.toString();

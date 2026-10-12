@@ -1,15 +1,19 @@
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/services.dart';
-import 'package:printing/printing.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:pdf/pdf.dart' show PdfPageFormat;
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/share_utils.dart';
 import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 import 'office_document_service.dart';
+import 'scan_pdf_service.dart';
 
 enum OfficePdfTab {
   wordToPdf('Word to PDF', Icons.description_rounded),
@@ -83,14 +87,8 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
   // 7. Searchable OCR
   Uint8List? _ocrImageBytes;
   String _ocrImageName = '';
-  final TextEditingController _ocrTextController = TextEditingController(
-    text: 'OMNI UTILITY TOOLS\n'
-        'Invoice #INV-2026-884\n'
-        'Date: October 10, 2026\n'
-        'Billed to: Enterprise Client Corp\n'
-        'Amount Due: \$4,850.00 USD\n\n'
-        'This scanned document now contains an embedded searchable text layer.',
-  );
+  // Fallback only: used when on-device recognition is unavailable or finds nothing.
+  final TextEditingController _ocrTextController = TextEditingController();
   Uint8List? _generatedSearchablePdfBytes;
 
   // 8. Metadata
@@ -116,6 +114,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
   Uint8List? _bookmarksPdfBytes;
   String _bookmarksPdfName = '';
   List<PdfBookmarkItem> _loadedBookmarks = [];
+  int _bookmarksPageCount = 0;
   final TextEditingController _newBmTitleCtrl = TextEditingController();
   final TextEditingController _newBmPageCtrl = TextEditingController(text: '1');
   Uint8List? _updatedBookmarksPdfBytes;
@@ -132,7 +131,37 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
   String _comparePdfBName = '';
   PdfComparisonResult? _comparisonResult;
 
+  @override
+  void dispose() {
+    for (final c in [
+      _docxTitleController,
+      _excelDataController,
+      _excelTitleController,
+      _pptxTitleController,
+      _ocrTextController,
+      _metaTitleCtrl,
+      _metaAuthorCtrl,
+      _metaSubjectCtrl,
+      _metaKeywordsCtrl,
+      _metaCreatorCtrl,
+      _metaProducerCtrl,
+      _extractPagesController,
+      _newBmTitleCtrl,
+      _newBmPageCtrl,
+    ]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  /// Drops a generated result whose inputs the user just edited, so Share can't hand out stale bytes.
+  void _staleResult(VoidCallback clear) => setState(clear);
+
+  /// File name without its extension.
+  String _stem(String name) => name.replaceFirst(RegExp(r'\.[A-Za-z0-9]{1,5}$'), '');
+
   void _showToast(String message, {bool isError = false}) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -144,20 +173,24 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
 
   Future<void> _shareFile(Uint8List bytes, String filename) async {
     PreferencesService().triggerHaptic();
-    await Printing.sharePdf(bytes: bytes, filename: filename);
+    try {
+      await shareFileBytes(bytes, filename);
+    } catch (e) {
+      _showToast('Could not share $filename: $e', isError: true);
+    }
   }
 
   // ================= 1. WORD TO PDF =================
   Future<void> _pickWordFile() async {
     try {
-      final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['docx']);
-      if (files.isNotEmpty) {
-        final file = files.first;
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['docx']);
+      if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         setState(() {
           _docxSourceBytes = bytes;
           _docxFileName = file.name;
-          _docxTitleController.text = file.name.replaceAll('.docx', '');
+          _docxTitleController.text = _stem(file.name);
           _generatedDocxPdfBytes = null;
         });
       }
@@ -175,10 +208,8 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
     PreferencesService().triggerHaptic();
 
     try {
-      final pdfBytes = await OfficeDocumentService.wordToPdf(
-        docxBytes: _docxSourceBytes!,
-        documentTitle: _docxTitleController.text.trim(),
-      );
+      final pdfBytes = await OfficeDocumentService.wordToPdfInBackground(_docxSourceBytes!, _docxTitleController.text.trim());
+      if (!mounted) return;
       setState(() => _generatedDocxPdfBytes = pdfBytes);
       _showToast('Word converted to PDF successfully!');
     } catch (e) {
@@ -194,18 +225,14 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
     PreferencesService().triggerHaptic();
 
     try {
-      final rawText = _excelDataController.text.trim();
-      final lines = rawText.split('\n');
-      final rows = <List<dynamic>>[];
-      for (final line in lines) {
-        if (line.trim().isEmpty) continue;
-        rows.add(line.split(',').map((c) => c.trim()).toList());
+      final rows = OfficeDocumentService.parseCsv(_excelDataController.text);
+      if (rows.isEmpty) {
+        _showToast('Enter some data first (one row per line, cells separated by commas or tabs).', isError: true);
+        return;
       }
 
-      final pdfBytes = await OfficeDocumentService.excelToPdf(
-        rows: rows,
-        sheetTitle: _excelTitleController.text.trim(),
-      );
+      final pdfBytes = await OfficeDocumentService.excelToPdfInBackground(rows, _excelTitleController.text.trim());
+      if (!mounted) return;
       setState(() => _generatedExcelPdfBytes = pdfBytes);
       _showToast('Spreadsheet converted to PDF table!');
     } catch (e) {
@@ -218,14 +245,14 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
   // ================= 3. PPT TO PDF =================
   Future<void> _pickPptxFile() async {
     try {
-      final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pptx']);
-      if (files.isNotEmpty) {
-        final file = files.first;
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pptx']);
+      if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         setState(() {
           _pptxSourceBytes = bytes;
           _pptxFileName = file.name;
-          _pptxTitleController.text = file.name.replaceAll('.pptx', '');
+          _pptxTitleController.text = _stem(file.name);
           _generatedPptxPdfBytes = null;
         });
       }
@@ -243,10 +270,8 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
     PreferencesService().triggerHaptic();
 
     try {
-      final pdfBytes = await OfficeDocumentService.pptxToPdf(
-        pptxBytes: _pptxSourceBytes!,
-        presentationTitle: _pptxTitleController.text.trim(),
-      );
+      final pdfBytes = await OfficeDocumentService.pptxToPdfInBackground(_pptxSourceBytes!, _pptxTitleController.text.trim());
+      if (!mounted) return;
       setState(() => _generatedPptxPdfBytes = pdfBytes);
       _showToast('PowerPoint slides converted to PDF!');
     } catch (e) {
@@ -259,10 +284,10 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
   // ================= 4. PDF TO WORD =================
   Future<void> _pickPdfForWord() async {
     try {
-      final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
-      if (files.isNotEmpty) {
-        final file = files.first;
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
+      if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         setState(() {
           _pdfForWordBytes = bytes;
           _pdfForWordName = file.name;
@@ -274,13 +299,14 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
     }
   }
 
-  void _runPdfToWord() {
+  Future<void> _runPdfToWord() async {
     if (_pdfForWordBytes == null) return;
     setState(() => _isProcessing = true);
     PreferencesService().triggerHaptic();
 
     try {
-      final docx = OfficeDocumentService.pdfToDocx(_pdfForWordBytes!);
+      final docx = await compute(OfficeDocumentService.pdfToDocx, _pdfForWordBytes!);
+      if (!mounted) return;
       setState(() => _generatedDocxBytes = docx);
       _showToast('PDF extracted into Word (.docx) document!');
     } catch (e) {
@@ -293,10 +319,10 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
   // ================= 5. PDF TO EXCEL =================
   Future<void> _pickPdfForExcel() async {
     try {
-      final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
-      if (files.isNotEmpty) {
-        final file = files.first;
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
+      if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         setState(() {
           _pdfForExcelBytes = bytes;
           _pdfForExcelName = file.name;
@@ -308,13 +334,14 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
     }
   }
 
-  void _runPdfToExcel() {
+  Future<void> _runPdfToExcel() async {
     if (_pdfForExcelBytes == null) return;
     setState(() => _isProcessing = true);
     PreferencesService().triggerHaptic();
 
     try {
-      final csv = OfficeDocumentService.pdfToCsv(_pdfForExcelBytes!);
+      final csv = await compute(OfficeDocumentService.pdfToCsv, _pdfForExcelBytes!);
+      if (!mounted) return;
       setState(() => _extractedCsvContent = csv);
       _showToast('Tables extracted into CSV spreadsheet!');
     } catch (e) {
@@ -327,10 +354,10 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
   // ================= 6. PDF TO PPT =================
   Future<void> _pickPdfForPpt() async {
     try {
-      final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
-      if (files.isNotEmpty) {
-        final file = files.first;
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
+      if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         setState(() {
           _pdfForPptBytes = bytes;
           _pdfForPptName = file.name;
@@ -342,13 +369,14 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
     }
   }
 
-  void _runPdfToPpt() {
+  Future<void> _runPdfToPpt() async {
     if (_pdfForPptBytes == null) return;
     setState(() => _isProcessing = true);
     PreferencesService().triggerHaptic();
 
     try {
-      final pptx = OfficeDocumentService.pdfToPptx(_pdfForPptBytes!);
+      final pptx = await compute(OfficeDocumentService.pdfToPptx, _pdfForPptBytes!);
+      if (!mounted) return;
       setState(() => _generatedPptxBytes = pptx);
       _showToast('PDF converted to PowerPoint deck!');
     } catch (e) {
@@ -361,10 +389,10 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
   // ================= 7. SEARCHABLE OCR =================
   Future<void> _pickOcrImage() async {
     try {
-      final files = await FilePicker.pickFiles(type: FileType.image);
-      if (files.isNotEmpty) {
-        final file = files.first;
+      final file = await FilePicker.pickFile(type: FileType.image);
+      if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         setState(() {
           _ocrImageBytes = bytes;
           _ocrImageName = file.name;
@@ -377,23 +405,47 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
   }
 
   Future<void> _runSearchableOcr() async {
-    if (_ocrImageBytes == null) {
+    final source = _ocrImageBytes;
+    if (source == null) {
       _showToast('Please select a document image first', isError: true);
       return;
     }
     setState(() => _isProcessing = true);
     PreferencesService().triggerHaptic();
 
+    TextRecognizer? recognizer;
     try {
-      final pdfBytes = await OfficeDocumentService.createSearchablePdf(
-        imageBytes: _ocrImageBytes!,
-        ocrText: _ocrTextController.text.trim(),
-      );
+      // Upright, size-capped JPEG: OCR runs on exactly the pixels that get embedded.
+      final page = await ScanPdfService.render((source: source, filter: ScanFilter.original, rotation: 0, maxSide: ScanQuality.high.maxSide, quality: ScanQuality.high.jpegQuality, trim: false));
+      var lines = const <OcrLine>[];
+      if (ScanPdfService.ocrAvailable) {
+        recognizer = TextRecognizer(script: TextRecognitionScript.latin);
+        try {
+          lines = await ScanPdfService.recognizeLines(recognizer, page);
+        } catch (_) {
+          // Falls through to the typed text below.
+        }
+      }
+      final typed = _ocrTextController.text.trim();
+      final Uint8List pdfBytes;
+      final String message;
+      if (lines.any((l) => l.text.trim().isNotEmpty)) {
+        pdfBytes = await ScanPdfService.buildScanPdfInBackground(ScanPdfRequest(pages: [ScanPdfPage(page.bytes, lines)], format: PdfPageFormat.a4, title: 'Searchable OCR Document'));
+        message = 'Searchable PDF created from ${lines.length} recognised lines!';
+      } else if (typed.isNotEmpty) {
+        pdfBytes = await OfficeDocumentService.createSearchablePdf(imageBytes: page.bytes, ocrText: typed);
+        message = 'No text was recognised, so your typed text was embedded instead.';
+      } else {
+        _showToast('No text could be recognised. Type the text into the box to embed it manually.', isError: true);
+        return;
+      }
+      if (!mounted) return;
       setState(() => _generatedSearchablePdfBytes = pdfBytes);
-      _showToast('Searchable PDF with OCR layer created!');
+      _showToast(message);
     } catch (e) {
       _showToast('Searchable PDF error: $e', isError: true);
     } finally {
+      recognizer?.close();
       if (mounted) setState(() => _isProcessing = false);
     }
   }
@@ -401,10 +453,10 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
   // ================= 8. METADATA =================
   Future<void> _pickPdfForMetadata() async {
     try {
-      final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
-      if (files.isNotEmpty) {
-        final file = files.first;
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
+      if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         final meta = OfficeDocumentService.readMetadata(bytes);
         setState(() {
           _metadataPdfBytes = bytes;
@@ -451,10 +503,10 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
   // ================= 9. PAGE EXTRACTION =================
   Future<void> _pickPdfForExtraction() async {
     try {
-      final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
-      if (files.isNotEmpty) {
-        final file = files.first;
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
+      if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         final meta = OfficeDocumentService.readMetadata(bytes);
         setState(() {
           _extractSourcePdfBytes = bytes;
@@ -468,41 +520,20 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
     }
   }
 
-  void _runPageExtraction() {
+  Future<void> _runPageExtraction() async {
     if (_extractSourcePdfBytes == null) return;
     setState(() => _isProcessing = true);
     PreferencesService().triggerHaptic();
 
     try {
-      final input = _extractPagesController.text.trim();
-      final pageNumbers = <int>[];
-
-      for (final part in input.split(',')) {
-        final trimmed = part.trim();
-        if (trimmed.contains('-')) {
-          final bounds = trimmed.split('-');
-          final start = int.tryParse(bounds[0].trim()) ?? 1;
-          final end = int.tryParse(bounds[1].trim()) ?? start;
-          for (int p = start; p <= end; p++) {
-            pageNumbers.add(p);
-          }
-        } else {
-          final p = int.tryParse(trimmed);
-          if (p != null) pageNumbers.add(p);
-        }
-      }
-
+      final pageNumbers = OfficeDocumentService.parsePageRange(_extractPagesController.text, _extractSourcePageCount);
       if (pageNumbers.isEmpty) {
-        _showToast('Please specify valid page numbers (e.g. 1, 3, 5)', isError: true);
+        _showToast('Please specify valid page numbers between 1 and $_extractSourcePageCount (e.g. 1, 3, 5-8)', isError: true);
         return;
       }
 
-      final zip = OfficeDocumentService.extractPagesToZip(
-        pdfBytes: _extractSourcePdfBytes!,
-        pageNumbers: pageNumbers.toSet().toList()..sort(),
-        baseName: _extractSourcePdfName.replaceAll('.pdf', ''),
-      );
-
+      final zip = await OfficeDocumentService.extractPagesToZipInBackground(_extractSourcePdfBytes!, pageNumbers, _stem(_extractSourcePdfName));
+      if (!mounted) return;
       setState(() => _extractedZipBytes = zip);
       _showToast('Extracted ${pageNumbers.length} pages into ZIP archive!');
     } catch (e) {
@@ -515,12 +546,14 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
   // ================= 10. BOOKMARKS =================
   Future<void> _pickPdfForBookmarks() async {
     try {
-      final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
-      if (files.isNotEmpty) {
-        final file = files.first;
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
+      if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         final bms = OfficeDocumentService.readBookmarks(bytes);
+        final pageCount = OfficeDocumentService.readMetadata(bytes).pageCount;
         setState(() {
+          _bookmarksPageCount = pageCount;
           _bookmarksPdfBytes = bytes;
           _bookmarksPdfName = file.name;
           _loadedBookmarks = bms;
@@ -554,10 +587,10 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
   // ================= 11. FLATTEN FORMS =================
   Future<void> _pickPdfForFlatten() async {
     try {
-      final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
-      if (files.isNotEmpty) {
-        final file = files.first;
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
+      if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         setState(() {
           _flattenPdfBytes = bytes;
           _flattenPdfName = file.name;
@@ -569,13 +602,14 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
     }
   }
 
-  void _runFlattenForms() {
+  Future<void> _runFlattenForms() async {
     if (_flattenPdfBytes == null) return;
     setState(() => _isProcessing = true);
     PreferencesService().triggerHaptic();
 
     try {
-      final flattened = OfficeDocumentService.flattenForms(_flattenPdfBytes!);
+      final flattened = await compute(OfficeDocumentService.flattenForms, _flattenPdfBytes!);
+      if (!mounted) return;
       setState(() => _flattenedResultPdfBytes = flattened);
       _showToast('All interactive form fields permanently flattened!');
     } catch (e) {
@@ -588,10 +622,10 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
   // ================= 12. COMPARE PDFS =================
   Future<void> _pickComparePdfA() async {
     try {
-      final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
-      if (files.isNotEmpty) {
-        final file = files.first;
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
+      if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         setState(() {
           _comparePdfABytes = bytes;
           _comparePdfAName = file.name;
@@ -605,10 +639,10 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
 
   Future<void> _pickComparePdfB() async {
     try {
-      final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
-      if (files.isNotEmpty) {
-        final file = files.first;
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
+      if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         setState(() {
           _comparePdfBBytes = bytes;
           _comparePdfBName = file.name;
@@ -620,7 +654,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
     }
   }
 
-  void _runComparePdfs() {
+  Future<void> _runComparePdfs() async {
     if (_comparePdfABytes == null || _comparePdfBBytes == null) {
       _showToast('Please select both Document A and Document B', isError: true);
       return;
@@ -629,7 +663,8 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
     PreferencesService().triggerHaptic();
 
     try {
-      final result = OfficeDocumentService.comparePdfs(_comparePdfABytes!, _comparePdfBBytes!);
+      final result = await OfficeDocumentService.comparePdfsInBackground(_comparePdfABytes!, _comparePdfBBytes!);
+      if (!mounted) return;
       setState(() => _comparisonResult = result);
       _showToast('Comparison completed! (${result.similarityPercent.toStringAsFixed(1)}% match)');
     } catch (e) {
@@ -645,7 +680,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
 
     return ToolScaffold(
       title: 'Office & Advanced PDF Suite',
-      category: ToolCategory.filesText,
+      category: ToolCategory.pdfDocuments,
       toolId: 'office_doc_pdf_suite',
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -711,7 +746,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
           icon: const Icon(Icons.file_open_rounded),
           label: Text(_docxFileName.isNotEmpty ? 'Change DOCX File' : 'Pick .docx Word Document'),
           style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.darkCardHover,
+            backgroundColor: AppColors.darkCardHover, foregroundColor: Colors.white,
             minimumSize: const Size(double.infinity, 48),
           ),
           onPressed: _pickWordFile,
@@ -719,6 +754,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
         const SizedBox(height: 14),
         TextField(
           controller: _docxTitleController,
+          onChanged: (_) => _staleResult(() => _generatedDocxPdfBytes = null), // the title is baked into the PDF header
           decoration: InputDecoration(
             labelText: 'PDF Document Header Title',
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
@@ -748,7 +784,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
               foregroundColor: Colors.white,
               minimumSize: const Size(double.infinity, 48),
             ),
-            onPressed: () => _shareFile(_generatedDocxPdfBytes!, '${_docxTitleController.text.trim()}.pdf'),
+            onPressed: () => _shareFile(_generatedDocxPdfBytes!, ScanPdfService.pdfFileName(_docxTitleController.text, 'Word_Document')),
           ),
         ],
       ],
@@ -769,6 +805,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
         const SizedBox(height: 16),
         TextField(
           controller: _excelTitleController,
+          onChanged: (_) => _staleResult(() => _generatedExcelPdfBytes = null),
           decoration: InputDecoration(
             labelText: 'Report Title',
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
@@ -778,8 +815,9 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
         TextField(
           controller: _excelDataController,
           maxLines: 6,
+          onChanged: (_) => _staleResult(() => _generatedExcelPdfBytes = null),
           decoration: InputDecoration(
-            labelText: 'Comma-Separated Data (CSV / Tabular)',
+            labelText: 'CSV / TSV Data (paste from a spreadsheet)',
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
           ),
         ),
@@ -807,7 +845,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
               foregroundColor: Colors.white,
               minimumSize: const Size(double.infinity, 48),
             ),
-            onPressed: () => _shareFile(_generatedExcelPdfBytes!, '${_excelTitleController.text.trim()}.pdf'),
+            onPressed: () => _shareFile(_generatedExcelPdfBytes!, ScanPdfService.pdfFileName(_excelTitleController.text, 'Spreadsheet')),
           ),
         ],
       ],
@@ -829,12 +867,13 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
         ElevatedButton.icon(
           icon: const Icon(Icons.slideshow_rounded),
           label: Text(_pptxFileName.isNotEmpty ? 'Change PPTX' : 'Pick .pptx Presentation'),
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, minimumSize: const Size(double.infinity, 48)),
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 48)),
           onPressed: _pickPptxFile,
         ),
         const SizedBox(height: 14),
         TextField(
           controller: _pptxTitleController,
+          onChanged: (_) => _staleResult(() => _generatedPptxPdfBytes = null),
           decoration: InputDecoration(
             labelText: 'Deck Title',
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
@@ -860,7 +899,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
             icon: const Icon(Icons.share_rounded),
             label: const Text('Share Presentation PDF'),
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.success, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 48)),
-            onPressed: () => _shareFile(_generatedPptxPdfBytes!, '${_pptxTitleController.text.trim()}.pdf'),
+            onPressed: () => _shareFile(_generatedPptxPdfBytes!, ScanPdfService.pdfFileName(_pptxTitleController.text, 'Presentation')),
           ),
         ],
       ],
@@ -882,7 +921,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
         ElevatedButton.icon(
           icon: const Icon(Icons.picture_as_pdf_rounded),
           label: Text(_pdfForWordName.isNotEmpty ? 'Change PDF' : 'Pick PDF to Convert'),
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, minimumSize: const Size(double.infinity, 48)),
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 48)),
           onPressed: _pickPdfForWord,
         ),
         const SizedBox(height: 18),
@@ -905,7 +944,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
             icon: const Icon(Icons.download_rounded),
             label: const Text('Share .docx Document'),
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.success, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 48)),
-            onPressed: () => _shareFile(_generatedDocxBytes!, '${_pdfForWordName.replaceAll('.pdf', '')}.docx'),
+            onPressed: () => _shareFile(_generatedDocxBytes!, '${_stem(_pdfForWordName)}.docx'),
           ),
         ],
       ],
@@ -927,7 +966,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
         ElevatedButton.icon(
           icon: const Icon(Icons.picture_as_pdf_rounded),
           label: Text(_pdfForExcelName.isNotEmpty ? 'Change PDF' : 'Pick PDF with Tables'),
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, minimumSize: const Size(double.infinity, 48)),
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 48)),
           onPressed: _pickPdfForExcel,
         ),
         const SizedBox(height: 18),
@@ -966,7 +1005,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
             icon: const Icon(Icons.share_rounded),
             label: const Text('Share CSV Spreadsheet'),
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.success, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 48)),
-            onPressed: () => _shareFile(Uint8List.fromList(utf8.encode(_extractedCsvContent!)), '${_pdfForExcelName.replaceAll('.pdf', '')}.csv'),
+            onPressed: () => _shareFile(Uint8List.fromList(utf8.encode(_extractedCsvContent!)), '${_stem(_pdfForExcelName)}.csv'),
           ),
         ],
       ],
@@ -988,7 +1027,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
         ElevatedButton.icon(
           icon: const Icon(Icons.picture_as_pdf_rounded),
           label: Text(_pdfForPptName.isNotEmpty ? 'Change PDF' : 'Pick PDF Document'),
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, minimumSize: const Size(double.infinity, 48)),
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 48)),
           onPressed: _pickPdfForPpt,
         ),
         const SizedBox(height: 18),
@@ -1011,7 +1050,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
             icon: const Icon(Icons.download_rounded),
             label: const Text('Share .pptx Presentation'),
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.success, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 48)),
-            onPressed: () => _shareFile(_generatedPptxBytes!, '${_pdfForPptName.replaceAll('.pdf', '')}.pptx'),
+            onPressed: () => _shareFile(_generatedPptxBytes!, '${_stem(_pdfForPptName)}.pptx'),
           ),
         ],
       ],
@@ -1026,22 +1065,23 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
         ResultCard(
           title: 'Searchable PDF with OCR Layer',
           primaryResult: _ocrImageName.isNotEmpty ? _ocrImageName : 'Select Scanned Image',
-          subtitle: 'Overlays invisible selectable & searchable text layer atop image',
+          subtitle: 'Reads the text in a photo on your device (Latin script) and hides it under the image so the PDF is searchable',
           accentColor: AppColors.catPdf,
         ),
         const SizedBox(height: 16),
         ElevatedButton.icon(
           icon: const Icon(Icons.image_rounded),
           label: Text(_ocrImageName.isNotEmpty ? 'Change Document Photo' : 'Pick Scanned Image / Document'),
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, minimumSize: const Size(double.infinity, 48)),
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 48)),
           onPressed: _pickOcrImage,
         ),
         const SizedBox(height: 14),
         TextField(
           controller: _ocrTextController,
           maxLines: 5,
+          onChanged: (_) => _staleResult(() => _generatedSearchablePdfBytes = null),
           decoration: InputDecoration(
-            labelText: 'Searchable OCR Text Layer',
+            labelText: 'Fallback text (only used if recognition is unavailable or finds nothing)',
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
           ),
         ),
@@ -1065,12 +1105,18 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
             icon: const Icon(Icons.share_rounded),
             label: const Text('Share Searchable PDF'),
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.success, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 48)),
-            onPressed: () => _shareFile(_generatedSearchablePdfBytes!, 'Searchable_OCR_Document.pdf'),
+            onPressed: () => _shareFile(_generatedSearchablePdfBytes!, ScanPdfService.pdfFileName('Searchable_${_stem(_ocrImageName)}', 'Searchable_OCR_Document')),
           ),
         ],
       ],
     );
   }
+
+  Widget _metaField(String label, TextEditingController controller) => TextField(
+    controller: controller,
+    onChanged: (_) => _staleResult(() => _updatedMetadataPdfBytes = null),
+    decoration: InputDecoration(labelText: label, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+  );
 
   // --- 8. METADATA EDITOR ---
   Widget _buildMetadataTab(bool isDark) {
@@ -1093,26 +1139,28 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
         ElevatedButton.icon(
           icon: const Icon(Icons.picture_as_pdf_rounded),
           label: Text(_metadataPdfName.isNotEmpty ? 'Change PDF' : 'Pick PDF to Inspect'),
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, minimumSize: const Size(double.infinity, 48)),
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 48)),
           onPressed: _pickPdfForMetadata,
         ),
         if (_loadedMetadata != null) ...[
           const SizedBox(height: 16),
-          TextField(controller: _metaTitleCtrl, decoration: InputDecoration(labelText: 'Title', border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
+          _metaField('Title', _metaTitleCtrl),
           const SizedBox(height: 10),
-          TextField(controller: _metaAuthorCtrl, decoration: InputDecoration(labelText: 'Author', border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
+          _metaField('Author', _metaAuthorCtrl),
           const SizedBox(height: 10),
-          TextField(controller: _metaSubjectCtrl, decoration: InputDecoration(labelText: 'Subject', border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
+          _metaField('Subject', _metaSubjectCtrl),
           const SizedBox(height: 10),
-          TextField(controller: _metaKeywordsCtrl, decoration: InputDecoration(labelText: 'Keywords', border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
+          _metaField('Keywords', _metaKeywordsCtrl),
           const SizedBox(height: 10),
-          TextField(controller: _metaCreatorCtrl, decoration: InputDecoration(labelText: 'Creator', border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
+          _metaField('Creator', _metaCreatorCtrl),
+          const SizedBox(height: 10),
+          _metaField('Producer', _metaProducerCtrl),
           const SizedBox(height: 18),
           ElevatedButton.icon(
             icon: const Icon(Icons.save_rounded),
             label: const Text('Update & Save Metadata'),
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.catPdf, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 50)),
-            onPressed: _runUpdateMetadata,
+            onPressed: _isProcessing ? null : _runUpdateMetadata,
           ),
           if (_updatedMetadataPdfBytes != null) ...[
             const SizedBox(height: 16),
@@ -1143,13 +1191,14 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
         ElevatedButton.icon(
           icon: const Icon(Icons.call_split_rounded),
           label: Text(_extractSourcePdfName.isNotEmpty ? 'Change PDF' : 'Pick Multi-Page PDF'),
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, minimumSize: const Size(double.infinity, 48)),
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 48)),
           onPressed: _pickPdfForExtraction,
         ),
         if (_extractSourcePdfBytes != null) ...[
           const SizedBox(height: 14),
           TextField(
             controller: _extractPagesController,
+            onChanged: (_) => _staleResult(() => _extractedZipBytes = null),
             decoration: InputDecoration(
               labelText: 'Pages to Extract (e.g. 1, 3, 5-8)',
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
@@ -1160,7 +1209,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
             icon: const Icon(Icons.folder_zip_rounded),
             label: const Text('Extract Pages to ZIP Archive'),
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.catPdf, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 50)),
-            onPressed: _runPageExtraction,
+            onPressed: _isProcessing ? null : _runPageExtraction,
           ),
           if (_extractedZipBytes != null) ...[
             const SizedBox(height: 16),
@@ -1191,7 +1240,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
         ElevatedButton.icon(
           icon: const Icon(Icons.picture_as_pdf_rounded),
           label: Text(_bookmarksPdfName.isNotEmpty ? 'Change PDF' : 'Pick PDF to Manage Bookmarks'),
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, minimumSize: const Size(double.infinity, 48)),
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 48)),
           onPressed: _pickPdfForBookmarks,
         ),
         if (_bookmarksPdfBytes != null) ...[
@@ -1207,7 +1256,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
               ),
               const SizedBox(width: 8),
               Expanded(
-                flex: 1,
+                flex: 2,
                 child: TextField(
                   controller: _newBmPageCtrl,
                   keyboardType: TextInputType.number,
@@ -1220,13 +1269,20 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
                 style: IconButton.styleFrom(backgroundColor: AppColors.catPdf),
                 onPressed: () {
                   final title = _newBmTitleCtrl.text.trim();
-                  final page = int.tryParse(_newBmPageCtrl.text.trim()) ?? 1;
-                  if (title.isNotEmpty) {
-                    setState(() {
-                      _loadedBookmarks.add(PdfBookmarkItem(title: title, pageNumber: page));
-                      _newBmTitleCtrl.clear();
-                    });
+                  final page = int.tryParse(_newBmPageCtrl.text.trim()) ?? 0;
+                  if (page < 1 || page > _bookmarksPageCount) {
+                    _showToast('Page must be between 1 and $_bookmarksPageCount', isError: true);
+                    return;
                   }
+                  if (title.isEmpty) {
+                    _showToast('Enter a bookmark title', isError: true);
+                    return;
+                  }
+                  setState(() {
+                    _loadedBookmarks.add(PdfBookmarkItem(title: title, pageNumber: page));
+                    _newBmTitleCtrl.clear();
+                    _updatedBookmarksPdfBytes = null;
+                  });
                 },
               ),
             ],
@@ -1244,7 +1300,10 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
                 subtitle: Text('Target: Page ${bm.pageNumber}'),
                 trailing: IconButton(
                   icon: const Icon(Icons.delete_outline, color: AppColors.error),
-                  onPressed: () => setState(() => _loadedBookmarks.removeAt(i)),
+                  onPressed: () => setState(() {
+                    _loadedBookmarks.removeAt(i);
+                    _updatedBookmarksPdfBytes = null;
+                  }),
                 ),
               );
             },
@@ -1254,7 +1313,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
             icon: const Icon(Icons.save_rounded),
             label: const Text('Save Bookmarks to PDF'),
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.catPdf, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 50)),
-            onPressed: _runSaveBookmarks,
+            onPressed: _isProcessing ? null : _runSaveBookmarks,
           ),
           if (_updatedBookmarksPdfBytes != null) ...[
             const SizedBox(height: 16),
@@ -1285,7 +1344,7 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
         ElevatedButton.icon(
           icon: const Icon(Icons.picture_as_pdf_rounded),
           label: Text(_flattenPdfName.isNotEmpty ? 'Change PDF' : 'Pick Fillable Form PDF'),
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, minimumSize: const Size(double.infinity, 48)),
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 48)),
           onPressed: _pickPdfForFlatten,
         ),
         const SizedBox(height: 18),
@@ -1336,8 +1395,8 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
             Expanded(
               child: ElevatedButton.icon(
                 icon: const Icon(Icons.file_present_rounded),
-                label: Text(_comparePdfAName.isNotEmpty ? _comparePdfAName : 'Document A'),
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover),
+                label: Text(_comparePdfAName.isNotEmpty ? _comparePdfAName : 'Document A', maxLines: 1, overflow: TextOverflow.ellipsis),
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, foregroundColor: Colors.white),
                 onPressed: _pickComparePdfA,
               ),
             ),
@@ -1345,8 +1404,8 @@ class _OfficePdfToolkitScreenState extends State<OfficePdfToolkitScreen> {
             Expanded(
               child: ElevatedButton.icon(
                 icon: const Icon(Icons.file_present_rounded),
-                label: Text(_comparePdfBName.isNotEmpty ? _comparePdfBName : 'Document B'),
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover),
+                label: Text(_comparePdfBName.isNotEmpty ? _comparePdfBName : 'Document B', maxLines: 1, overflow: TextOverflow.ellipsis),
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, foregroundColor: Colors.white),
                 onPressed: _pickComparePdfB,
               ),
             ),

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
@@ -196,7 +198,11 @@ class _FeatureTabSelectorState<T> extends State<FeatureTabSelector<T>> {
                           crossAxisCount: crossAxisCount,
                           crossAxisSpacing: 10,
                           mainAxisSpacing: 10,
-                          childAspectRatio: isWide ? 2.1 : 1.9,
+                          // Fixed ratios clipped 2-line labels at large font scales.
+                          mainAxisExtent: math.max(
+                            72.0,
+                            20 + math.max(34.0, MediaQuery.textScalerOf(context).scale(12.5) * 1.4 * 2),
+                          ),
                         ),
                         itemCount: widget.tabs.length,
                         itemBuilder: (context, idx) {

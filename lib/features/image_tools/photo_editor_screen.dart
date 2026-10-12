@@ -1,14 +1,14 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:image/image.dart' as img;
-import 'package:printing/printing.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/share_utils.dart';
 import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
@@ -40,7 +40,10 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
   bool _isProcessing = false;
 
   // Global Loaded Image State
-  Uint8List? _sourceImageBytes;
+  Uint8List? _sourceImageBytes; // the picked file as-is (only its size is shown)
+  Uint8List? _previewBytes; // <=1280 px PNG of the working image, for on-screen display
+  bool _isLoading = false;
+  String? _scaledNote; // set when the photo was scaled down to the working size
   img.Image? _decodedSourceImage;
   String _sourceFileName = 'image.png';
 
@@ -50,11 +53,12 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
   double _bgTolerance = 25.0; // 5 to 70
   bool _floodFillFromEdges = true;
   Color _sampledColor = Colors.white;
+  Color _cornerColor = Colors.white;
 
   // 2. Change BG State
   Color _selectedBgColor = Colors.white;
   bool _useGradient = false;
-  List<Color> _selectedGradient = [const Color(0xFFFF512F), const Color(0xFFDD2476)];
+  late List<Color> _selectedGradient = _presetGradients.first;
   Uint8List? _composedBgBytes;
 
   // 3. Adjustments State
@@ -78,7 +82,6 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
   Uint8List? _blurredBytes;
 
   // 6. Draw & Annotate State
-  final GlobalKey _repaintBoundaryKey = GlobalKey();
   final List<AnnotationStroke> _strokes = [];
   final List<AnnotationStroke> _undoneStrokes = [];
   String _currentTool = 'pen'; // 'pen', 'highlighter', 'arrow', 'rect', 'circle', 'line'
@@ -94,7 +97,8 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
   Uint8List? _logoImageBytes;
   img.Image? _decodedLogoImage;
   double _logoScale = 0.25;
-  Alignment _logoAlignment = Alignment.bottomRight;
+  double _logoOpacity = 1.0;
+  int _logoAnchor = 8; // 3x3 grid, row * 3 + column: 0 top-left ... 8 bottom-right
   Uint8List? _finalWatermarkedBytes;
 
   final List<Color> _presetColors = [
@@ -135,40 +139,71 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
   ];
 
   Future<void> _pickImage() async {
+    if (_isLoading) return;
     PreferencesService().triggerHaptic();
     try {
       final files = await FilePicker.pickFiles(type: FileType.image);
-      if (files.isNotEmpty) {
-        final file = files.first;
-        final bytes = await file.readAsBytes();
-        final decoded = img.decodeImage(bytes);
-        if (decoded != null) {
-          setState(() {
-            _sourceImageBytes = bytes;
-            _decodedSourceImage = decoded;
-            _sourceFileName = file.name;
-            // Sample corner pixel for background removal hint
-            final p = decoded.getPixel(0, 0);
-            _sampledColor = Color.fromARGB(255, p.r.toInt(), p.g.toInt(), p.b.toInt());
-
-            // Reset states
-            _cutoutBytes = null;
-            _cutoutImage = null;
-            _composedBgBytes = null;
-            _adjustedBytes = null;
-            _filteredBytes = null;
-            _blurredBytes = null;
-            _strokes.clear();
-            _finalWatermarkedBytes = null;
-          });
-        }
+      if (files.isEmpty) return;
+      final file = files.first;
+      final bytes = await file.readAsBytes();
+      if (!mounted) return;
+      setState(() => _isLoading = true);
+      // Decoding a 12 MP photo takes seconds: do it off the UI thread.
+      final loaded = await PhotoEditorService.loadForEditingInBackground(bytes);
+      if (!mounted) return;
+      if (loaded == null) {
+        _showToast('Unsupported or corrupt image file.', isError: true);
+        return;
       }
+      final decoded = loaded.image;
+      final p = decoded.getPixel(0, 0);
+      setState(() {
+        _resetEdits();
+        _sourceImageBytes = bytes;
+        _previewBytes = loaded.preview;
+        _decodedSourceImage = decoded;
+        _sourceFileName = file.name;
+        _scaledNote = loaded.originalWidth > decoded.width || loaded.originalHeight > decoded.height
+            ? 'Scaled down from ${loaded.originalWidth} × ${loaded.originalHeight} px so the editor stays fast'
+            : null;
+        // Sample corner pixel for background removal hint
+        _cornerColor = Color.fromARGB(255, p.r.toInt(), p.g.toInt(), p.b.toInt());
+        _sampledColor = _cornerColor;
+      });
     } catch (e) {
       _showToast('Error picking image: $e', isError: true);
+    } finally {
+      if (mounted && _isLoading) setState(() => _isLoading = false);
     }
   }
 
+  /// Clears every edit result and control for a fresh photo (the logo and overlay text are kept).
+  void _resetEdits() {
+    _cutoutBytes = null;
+    _cutoutImage = null;
+    _bgTolerance = 25.0;
+    _floodFillFromEdges = true;
+    _composedBgBytes = null;
+    _useGradient = false;
+    _selectedBgColor = Colors.white;
+    _selectedGradient = _presetGradients.first;
+    _brightness = _contrast = _saturation = _sharpness = _exposure = _vignette = 0.0;
+    _adjustedBytes = null;
+    _activeFilter = 'Original';
+    _filteredBytes = null;
+    _blurAreas
+      ..clear()
+      ..add(const BlurArea(x: 0.3, y: 0.25, width: 0.4, height: 0.3, intensity: 15, isMosaic: false));
+    _activeBlurIndex = 0;
+    _blurredBytes = null;
+    _strokes.clear();
+    _undoneStrokes.clear();
+    _currentPoints = [];
+    _finalWatermarkedBytes = null;
+  }
+
   void _showToast(String message, {bool isError = false}) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -178,199 +213,156 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
     );
   }
 
-  // --- 1. REMOVE BACKGROUND ---
-  Future<void> _executeRemoveBackground() async {
-    if (_decodedSourceImage == null) return;
+  bool _isCurrent(img.Image src) => mounted && identical(src, _decodedSourceImage);
+
+  /// Runs [work] on the loaded photo with the busy flag set. [work] should do its pixel
+  /// maths in a background isolate and apply results only while [_isCurrent] still holds
+  /// (the user may have changed or reset the photo in the meantime).
+  Future<void> _runEdit(String failure, Future<void> Function(img.Image src) work, {String? success}) async {
+    final src = _decodedSourceImage;
+    if (src == null || _isProcessing) return;
     setState(() => _isProcessing = true);
     PreferencesService().triggerHaptic();
-
     try {
-      final cutout = PhotoEditorService.removeBackground(
-        _decodedSourceImage!,
-        sampleR: _sampledColor.red,
-        sampleG: _sampledColor.green,
-        sampleB: _sampledColor.blue,
-        tolerance: _bgTolerance,
-        floodFillFromEdges: _floodFillFromEdges,
-      );
-
-      final bytes = Uint8List.fromList(img.encodePng(cutout));
-      setState(() {
-        _cutoutImage = cutout;
-        _cutoutBytes = bytes;
-      });
-      _showToast('Background removed successfully!');
+      await work(src);
+      if (success != null && _isCurrent(src)) _showToast(success);
     } catch (e) {
-      _showToast('Background removal failed: $e', isError: true);
+      _showToast('$failure: $e', isError: true);
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
   }
 
+  /// 0..1 colour channel to 0..255.
+  int _channel(double v) => (v * 255).round().clamp(0, 255);
+
+  // --- 1. REMOVE BACKGROUND ---
+  Future<void> _executeRemoveBackground() => _runEdit('Background removal failed', (src) async {
+        final (cutout, bytes) = await PhotoEditorService.removeBackgroundInBackground(
+          src,
+          sampleR: _channel(_sampledColor.r),
+          sampleG: _channel(_sampledColor.g),
+          sampleB: _channel(_sampledColor.b),
+          tolerance: _bgTolerance,
+          floodFillFromEdges: _floodFillFromEdges,
+        );
+        if (!_isCurrent(src)) return;
+        setState(() {
+          _cutoutImage = cutout;
+          _cutoutBytes = bytes;
+        });
+      }, success: 'Background removed successfully!');
+
   // --- 2. CHANGE BG COLOR ---
-  Future<void> _executeChangeBackground() async {
+  Future<void> _executeChangeBackground() {
     final baseImage = _cutoutImage ?? _decodedSourceImage;
-    if (baseImage == null) return;
-
-    setState(() => _isProcessing = true);
-    PreferencesService().triggerHaptic();
-
-    try {
-      final composed = PhotoEditorService.replaceBackground(
+    if (baseImage == null) return Future.value();
+    if (_cutoutImage == null && !baseImage.hasAlpha) {
+      _showToast('Remove the background first - the photo has no transparent area to fill.', isError: true);
+      return Future.value();
+    }
+    return _runEdit('Failed to apply background', (src) async {
+      final bytes = await PhotoEditorService.replaceBackgroundInBackground(
         baseImage,
         solidColor: _useGradient ? null : _selectedBgColor,
         gradientColors: _useGradient ? _selectedGradient : null,
       );
-      final bytes = Uint8List.fromList(img.encodePng(composed));
+      if (!_isCurrent(src)) return;
       setState(() => _composedBgBytes = bytes);
-      _showToast('Background updated!');
-    } catch (e) {
-      _showToast('Failed to apply background: $e', isError: true);
-    } finally {
-      if (mounted) setState(() => _isProcessing = false);
-    }
+    }, success: 'Background updated!');
   }
 
   // --- 3. ADJUSTMENTS ---
-  Future<void> _executeAdjustments() async {
-    if (_decodedSourceImage == null) return;
-    setState(() => _isProcessing = true);
-    PreferencesService().triggerHaptic();
-
-    try {
-      final adjusted = PhotoEditorService.adjustImage(
-        source: _decodedSourceImage!,
-        brightness: _brightness,
-        contrast: _contrast,
-        saturation: _saturation,
-        sharpness: _sharpness,
-        gamma: _exposure,
-        vignette: _vignette,
-      );
-      final bytes = Uint8List.fromList(img.encodePng(adjusted));
-      setState(() => _adjustedBytes = bytes);
-      _showToast('Adjustments applied!');
-    } catch (e) {
-      _showToast('Failed to adjust image: $e', isError: true);
-    } finally {
-      if (mounted) setState(() => _isProcessing = false);
-    }
-  }
+  Future<void> _executeAdjustments() => _runEdit('Failed to adjust image', (src) async {
+        final bytes = await PhotoEditorService.adjustImageInBackground(
+          src,
+          brightness: _brightness,
+          contrast: _contrast,
+          saturation: _saturation,
+          sharpness: _sharpness,
+          gamma: _exposure,
+          vignette: _vignette,
+        );
+        if (!_isCurrent(src)) return;
+        setState(() => _adjustedBytes = bytes);
+      }, success: 'Adjustments applied!');
 
   // --- 4. FILTERS ---
-  Future<void> _executeFilter(String filterName) async {
-    if (_decodedSourceImage == null) return;
-    setState(() {
-      _activeFilter = filterName;
-      _isProcessing = true;
-    });
-    PreferencesService().triggerHaptic();
-
-    try {
-      final filtered = PhotoEditorService.applyFilter(_decodedSourceImage!, filterName);
-      final bytes = Uint8List.fromList(img.encodePng(filtered));
+  Future<void> _executeFilter(String filterName) {
+    if (_isProcessing) return Future.value(); // one render at a time, so the chip always matches the preview
+    setState(() => _activeFilter = filterName);
+    return _runEdit('Filter error', (src) async {
+      final bytes = await PhotoEditorService.applyFilterInBackground(src, filterName);
+      if (!_isCurrent(src)) return;
       setState(() => _filteredBytes = bytes);
-    } catch (e) {
-      _showToast('Filter error: $e', isError: true);
-    } finally {
-      if (mounted) setState(() => _isProcessing = false);
-    }
+    });
   }
 
   // --- 5. BLUR & CENSOR ---
-  Future<void> _executeBlur() async {
-    if (_decodedSourceImage == null) return;
-    setState(() => _isProcessing = true);
-    PreferencesService().triggerHaptic();
-
-    try {
-      final blurred = PhotoEditorService.applyBlurAreas(_decodedSourceImage!, _blurAreas);
-      final bytes = Uint8List.fromList(img.encodePng(blurred));
-      setState(() => _blurredBytes = bytes);
-      _showToast('Selected areas blurred!');
-    } catch (e) {
-      _showToast('Blur failed: $e', isError: true);
-    } finally {
-      if (mounted) setState(() => _isProcessing = false);
-    }
-  }
+  Future<void> _executeBlur() => _runEdit('Blur failed', (src) async {
+        final bytes = await PhotoEditorService.applyBlurAreasInBackground(src, List.of(_blurAreas));
+        if (!_isCurrent(src)) return;
+        setState(() => _blurredBytes = bytes);
+      }, success: 'Selected areas blurred!');
 
   // --- 7. TEXT & LOGO ---
   Future<void> _pickLogoImage() async {
     PreferencesService().triggerHaptic();
     try {
       final files = await FilePicker.pickFiles(type: FileType.image);
-      if (files.isNotEmpty) {
-        final bytes = await files.first.readAsBytes();
-        final decoded = img.decodeImage(bytes);
-        if (decoded != null) {
-          setState(() {
-            _logoImageBytes = bytes;
-            _decodedLogoImage = decoded;
-          });
-        }
+      if (files.isEmpty) return;
+      final bytes = await files.first.readAsBytes();
+      if (!mounted) return;
+      // Decoded off the UI thread; a logo never needs more than ~1000 px.
+      final loaded = await PhotoEditorService.loadForEditingInBackground(bytes);
+      if (!mounted) return;
+      if (loaded == null) {
+        _showToast('Unsupported or corrupt logo image.', isError: true);
+        return;
       }
+      setState(() {
+        _logoImageBytes = loaded.preview;
+        _decodedLogoImage = loaded.image;
+      });
     } catch (e) {
       _showToast('Failed to pick logo: $e', isError: true);
     }
   }
 
-  Future<void> _executeWatermarkComposite() async {
-    if (_decodedSourceImage == null) return;
-    setState(() => _isProcessing = true);
-    PreferencesService().triggerHaptic();
-
-    try {
-      var base = img.Image.from(_decodedSourceImage!);
-
-      // Composite logo if chosen
-      if (_decodedLogoImage != null) {
-        final targetW = (base.width * _logoScale).round().clamp(10, base.width);
-        final scaledLogo = img.copyResize(_decodedLogoImage!, width: targetW);
-
-        // Calculate position based on alignment
-        int dstX = 20;
-        int dstY = 20;
-        if (_logoAlignment == Alignment.topRight) {
-          dstX = base.width - scaledLogo.width - 20;
-        } else if (_logoAlignment == Alignment.bottomRight) {
-          dstX = base.width - scaledLogo.width - 20;
-          dstY = base.height - scaledLogo.height - 20;
-        } else if (_logoAlignment == Alignment.bottomLeft) {
-          dstY = base.height - scaledLogo.height - 20;
-        } else if (_logoAlignment == Alignment.center) {
-          dstX = (base.width - scaledLogo.width) ~/ 2;
-          dstY = (base.height - scaledLogo.height) ~/ 2;
-        }
-
-        img.compositeImage(base, scaledLogo, dstX: dstX, dstY: dstY);
-      }
-
-      if (_textOverlayController.text.trim().isNotEmpty) {
-        final txt = _textOverlayController.text.trim();
-        img.drawString(
-          base,
-          txt,
-          font: img.arial24,
-          x: 20,
-          y: base.height - 35,
-          color: img.ColorRgba8(255, 255, 255, 255),
-        );
-      }
-
-      final bytes = Uint8List.fromList(img.encodePng(base));
-      setState(() => _finalWatermarkedBytes = bytes);
-      _showToast('Text and Logo applied successfully!');
-    } catch (e) {
-      _showToast('Composite error: $e', isError: true);
-    } finally {
-      if (mounted) setState(() => _isProcessing = false);
+  Future<void> _executeWatermarkComposite() {
+    if (_decodedLogoImage == null && _textOverlayController.text.trim().isEmpty) {
+      _showToast('Add overlay text or pick a logo first.', isError: true);
+      return Future.value();
     }
+    return _runEdit('Composite error', (src) async {
+      final bytes = await PhotoEditorService.applyWatermarkInBackground(
+        src,
+        logo: _decodedLogoImage,
+        logoScale: _logoScale,
+        logoOpacity: _logoOpacity,
+        logoAnchor: _logoAnchor,
+        text: _textOverlayController.text,
+        textSize: _textFontSize,
+        textBackground: _hasTextBackground,
+      );
+      if (!_isCurrent(src)) return;
+      setState(() => _finalWatermarkedBytes = bytes);
+    }, success: 'Text and Logo applied successfully!');
+  }
+
+  /// All editor outputs are PNG, whatever the source extension was.
+  String _pngName(String prefix) {
+    final dot = _sourceFileName.lastIndexOf('.');
+    return '${prefix}_${dot > 0 ? _sourceFileName.substring(0, dot) : _sourceFileName}.png';
   }
 
   Future<void> _shareImage(Uint8List bytes, String filename) async {
     PreferencesService().triggerHaptic();
-    await Printing.sharePdf(bytes: bytes, filename: filename);
+    try {
+      await shareFileBytes(bytes, filename);
+    } catch (e) {
+      _showToast('Share failed: $e', isError: true);
+    }
   }
 
   @override
@@ -379,19 +371,25 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
 
     return ToolScaffold(
       title: 'Photo Studio & Editor',
-      category: ToolCategory.filesText,
+      category: ToolCategory.imagePhoto,
       toolId: 'photo_editor_studio',
       onReset: () {
         setState(() {
+          _resetEdits();
           _sourceImageBytes = null;
+          _previewBytes = null;
           _decodedSourceImage = null;
-          _cutoutBytes = null;
-          _composedBgBytes = null;
-          _adjustedBytes = null;
-          _filteredBytes = null;
-          _blurredBytes = null;
-          _strokes.clear();
-          _finalWatermarkedBytes = null;
+          _scaledNote = null;
+          _isProcessing = false;
+          _isLoading = false;
+          _logoImageBytes = null;
+          _decodedLogoImage = null;
+          _logoScale = 0.25;
+          _logoOpacity = 1.0;
+          _logoAnchor = 8;
+          _textOverlayController.text = 'Sample Watermark';
+          _textFontSize = 28.0;
+          _hasTextBackground = true;
         });
       },
       body: Column(
@@ -407,6 +405,10 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
             tabs: PhotoEditorTab.values.map((t) => FeatureTabItem(value: t, label: t.label, icon: t.icon)).toList(),
           ),
           const SizedBox(height: 16),
+          if (_isLoading) ...[
+            const LinearProgressIndicator(color: AppColors.catImage),
+            const SizedBox(height: 16),
+          ],
           if (_sourceImageBytes == null)
             _buildEmptyUploadCard(isDark)
           else ...[
@@ -480,7 +482,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: Image.memory(_sourceImageBytes!, width: 44, height: 44, fit: BoxFit.cover),
+            child: Image.memory(_previewBytes!, width: 44, height: 44, fit: BoxFit.cover),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -497,6 +499,8 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
                   '${_decodedSourceImage?.width ?? 0} × ${_decodedSourceImage?.height ?? 0} px  •  ${((_sourceImageBytes?.length ?? 0) / 1024).toStringAsFixed(1)} KB',
                   style: TextStyle(fontSize: 12, color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary),
                 ),
+                if (_scaledNote != null)
+                  Text(_scaledNote!, style: TextStyle(fontSize: 11, color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary)),
               ],
             ),
           ),
@@ -547,7 +551,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
           breakdowns: [
             BreakdownItem(label: 'Tolerance', value: '${_bgTolerance.round()}%'),
             BreakdownItem(label: 'Mode', value: _floodFillFromEdges ? 'Edge Flood-Fill' : 'Color Key'),
-            BreakdownItem(label: 'Sample RGB', value: '(${_sampledColor.red}, ${_sampledColor.green}, ${_sampledColor.blue})'),
+            BreakdownItem(label: 'Sample RGB', value: '(${_channel(_sampledColor.r)}, ${_channel(_sampledColor.g)}, ${_channel(_sampledColor.b)})'),
           ],
         ),
         const SizedBox(height: 16),
@@ -573,7 +577,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
         Wrap(
           spacing: 8,
           children: [
-            _buildSampleChip('Top-Left Corner', _sampledColor),
+            _buildSampleChip('Top-Left Corner', _cornerColor),
             _buildSampleChip('Pure White', Colors.white),
             _buildSampleChip('Pure Black', Colors.black),
             _buildSampleChip('Studio Green', const Color(0xFF00FF00)),
@@ -620,7 +624,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
                   icon: const Icon(Icons.share_rounded),
                   label: const Text('Share Cutout (PNG)'),
                   style: ElevatedButton.styleFrom(backgroundColor: AppColors.catImage, foregroundColor: Colors.white),
-                  onPressed: () => _shareImage(_cutoutBytes!, 'Cutout_${_sourceFileName.replaceAll('.jpg', '.png')}'),
+                  onPressed: () => _shareImage(_cutoutBytes!, _pngName('Cutout')),
                 ),
               ),
               const SizedBox(width: 12),
@@ -765,7 +769,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
               foregroundColor: Colors.white,
               minimumSize: const Size(double.infinity, 46),
             ),
-            onPressed: () => _shareImage(_composedBgBytes!, 'Studio_Background_$_sourceFileName'),
+            onPressed: () => _shareImage(_composedBgBytes!, _pngName('Studio_Background')),
           ),
         ],
       ],
@@ -843,7 +847,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
               foregroundColor: Colors.white,
               minimumSize: const Size(double.infinity, 46),
             ),
-            onPressed: () => _shareImage(_adjustedBytes!, 'Adjusted_$_sourceFileName'),
+            onPressed: () => _shareImage(_adjustedBytes!, _pngName('Adjusted')),
           ),
         ],
       ],
@@ -916,7 +920,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
               foregroundColor: Colors.white,
               minimumSize: const Size(double.infinity, 46),
             ),
-            onPressed: () => _shareImage(_filteredBytes!, 'Filter_${_activeFilter}_$_sourceFileName'),
+            onPressed: () => _shareImage(_filteredBytes!, _pngName('Filter_$_activeFilter')),
           ),
         ],
       ],
@@ -939,6 +943,41 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
           accentColor: AppColors.catImage,
         ),
         const SizedBox(height: 16),
+        // Where each box sits on the photo; the selected one is outlined in the accent colour.
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 260),
+            child: AspectRatio(
+              aspectRatio: _decodedSourceImage!.width / _decodedSourceImage!.height,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.memory(_previewBytes!, fit: BoxFit.fill),
+                    CustomPaint(painter: _BlurBoxPainter(List.of(_blurAreas), _activeBlurIndex)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (_blurAreas.length > 1) ...[
+          Wrap(
+            spacing: 8,
+            children: [
+              for (var i = 0; i < _blurAreas.length; i++)
+                ChoiceChip(
+                  label: Text('Box ${i + 1}'),
+                  selected: i == _activeBlurIndex,
+                  selectedColor: AppColors.catImage.withValues(alpha: 0.25),
+                  onSelected: (_) => setState(() => _activeBlurIndex = i),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
         if (activeArea != null) ...[
           Text('Blur Mode & Type for Box #${_activeBlurIndex + 1}:', style: const TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
@@ -998,12 +1037,14 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
           }),
         ],
         const SizedBox(height: 12),
-        Row(
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
           children: [
             ElevatedButton.icon(
               icon: const Icon(Icons.add_box_rounded),
               label: const Text('Add Censor Box'),
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover),
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, foregroundColor: Colors.white),
               onPressed: () {
                 setState(() {
                   _blurAreas.add(
@@ -1013,7 +1054,6 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
                 });
               },
             ),
-            const SizedBox(width: 12),
             if (_blurAreas.length > 1)
               OutlinedButton.icon(
                 icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error),
@@ -1058,7 +1098,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
               foregroundColor: Colors.white,
               minimumSize: const Size(double.infinity, 46),
             ),
-            onPressed: () => _shareImage(_blurredBytes!, 'Censored_$_sourceFileName'),
+            onPressed: () => _shareImage(_blurredBytes!, _pngName('Censored')),
           ),
         ],
       ],
@@ -1091,14 +1131,16 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Text('Color: ', style: const TextStyle(fontWeight: FontWeight.bold)),
+            const Text('Color:', style: TextStyle(fontWeight: FontWeight.bold)),
             ..._presetColors.take(6).map((c) {
               return GestureDetector(
                 onTap: () => setState(() => _strokeColor = c),
                 child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
                   width: 28,
                   height: 28,
                   decoration: BoxDecoration(
@@ -1109,7 +1151,11 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
                 ),
               );
             }),
-            const Spacer(),
+          ],
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
             IconButton(
               icon: const Icon(Icons.undo_rounded),
               tooltip: 'Undo',
@@ -1136,7 +1182,6 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 8),
         Row(
           children: [
             const Text('Width: ', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -1152,100 +1197,119 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
           ],
         ),
         const SizedBox(height: 10),
-        // Interactive Drawing Canvas Overlay
-        RepaintBoundary(
-          key: _repaintBoundaryKey,
-          child: Stack(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: Image.memory(
-                  _sourceImageBytes!,
-                  height: 320,
-                  width: double.infinity,
-                  fit: BoxFit.contain,
-                ),
-              ),
-              Positioned.fill(
-                child: GestureDetector(
-                  onPanStart: (details) {
-                    setState(() {
-                      _currentPoints = [details.localPosition];
-                    });
-                  },
-                  onPanUpdate: (details) {
-                    setState(() {
-                      _currentPoints.add(details.localPosition);
-                    });
-                  },
-                  onPanEnd: (details) {
-                    setState(() {
-                      if (_currentPoints.isNotEmpty) {
-                        _strokes.add(
-                          AnnotationStroke(
-                            points: List.from(_currentPoints),
-                            color: _currentTool == 'highlighter'
-                                ? _strokeColor.withValues(alpha: 0.4)
-                                : _strokeColor,
-                            strokeWidth: _strokeWidth,
-                            tool: _currentTool,
+        // The canvas has exactly the photo's aspect ratio, so a point on it maps straight to
+        // a point on the full-resolution image (strokes are stored as 0..1 fractions).
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 320),
+            child: AspectRatio(
+              aspectRatio: _decodedSourceImage!.width / _decodedSourceImage!.height,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final canvas = constraints.biggest;
+                  final color = _currentTool == 'highlighter' ? _strokeColor.withValues(alpha: 0.4) : _strokeColor;
+                  return ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.memory(_previewBytes!, fit: BoxFit.fill),
+                        GestureDetector(
+                          onPanStart: (details) {
+                            setState(() => _currentPoints = [PhotoEditorService.normalizePoint(details.localPosition, canvas)]);
+                          },
+                          onPanUpdate: (details) {
+                            final p = PhotoEditorService.normalizePoint(details.localPosition, canvas);
+                            setState(() {
+                              // Shapes need only their two corners; freehand tools keep the whole path.
+                              if (_currentTool == 'pen' || _currentTool == 'highlighter') {
+                                _currentPoints.add(p);
+                              } else if (_currentPoints.isNotEmpty) {
+                                _currentPoints = [_currentPoints.first, p];
+                              }
+                            });
+                          },
+                          onPanEnd: (details) {
+                            setState(() {
+                              if (_currentPoints.isNotEmpty) {
+                                _strokes.add(AnnotationStroke(
+                                  points: List.of(_currentPoints),
+                                  color: color,
+                                  strokeWidth: _strokeWidth,
+                                  tool: _currentTool,
+                                ));
+                                _currentPoints = [];
+                                _undoneStrokes.clear();
+                              }
+                            });
+                          },
+                          child: CustomPaint(
+                            painter: _AnnotationPainter(
+                              strokes: _strokes,
+                              currentPoints: _currentPoints,
+                              currentTool: _currentTool,
+                              currentColor: color,
+                              currentWidth: _strokeWidth,
+                            ),
                           ),
-                        );
-                        _currentPoints = [];
-                        _undoneStrokes.clear();
-                      }
-                    });
-                  },
-                  child: CustomPaint(
-                    painter: _AnnotationPainter(
-                      strokes: _strokes,
-                      currentPoints: _currentPoints,
-                      currentTool: _currentTool,
-                      currentColor: _currentTool == 'highlighter'
-                          ? _strokeColor.withValues(alpha: 0.4)
-                          : _strokeColor,
-                      currentWidth: _strokeWidth,
+                        ),
+                      ],
                     ),
-                  ),
-                ),
+                  );
+                },
               ),
-            ],
+            ),
           ),
         ),
         const SizedBox(height: 16),
         ElevatedButton.icon(
           icon: const Icon(Icons.share_rounded),
-          label: const Text('Export & Share Annotated Photo'),
+          label: Text('Export & Share Annotated Photo (${_decodedSourceImage!.width} × ${_decodedSourceImage!.height})'),
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.catImage,
             foregroundColor: Colors.white,
             minimumSize: const Size(double.infinity, 48),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           ),
-          onPressed: () async {
-            try {
-              final boundary = _repaintBoundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-              if (boundary != null) {
-                final image = await boundary.toImage(pixelRatio: 2.0);
-                final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-                if (byteData != null) {
-                  await _shareImage(byteData.buffer.asUint8List(), 'Annotated_$_sourceFileName');
-                }
-              }
-            } catch (e) {
-              _showToast('Export error: $e', isError: true);
-            }
-          },
+          onPressed: _isProcessing ? null : _exportAnnotated,
         ),
       ],
     );
   }
 
+  /// Draws the strokes onto the full-resolution photo (not the on-screen preview) and shares it.
+  Future<void> _exportAnnotated() => _runEdit('Export error', (src) async {
+        final w = src.width;
+        final h = src.height;
+        final rgba = src.convert(format: img.Format.uint8, numChannels: 4, noAnimation: true).toUint8List();
+        final base = Completer<ui.Image>();
+        ui.decodeImageFromPixels(rgba, w, h, ui.PixelFormat.rgba8888, base.complete);
+        final photo = await base.future;
+        final recorder = ui.PictureRecorder();
+        final canvas = Canvas(recorder);
+        canvas.drawImage(photo, Offset.zero, Paint());
+        _AnnotationPainter(
+          strokes: _strokes,
+          currentPoints: const [],
+          currentTool: _currentTool,
+          currentColor: _strokeColor,
+          currentWidth: _strokeWidth,
+        ).paint(canvas, Size(w.toDouble(), h.toDouble()));
+        final picture = recorder.endRecording();
+        final rendered = await picture.toImage(w, h);
+        final data = await rendered.toByteData(format: ui.ImageByteFormat.png);
+        photo.dispose();
+        picture.dispose();
+        rendered.dispose();
+        if (data == null) throw Exception('could not encode the annotated image');
+        await _shareImage(data.buffer.asUint8List(), _pngName('Annotated'));
+      });
+
   Widget _buildToolIcon(IconData icon, String toolName, String label) {
     final isSelected = _currentTool == toolName;
     return ChoiceChip(
       avatar: Icon(icon, size: 16, color: isSelected ? Colors.white : null),
-      label: Text(label),
+      label: Text(label, style: isSelected ? const TextStyle(color: Colors.white) : null),
       selected: isSelected,
       selectedColor: AppColors.catImage,
       onSelected: (_) => setState(() => _currentTool = toolName),
@@ -1274,46 +1338,55 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 12),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Background Pill', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+          value: _hasTextBackground,
+          activeThumbColor: AppColors.catImage,
+          onChanged: (v) => setState(() => _hasTextBackground = v),
+        ),
         Row(
           children: [
-            Expanded(
-              child: SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Background Pill', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                value: _hasTextBackground,
-                activeThumbColor: AppColors.catImage,
-                onChanged: (v) => setState(() => _hasTextBackground = v),
-              ),
-            ),
-            const SizedBox(width: 8),
             const Text('Font Size: ', style: TextStyle(fontWeight: FontWeight.bold)),
             Expanded(
               child: Slider(
                 value: _textFontSize,
                 min: 14.0,
                 max: 60.0,
+                label: _textFontSize.round().toString(),
                 activeColor: AppColors.catImage,
                 onChanged: (v) => setState(() => _textFontSize = v),
               ),
             ),
           ],
         ),
+        const Text('Text sits at the bottom-left; its size scales with the photo.', style: TextStyle(fontSize: 12)),
         const SizedBox(height: 16),
         const Text('Custom Logo / Watermark Image:', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
-        Row(
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             ElevatedButton.icon(
               icon: const Icon(Icons.add_photo_alternate_rounded),
               label: Text(_logoImageBytes != null ? 'Change Logo' : 'Select Logo File'),
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover),
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.darkCardHover, foregroundColor: Colors.white),
               onPressed: _pickLogoImage,
             ),
-            const SizedBox(width: 12),
             if (_logoImageBytes != null)
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: Image.memory(_logoImageBytes!, width: 44, height: 44, fit: BoxFit.contain),
+              ),
+            if (_logoImageBytes != null)
+              TextButton(
+                onPressed: () => setState(() {
+                  _logoImageBytes = null;
+                  _decodedLogoImage = null;
+                }),
+                child: const Text('Remove'),
               ),
           ],
         ),
@@ -1327,39 +1400,31 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
                   value: _logoScale,
                   min: 0.1,
                   max: 0.6,
+                  label: '${(_logoScale * 100).round()}%',
                   activeColor: AppColors.catImage,
                   onChanged: (v) => setState(() => _logoScale = v),
                 ),
               ),
             ],
           ),
-          const Text('Logo Alignment:', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
+          Row(
             children: [
-              ChoiceChip(
-                label: const Text('Bottom Right'),
-                selected: _logoAlignment == Alignment.bottomRight,
-                onSelected: (_) => setState(() => _logoAlignment = Alignment.bottomRight),
-              ),
-              ChoiceChip(
-                label: const Text('Bottom Left'),
-                selected: _logoAlignment == Alignment.bottomLeft,
-                onSelected: (_) => setState(() => _logoAlignment = Alignment.bottomLeft),
-              ),
-              ChoiceChip(
-                label: const Text('Top Right'),
-                selected: _logoAlignment == Alignment.topRight,
-                onSelected: (_) => setState(() => _logoAlignment = Alignment.topRight),
-              ),
-              ChoiceChip(
-                label: const Text('Center'),
-                selected: _logoAlignment == Alignment.center,
-                onSelected: (_) => setState(() => _logoAlignment = Alignment.center),
+              const Text('Logo Opacity: ', style: TextStyle(fontWeight: FontWeight.bold)),
+              Expanded(
+                child: Slider(
+                  value: _logoOpacity,
+                  min: 0.1,
+                  max: 1.0,
+                  label: '${(_logoOpacity * 100).round()}%',
+                  activeColor: AppColors.catImage,
+                  onChanged: (v) => setState(() => _logoOpacity = v),
+                ),
               ),
             ],
           ),
+          const Text('Logo Position:', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          _buildAnchorGrid(),
         ],
         const SizedBox(height: 20),
         ElevatedButton.icon(
@@ -1392,14 +1457,96 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
               foregroundColor: Colors.white,
               minimumSize: const Size(double.infinity, 46),
             ),
-            onPressed: () => _shareImage(_finalWatermarkedBytes!, 'Branded_$_sourceFileName'),
+            onPressed: () => _shareImage(_finalWatermarkedBytes!, _pngName('Branded')),
           ),
         ],
       ],
     );
   }
+
+  /// 3x3 grid of position cells for the logo (cell index = row * 3 + column).
+  Widget _buildAnchorGrid() {
+    const names = [
+      'Top left', 'Top center', 'Top right',
+      'Middle left', 'Center', 'Middle right',
+      'Bottom left', 'Bottom center', 'Bottom right',
+    ];
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var row = 0; row < 3; row++)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var col = 0; col < 3; col++)
+                  _buildAnchorCell(row * 3 + col, names[row * 3 + col]),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAnchorCell(int index, String name) {
+    final selected = _logoAnchor == index;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: 'Logo position: $name',
+      child: Tooltip(
+        message: name,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => setState(() => _logoAnchor = index),
+          child: Container(
+            width: 48,
+            height: 48,
+            margin: const EdgeInsets.all(2),
+            decoration: BoxDecoration(
+              color: selected ? AppColors.catImage : AppColors.catImage.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.catImage.withValues(alpha: selected ? 1 : 0.35)),
+            ),
+            child: selected ? const Icon(Icons.check_rounded, color: Colors.white, size: 20) : null,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
+/// Outlines the censor boxes (fractions of the photo) over its preview; the active one is bold.
+class _BlurBoxPainter extends CustomPainter {
+  final List<BlurArea> areas;
+  final int activeIndex;
+
+  _BlurBoxPainter(this.areas, this.activeIndex);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (var i = 0; i < areas.length; i++) {
+      final a = areas[i];
+      final rect = Rect.fromLTWH(a.x * size.width, a.y * size.height, a.width * size.width, a.height * size.height);
+      canvas.drawRect(rect, Paint()..color = (i == activeIndex ? AppColors.catImage : Colors.white).withValues(alpha: 0.18));
+      canvas.drawRect(
+        rect,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = i == activeIndex ? 3 : 1.5
+          ..color = i == activeIndex ? AppColors.catImage : Colors.white,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BlurBoxPainter oldDelegate) => true;
+}
+
+/// Paints annotation strokes whose points are 0..1 fractions of [size]. Line widths and the
+/// arrowhead are defined for a 360 px wide canvas and scale with it, so the same strokes
+/// look identical on screen and when painted onto the full-resolution photo.
 class _AnnotationPainter extends CustomPainter {
   final List<AnnotationStroke> strokes;
   final List<Offset> currentPoints;
@@ -1417,36 +1564,36 @@ class _AnnotationPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    final k = size.width / PhotoEditorService.annotationReferenceWidth;
     for (final stroke in strokes) {
-      _drawStroke(canvas, stroke.points, stroke.color, stroke.strokeWidth, stroke.tool);
+      _drawStroke(canvas, size, k, stroke.points, stroke.color, stroke.strokeWidth, stroke.tool);
     }
     if (currentPoints.isNotEmpty) {
-      _drawStroke(canvas, currentPoints, currentColor, currentWidth, currentTool);
+      _drawStroke(canvas, size, k, currentPoints, currentColor, currentWidth, currentTool);
     }
   }
 
-  void _drawStroke(Canvas canvas, List<Offset> pts, Color color, double width, String tool) {
-    if (pts.isEmpty) return;
+  void _drawStroke(Canvas canvas, Size size, double k, List<Offset> norm, Color color, double width, String tool) {
+    if (norm.isEmpty) return;
+    final pts = [for (final p in norm) Offset(p.dx * size.width, p.dy * size.height)];
     final paint = Paint()
       ..color = color
-      ..strokeWidth = width
+      ..strokeWidth = width * k
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..style = PaintingStyle.stroke;
 
     if (tool == 'rect' && pts.length >= 2) {
-      final rect = Rect.fromPoints(pts.first, pts.last);
-      canvas.drawRect(rect, paint);
+      canvas.drawRect(Rect.fromPoints(pts.first, pts.last), paint);
     } else if (tool == 'circle' && pts.length >= 2) {
-      final rect = Rect.fromPoints(pts.first, pts.last);
-      canvas.drawOval(rect, paint);
+      canvas.drawOval(Rect.fromPoints(pts.first, pts.last), paint);
     } else if (tool == 'arrow' && pts.length >= 2) {
       final p1 = pts.first;
       final p2 = pts.last;
       canvas.drawLine(p1, p2, paint);
       // Draw arrowhead
       final angle = atan2(p2.dy - p1.dy, p2.dx - p1.dx);
-      const arrowSize = 16.0;
+      final arrowSize = 16.0 * k;
       final path = Path()
         ..moveTo(p2.dx, p2.dy)
         ..lineTo(p2.dx - arrowSize * cos(angle - pi / 6), p2.dy - arrowSize * sin(angle - pi / 6))
@@ -1455,6 +1602,9 @@ class _AnnotationPainter extends CustomPainter {
       canvas.drawPath(path, paint);
     } else if (tool == 'line' && pts.length >= 2) {
       canvas.drawLine(pts.first, pts.last, paint);
+    } else if (pts.length == 1) {
+      // A tap: draw a dot (a one-point path draws nothing).
+      canvas.drawCircle(pts.first, width * k / 2, paint..style = PaintingStyle.fill);
     } else {
       // Pen or highlighter continuous curve
       final path = Path()..moveTo(pts.first.dx, pts.first.dy);

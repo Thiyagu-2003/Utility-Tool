@@ -1,17 +1,20 @@
 import 'dart:convert';
+import 'dart:isolate';
+import 'dart:math';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
-import 'package:printing/printing.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/share_utils.dart';
 import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 import 'photo_editor_screen.dart';
+import 'photo_editor_service.dart';
 
 enum ImageToolkitTab {
   compress('Compress', Icons.compress_rounded),
@@ -73,7 +76,8 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
 
   // 3. Format Convert State
   LoadedImage? _convertImage;
-  String _targetFormat = 'PNG'; // JPG, PNG, WEBP, BMP
+  String _targetFormat = 'PNG'; // JPG, PNG, BMP, GIF
+  String _convertedFormat = 'PNG'; // format _convertedBytes really is
   Uint8List? _convertedBytes;
 
   // 4. Rotate & Flip State
@@ -93,10 +97,13 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
   LoadedImage? _base64SourceImage;
   final TextEditingController _base64StringController = TextEditingController();
   Uint8List? _base64DecodedBytes;
+  String? _base64Full; // the whole string when the text box shows only the start of a huge one
+  static const _base64BoxLimit = 20000;
 
   // 7. Remove EXIF State
   LoadedImage? _exifSourceImage;
   Uint8List? _cleanExifBytes;
+  String _cleanExifExt = 'jpg';
 
   // 8. Watermark State
   LoadedImage? _watermarkSourceImage;
@@ -111,6 +118,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
   int _sheetCopies = 6; // 4, 6, 8, 12
   Uint8List? _passportSingleBytes;
   Uint8List? _passportSheetBytes;
+  int _passportPlaced = 0;
 
   @override
   void dispose() {
@@ -123,32 +131,58 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
 
   // --- HELPERS ---
 
+  bool _isBusy = false;
+  Future<void> Function()? _queuedJob;
+
+  /// Runs [job] with the busy flag set and reports failures. Heavy pixel work inside [job] must go
+  /// through an `...InBackground` function so the UI never freezes. Only one job runs at a time; a
+  /// request that arrives meanwhile is queued (the newest one wins) rather than silently dropped.
+  Future<void> _work(String failure, Future<void> Function() job) async {
+    if (_isBusy) {
+      _queuedJob = () => _work(failure, job);
+      return;
+    }
+    PreferencesService().triggerHaptic();
+    setState(() => _isBusy = true);
+    try {
+      await job();
+    } catch (e) {
+      _showError('$failure: $e');
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+      final next = _queuedJob;
+      _queuedJob = null;
+      if (next != null && mounted) next();
+    }
+  }
+
   Future<LoadedImage?> _pickSingleImage() async {
     PreferencesService().triggerHaptic();
     try {
       final file = await FilePicker.pickFile(
         type: FileType.image,
       );
-
-      if (file != null) {
-        final bytes = await file.readAsBytes();
-        final decoded = img.decodeImage(bytes);
-        if (decoded != null) {
-          final ext = file.extension?.toUpperCase() ?? 'JPG';
-          return LoadedImage(
-            name: file.name,
-            bytes: bytes,
-            width: decoded.width,
-            height: decoded.height,
-            sizeBytes: bytes.length,
-            format: ext,
-          );
-        }
+      if (file == null) return null;
+      final bytes = await file.readAsBytes();
+      if (!mounted) return null;
+      final size = await readImageSizeInBackground(bytes);
+      if (!mounted) return null;
+      if (size == null) {
+        _showError('Unsupported or corrupt image file.');
+        return null;
       }
+      return LoadedImage(
+        name: file.name,
+        bytes: bytes,
+        width: size.$1,
+        height: size.$2,
+        sizeBytes: bytes.length,
+        format: file.extension?.toUpperCase() ?? 'JPG',
+      );
     } catch (e) {
       _showError('Error picking image: $e');
+      return null;
     }
-    return null;
   }
 
   void _showError(String message) {
@@ -162,10 +196,26 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
     );
   }
 
+  void _showInfo(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+    );
+  }
+
+  Future<void> _share(Uint8List bytes, String filename) async {
+    PreferencesService().triggerHaptic();
+    try {
+      await shareFileBytes(bytes, filename);
+    } catch (e) {
+      _showError('Share failed: $e');
+    }
+  }
+
   // --- TAB 1: COMPRESS ---
   Future<void> _pickCompressImage() async {
     final image = await _pickSingleImage();
-    if (image != null) {
+    if (image != null && mounted) {
       setState(() {
         _compressImage = image;
         _compressedBytes = null;
@@ -176,28 +226,27 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
   }
 
   Future<void> _runCompression() async {
-    if (_compressImage == null) return;
-    PreferencesService().triggerHaptic();
-
-    try {
-      final decoded = img.decodeImage(_compressImage!.bytes);
-      if (decoded != null) {
-        final quality = _compressQuality.round().clamp(1, 100);
-        final compressed = img.encodeJpg(decoded, quality: quality);
-        setState(() {
-          _compressedBytes = Uint8List.fromList(compressed);
-          _compressedSizeBytes = compressed.length;
-        });
+    final source = _compressImage;
+    if (source == null) return;
+    final quality = _compressQuality.round().clamp(1, 100);
+    await _work('Compression error', () async {
+      final out = await compressImageInBackground(source.bytes, quality);
+      if (!mounted || !identical(source, _compressImage)) return; // another image was picked meanwhile
+      if (out == null) {
+        _showError('Could not read that image.');
+        return;
       }
-    } catch (e) {
-      _showError('Compression error: $e');
-    }
+      setState(() {
+        _compressedBytes = out;
+        _compressedSizeBytes = out.length;
+      });
+    });
   }
 
   // --- TAB 2: RESIZE & CROP ---
   Future<void> _pickResizeImage() async {
     final image = await _pickSingleImage();
-    if (image != null) {
+    if (image != null && mounted) {
       setState(() {
         _resizeImage = image;
         _resizeWidthController.text = image.width.toString();
@@ -212,6 +261,15 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
     if (_resizeImage == null) return;
     setState(() {
       final w = _resizeImage!.width;
+      // Lock subsequent edits to the preset's ratio, not the original image's.
+      _aspectRatioFactor = switch (preset) {
+        '1:1 Square' => 1.0,
+        '16:9 Landscape' => 16 / 9,
+        '4:3 Standard' => 4 / 3,
+        '9:16 Story' => 9 / 16,
+        _ => _aspectRatioFactor,
+      };
+      _resizedBytes = null;
       if (preset == '1:1 Square') {
         final side = w < _resizeImage!.height ? w : _resizeImage!.height;
         _resizeWidthController.text = side.toString();
@@ -232,37 +290,49 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
     });
   }
 
-  Future<void> _runResizeCrop() async {
-    if (_resizeImage == null) return;
-    PreferencesService().triggerHaptic();
-
-    try {
-      final decoded = img.decodeImage(_resizeImage!.bytes);
-      if (decoded != null) {
-        final targetW = int.tryParse(_resizeWidthController.text) ?? decoded.width;
-        final targetH = int.tryParse(_resizeHeightController.text) ?? decoded.height;
-
-        final resized = img.copyResize(
-          decoded,
-          width: targetW,
-          height: targetH,
-          interpolation: img.Interpolation.linear,
-        );
-
-        final encoded = img.encodePng(resized);
-        setState(() {
-          _resizedBytes = Uint8List.fromList(encoded);
-        });
+  /// Keeps the other dimension in step while the aspect ratio is locked; a half-typed or empty
+  /// field leaves it alone (it used to flip to 0). Any edit makes the old result stale.
+  void _onResizeDimensionChanged({required bool widthChanged, required String text}) {
+    final value = int.tryParse(text);
+    if (_maintainAspectRatio && value != null && value > 0) {
+      if (widthChanged) {
+        _resizeHeightController.text = (value / _aspectRatioFactor).round().toString();
+      } else {
+        _resizeWidthController.text = (value * _aspectRatioFactor).round().toString();
       }
-    } catch (e) {
-      _showError('Resize failed: $e');
     }
+    if (_resizedBytes != null) setState(() => _resizedBytes = null);
+  }
+
+  Future<void> _runResizeCrop() async {
+    final source = _resizeImage;
+    if (source == null) return;
+    final targetW = int.tryParse(_resizeWidthController.text.trim()) ?? source.width;
+    final targetH = int.tryParse(_resizeHeightController.text.trim()) ?? source.height;
+    if (targetW < 1 || targetH < 1 || targetW > 10000 || targetH > 10000) {
+      _showError('Width and height must be between 1 and 10000 px.');
+      return;
+    }
+    if (targetW * targetH > maxResizePixels) {
+      _showError('That output is over ${maxResizePixels ~/ 1000000} megapixels, more than a phone can safely build. Use smaller dimensions.');
+      return;
+    }
+    await _work('Resize failed', () async {
+      // Centre-crop to the target ratio first so presets crop instead of stretching.
+      final out = await resizeImageInBackground(source.bytes, targetW, targetH);
+      if (!mounted || !identical(source, _resizeImage)) return;
+      if (out == null) {
+        _showError('Could not read that image.');
+        return;
+      }
+      setState(() => _resizedBytes = out);
+    });
   }
 
   // --- TAB 3: FORMAT CONVERT ---
   Future<void> _pickConvertImage() async {
     final image = await _pickSingleImage();
-    if (image != null) {
+    if (image != null && mounted) {
       setState(() {
         _convertImage = image;
         _convertedBytes = null;
@@ -271,42 +341,27 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
   }
 
   Future<void> _runFormatConvert() async {
-    if (_convertImage == null) return;
-    PreferencesService().triggerHaptic();
-
-    try {
-      final decoded = img.decodeImage(_convertImage!.bytes);
-      if (decoded != null) {
-        List<int> encodedBytes;
-        switch (_targetFormat) {
-          case 'JPG':
-            encodedBytes = img.encodeJpg(decoded, quality: 90);
-            break;
-          case 'PNG':
-            encodedBytes = img.encodePng(decoded);
-            break;
-          case 'BMP':
-            encodedBytes = img.encodeBmp(decoded);
-            break;
-          case 'GIF':
-            encodedBytes = img.encodeGif(decoded);
-            break;
-          default:
-            encodedBytes = img.encodePng(decoded);
-        }
-        setState(() {
-          _convertedBytes = Uint8List.fromList(encodedBytes);
-        });
+    final source = _convertImage;
+    if (source == null) return;
+    final format = _targetFormat;
+    await _work('Conversion failed', () async {
+      final out = await convertImageInBackground(source.bytes, format);
+      if (!mounted || !identical(source, _convertImage)) return;
+      if (out == null) {
+        _showError('Could not read that image.');
+        return;
       }
-    } catch (e) {
-      _showError('Conversion failed: $e');
-    }
+      setState(() {
+        _convertedBytes = out;
+        _convertedFormat = format;
+      });
+    });
   }
 
   // --- TAB 4: ROTATE & FLIP ---
   Future<void> _pickRotateImage() async {
     final image = await _pickSingleImage();
-    if (image != null) {
+    if (image != null && mounted) {
       setState(() {
         _rotateImage = image;
         _rotationAngle = 0;
@@ -314,34 +369,31 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
         _flipVertical = false;
         _transformedBytes = null;
       });
+      _runTransform();
     }
   }
 
   Future<void> _runTransform() async {
-    if (_rotateImage == null) return;
-    PreferencesService().triggerHaptic();
-
-    try {
-      var current = img.decodeImage(_rotateImage!.bytes);
-      if (current != null) {
-        if (_rotationAngle != 0) {
-          current = img.copyRotate(current, angle: _rotationAngle.toDouble());
-        }
-        if (_flipHorizontal) {
-          current = img.flipHorizontal(current);
-        }
-        if (_flipVertical) {
-          current = img.flipVertical(current);
-        }
-
-        final encoded = img.encodePng(current);
-        setState(() {
-          _transformedBytes = Uint8List.fromList(encoded);
-        });
+    final source = _rotateImage;
+    if (source == null) return;
+    final angle = _rotationAngle;
+    final flipH = _flipHorizontal;
+    final flipV = _flipVertical;
+    await _work('Transformation failed', () async {
+      final out = await transformImageInBackground(source.bytes, angle, flipH, flipV);
+      if (!mounted || !identical(source, _rotateImage)) return;
+      if (out == null) {
+        _showError('Could not read that image.');
+        return;
       }
-    } catch (e) {
-      _showError('Transformation failed: $e');
-    }
+      setState(() => _transformedBytes = out);
+    });
+  }
+
+  /// Turn the picture by [delta] degrees as seen on screen, then refresh the preview.
+  void _rotate(int delta) {
+    setState(() => _rotationAngle = nextRotation(_rotationAngle, delta, _flipHorizontal, _flipVertical));
+    _runTransform();
   }
 
   // --- TAB 5: COMBINE IMAGES ---
@@ -353,23 +405,29 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
       );
 
       if (files.isNotEmpty) {
+        var skipped = 0;
         for (final file in files) {
           final bytes = await file.readAsBytes();
-          final decoded = img.decodeImage(bytes);
-          if (decoded != null) {
-            _combineImages.add(
-              LoadedImage(
-                name: file.name,
-                bytes: bytes,
-                width: decoded.width,
-                height: decoded.height,
-                sizeBytes: bytes.length,
-                format: file.extension?.toUpperCase() ?? 'PNG',
-              ),
-            );
+          if (!mounted) return;
+          final size = await readImageSizeInBackground(bytes);
+          if (!mounted) return;
+          if (size == null) {
+            skipped++;
+            continue;
           }
+          _combineImages.add(
+            LoadedImage(
+              name: file.name,
+              bytes: bytes,
+              width: size.$1,
+              height: size.$2,
+              sizeBytes: bytes.length,
+              format: file.extension?.toUpperCase() ?? 'PNG',
+            ),
+          );
         }
-        setState(() {});
+        if (skipped > 0) _showError('$skipped file(s) could not be read as images and were skipped.');
+        setState(() => _combinedResultBytes = null);
       }
     } catch (e) {
       _showError('Error picking images: $e');
@@ -381,104 +439,50 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
       _showError('Select at least 2 images to combine.');
       return;
     }
-
-    PreferencesService().triggerHaptic();
-
-    try {
-      final List<img.Image> decodedList = [];
-      for (final item in _combineImages) {
-        final dec = img.decodeImage(item.bytes);
-        if (dec != null) decodedList.add(dec);
-      }
-
-      final spacing = _combineSpacing.toInt();
-      img.Image canvas;
-
-      if (_combineLayout == 'Side by Side') {
-        final targetH = decodedList.map((i) => i.height).reduce((a, b) => a > b ? a : b);
-        var totalW = spacing;
-        final List<img.Image> scaled = [];
-
-        for (final item in decodedList) {
-          final res = img.copyResize(item, height: targetH);
-          scaled.add(res);
-          totalW += res.width + spacing;
-        }
-
-        canvas = img.Image(width: totalW, height: targetH + (spacing * 2));
-        img.fill(canvas, color: img.ColorRgba8(255, 255, 255, 255));
-
-        var currentX = spacing;
-        for (final item in scaled) {
-          img.compositeImage(canvas, item, dstX: currentX, dstY: spacing);
-          currentX += item.width + spacing;
-        }
-      } else if (_combineLayout == 'Stacked Vertical') {
-        final targetW = decodedList.map((i) => i.width).reduce((a, b) => a > b ? a : b);
-        var totalH = spacing;
-        final List<img.Image> scaled = [];
-
-        for (final item in decodedList) {
-          final res = img.copyResize(item, width: targetW);
-          scaled.add(res);
-          totalH += res.height + spacing;
-        }
-
-        canvas = img.Image(width: targetW + (spacing * 2), height: totalH);
-        img.fill(canvas, color: img.ColorRgba8(255, 255, 255, 255));
-
-        var currentY = spacing;
-        for (final item in scaled) {
-          img.compositeImage(canvas, item, dstX: spacing, dstY: currentY);
-          currentY += item.height + spacing;
-        }
-      } else {
-        // 2x2 Grid (for up to 4 images)
-        final cellW = 500;
-        final cellH = 500;
-        canvas = img.Image(width: (cellW * 2) + (spacing * 3), height: (cellH * 2) + (spacing * 3));
-        img.fill(canvas, color: img.ColorRgba8(255, 255, 255, 255));
-
-        for (int i = 0; i < decodedList.length && i < 4; i++) {
-          final res = img.copyResize(decodedList[i], width: cellW, height: cellH);
-          final row = i ~/ 2;
-          final col = i % 2;
-          final x = spacing + col * (cellW + spacing);
-          final y = spacing + row * (cellH + spacing);
-          img.compositeImage(canvas, res, dstX: x, dstY: y);
-        }
-      }
-
-      final encoded = img.encodePng(canvas);
-      setState(() {
-        _combinedResultBytes = Uint8List.fromList(encoded);
-      });
-    } catch (e) {
-      _showError('Combine error: $e');
+    final inputs = [for (final i in _combineImages) i.bytes];
+    final layout = _combineLayout;
+    final spacing = _combineSpacing.toInt();
+    if (layout == '2x2 Grid' && inputs.length > 4) {
+      _showInfo('2x2 Grid uses the first 4 images only.');
     }
+    await _work('Combine error', () async {
+      final out = await combineImagesInBackground(inputs, layout, spacing);
+      if (!mounted) return;
+      if (out == null) {
+        _showError('Fewer than 2 of those files could be read as images.');
+        return;
+      }
+      setState(() => _combinedResultBytes = out);
+    });
   }
 
   // --- TAB 6: BASE64 ---
+
+  /// The text the Base64 buttons act on: the real string, even when the box only shows the start
+  /// of a very large one (a multi-megabyte string in a text field freezes the UI).
+  String get _base64Text => _base64Full ?? _base64StringController.text;
+
   Future<void> _pickBase64Image() async {
     final image = await _pickSingleImage();
-    if (image != null) {
-      final base64Str = 'data:image/png;base64,${base64Encode(image.bytes)}';
-      setState(() {
-        _base64SourceImage = image;
-        _base64StringController.text = base64Str;
-      });
-    }
+    if (image == null || !mounted) return;
+    final full = 'data:${imageMimeType(image.bytes)};base64,${base64Encode(image.bytes)}';
+    final isBig = full.length > _base64BoxLimit;
+    setState(() {
+      _base64SourceImage = image;
+      _base64DecodedBytes = null;
+      _base64Full = isBig ? full : null;
+      _base64StringController.text = isBig
+          ? '${full.substring(0, _base64BoxLimit ~/ 10)}...\n[${full.length} characters in total - only the start is shown. '
+              'Copy Base64 Data copies all of it.]'
+          : full;
+    });
   }
 
   void _decodeBase64String() {
-    final input = _base64StringController.text.trim();
+    final input = _base64Text.trim();
     if (input.isEmpty) return;
     try {
-      var clean = input;
-      if (clean.contains(',')) {
-        clean = clean.split(',').last;
-      }
-      final bytes = base64Decode(clean);
+      final bytes = decodeBase64Image(input);
       setState(() {
         _base64DecodedBytes = bytes;
       });
@@ -488,10 +492,12 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
     }
   }
 
+  String _base64DecodedExt() => imageMimeType(_base64DecodedBytes!).split('/').last.replaceAll('jpeg', 'jpg');
+
   // --- TAB 7: REMOVE EXIF ---
   Future<void> _pickExifImage() async {
     final image = await _pickSingleImage();
-    if (image != null) {
+    if (image != null && mounted) {
       setState(() {
         _exifSourceImage = image;
         _cleanExifBytes = null;
@@ -501,28 +507,26 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
   }
 
   Future<void> _stripExif() async {
-    if (_exifSourceImage == null) return;
-    PreferencesService().triggerHaptic();
-
-    try {
-      final decoded = img.decodeImage(_exifSourceImage!.bytes);
-      if (decoded != null) {
-        final cleanImage = img.Image.from(decoded);
-        cleanImage.exif.clear();
-        final encoded = img.encodeJpg(cleanImage, quality: 95);
-        setState(() {
-          _cleanExifBytes = Uint8List.fromList(encoded);
-        });
+    final source = _exifSourceImage;
+    if (source == null) return;
+    await _work('EXIF stripping failed', () async {
+      final clean = await stripImageMetadataInBackground(source.bytes);
+      if (!mounted || !identical(source, _exifSourceImage)) return;
+      if (clean == null) {
+        _showError('Could not read that image.');
+        return;
       }
-    } catch (e) {
-      _showError('EXIF stripping failed: $e');
-    }
+      setState(() {
+        _cleanExifBytes = clean.$1;
+        _cleanExifExt = clean.$2;
+      });
+    });
   }
 
   // --- TAB 8: WATERMARK ---
   Future<void> _pickWatermarkImage() async {
     final image = await _pickSingleImage();
-    if (image != null) {
+    if (image != null && mounted) {
       setState(() {
         _watermarkSourceImage = image;
         _watermarkedBytes = null;
@@ -531,64 +535,30 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
   }
 
   Future<void> _applyWatermark() async {
-    if (_watermarkSourceImage == null) return;
-    PreferencesService().triggerHaptic();
-
-    try {
-      final decoded = img.decodeImage(_watermarkSourceImage!.bytes);
-      if (decoded != null) {
-        final text = _watermarkTextController.text.trim();
-        final font = img.arial48;
-
-        if (_watermarkPosition == 'Repeat Diagonal') {
-          for (int y = 50; y < decoded.height; y += 180) {
-            for (int x = 50; x < decoded.width; x += 300) {
-              img.drawString(
-                decoded,
-                text,
-                font: font,
-                x: x,
-                y: y,
-                color: img.ColorRgba8(255, 0, 0, (_watermarkOpacity * 255).round()),
-              );
-            }
-          }
-        } else {
-          int x = (decoded.width / 2 - 100).toInt();
-          int y = (decoded.height / 2 - 20).toInt();
-
-          if (_watermarkPosition == 'Bottom Right') {
-            x = decoded.width - 250;
-            y = decoded.height - 80;
-          } else if (_watermarkPosition == 'Top Left') {
-            x = 40;
-            y = 40;
-          }
-
-          img.drawString(
-            decoded,
-            text,
-            font: font,
-            x: x.clamp(0, decoded.width),
-            y: y.clamp(0, decoded.height),
-            color: img.ColorRgba8(255, 0, 0, (_watermarkOpacity * 255).round()),
-          );
-        }
-
-        final encoded = img.encodePng(decoded);
-        setState(() {
-          _watermarkedBytes = Uint8List.fromList(encoded);
-        });
-      }
-    } catch (e) {
-      _showError('Watermarking failed: $e');
+    final source = _watermarkSourceImage;
+    if (source == null) return;
+    final text = _watermarkTextController.text.trim();
+    if (text.isEmpty) {
+      _showError('Enter watermark text first.');
+      return;
     }
+    final position = _watermarkPosition;
+    final opacity = _watermarkOpacity;
+    await _work('Watermarking failed', () async {
+      final out = await watermarkImageInBackground(source.bytes, text, position, opacity);
+      if (!mounted || !identical(source, _watermarkSourceImage)) return;
+      if (out == null) {
+        _showError('Could not read that image.');
+        return;
+      }
+      setState(() => _watermarkedBytes = out);
+    });
   }
 
   // --- TAB 9: PASSPORT PHOTO MAKER ---
   Future<void> _pickPassportImage() async {
     final image = await _pickSingleImage();
-    if (image != null) {
+    if (image != null && mounted) {
       setState(() {
         _passportSourceImage = image;
         _passportSingleBytes = null;
@@ -599,61 +569,31 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
   }
 
   Future<void> _generatePassportPhotos() async {
-    if (_passportSourceImage == null) return;
-    PreferencesService().triggerHaptic();
-
-    try {
-      final decoded = img.decodeImage(_passportSourceImage!.bytes);
-      if (decoded != null) {
-        int targetW = 600;
-        int targetH = 600;
-
-        if (_passportPreset == 'Schengen / India (35x45mm)') {
-          targetW = 413;
-          targetH = 531;
-        } else if (_passportPreset == 'ID Card (30x40mm)') {
-          targetW = 354;
-          targetH = 472;
-        }
-
-        // Center crop and resize
-        final cropSide = decoded.width < decoded.height ? decoded.width : decoded.height;
-        final cropX = (decoded.width - cropSide) ~/ 2;
-        final cropY = (decoded.height - cropSide) ~/ 2;
-        final cropped = img.copyCrop(decoded, x: cropX, y: cropY, width: cropSide, height: cropSide);
-        final single = img.copyResize(cropped, width: targetW, height: targetH);
-
-        final singleBytes = img.encodePng(single);
-
-        // Generate printable 4x6" Sheet (1200 x 1800 px)
-        final sheet = img.Image(width: 1200, height: 1800);
-        img.fill(sheet, color: img.ColorRgba8(255, 255, 255, 255));
-
-        final cols = 2;
-        final rows = _sheetCopies ~/ 2;
-        final marginX = 80;
-        final marginY = 80;
-        final gapX = (1200 - (2 * marginX) - (cols * targetW)) ~/ (cols - 1 > 0 ? cols - 1 : 1);
-        final gapY = (1800 - (2 * marginY) - (rows * targetH)) ~/ (rows - 1 > 0 ? rows - 1 : 1);
-
-        for (int r = 0; r < rows; r++) {
-          for (int c = 0; c < cols; c++) {
-            final x = marginX + c * (targetW + gapX);
-            final y = marginY + r * (targetH + gapY);
-            img.compositeImage(sheet, single, dstX: x, dstY: y);
-          }
-        }
-
-        final sheetBytes = img.encodeJpg(sheet, quality: 98);
-
-        setState(() {
-          _passportSingleBytes = Uint8List.fromList(singleBytes);
-          _passportSheetBytes = Uint8List.fromList(sheetBytes);
-        });
-      }
-    } catch (e) {
-      _showError('Passport photo generation error: $e');
+    final source = _passportSourceImage;
+    if (source == null) return;
+    var targetW = 600;
+    var targetH = 600;
+    if (_passportPreset == 'Schengen / India (35x45mm)') {
+      targetW = 413;
+      targetH = 531;
+    } else if (_passportPreset == 'ID Card (30x40mm)') {
+      targetW = 354;
+      targetH = 472;
     }
+    final copies = _sheetCopies;
+    await _work('Passport photo generation error', () async {
+      final result = await makePassportPhotosInBackground(source.bytes, targetW, targetH, copies);
+      if (!mounted || !identical(source, _passportSourceImage)) return;
+      if (result == null) {
+        _showError('Could not read that image.');
+        return;
+      }
+      setState(() {
+        _passportSingleBytes = result.single;
+        _passportSheetBytes = result.sheet;
+        _passportPlaced = result.placed;
+      });
+    });
   }
 
   @override
@@ -662,30 +602,51 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
 
     return ToolScaffold(
       title: 'Image Toolkit',
-      category: ToolCategory.filesText,
+      category: ToolCategory.imagePhoto,
       toolId: 'image_toolkit',
       onReset: () {
+        _queuedJob = null;
         setState(() {
           _compressImage = null;
           _compressedBytes = null;
+          _compressedSizeBytes = 0;
+          _compressQuality = 75;
           _resizeImage = null;
           _resizedBytes = null;
+          _resizeWidthController.clear();
+          _resizeHeightController.clear();
+          _maintainAspectRatio = true;
+          _aspectRatioFactor = 1.0;
           _convertImage = null;
           _convertedBytes = null;
+          _targetFormat = 'PNG';
+          _convertedFormat = 'PNG';
           _rotateImage = null;
           _transformedBytes = null;
+          _rotationAngle = 0;
+          _flipHorizontal = false;
+          _flipVertical = false;
           _combineImages.clear();
+          _combineLayout = 'Side by Side';
           _combinedResultBytes = null;
           _base64SourceImage = null;
           _base64StringController.clear();
+          _base64Full = null;
           _base64DecodedBytes = null;
           _exifSourceImage = null;
           _cleanExifBytes = null;
+          _cleanExifExt = 'jpg';
           _watermarkSourceImage = null;
           _watermarkedBytes = null;
+          _watermarkTextController.text = 'CONFIDENTIAL';
+          _watermarkPosition = 'Center';
+          _watermarkOpacity = 0.5;
           _passportSourceImage = null;
           _passportSingleBytes = null;
           _passportSheetBytes = null;
+          _passportPreset = 'US Passport (2x2 in)';
+          _sheetCopies = 6;
+          _passportPlaced = 0;
         });
       },
       body: Column(
@@ -734,6 +695,10 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
             onTabSelected: (tab) => setState(() => _activeTab = tab),
           ),
           const SizedBox(height: 20),
+          if (_isBusy) ...[
+            const LinearProgressIndicator(color: AppColors.catConverter),
+            const SizedBox(height: 16),
+          ],
 
           if (_activeTab == ImageToolkitTab.compress) _buildCompressTab(isDark),
           if (_activeTab == ImageToolkitTab.resizeCrop) _buildResizeCropTab(isDark),
@@ -764,12 +729,16 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
         ResultCard(
           title: 'Compression Overview',
           primaryResult: _compressedSizeBytes > 0 ? '$compKb KB' : 'Select an Image',
-          subtitle: _compressedSizeBytes > 0 ? 'Saved $savedPercent% of original $origKb KB' : 'Reduces file size with smart JPEG encoding',
+          subtitle: _compressedSizeBytes == 0
+              ? 'Reduces file size with smart JPEG encoding'
+              : (savedPercent >= 0
+                  ? 'Saved $savedPercent% of original $origKb KB'
+                  : '${-savedPercent}% larger than the original $origKb KB - lower the quality'),
           accentColor: AppColors.catConverter,
           breakdowns: [
             BreakdownItem(label: 'Original Size', value: '$origKb KB'),
             BreakdownItem(label: 'Quality Level', value: '${_compressQuality.round()}%'),
-            BreakdownItem(label: 'Compression', value: savedPercent > 0 ? '-$savedPercent%' : 'Ready'),
+            BreakdownItem(label: 'Compression', value: _compressedSizeBytes == 0 ? 'Ready' : (savedPercent >= 0 ? '-$savedPercent%' : '+${-savedPercent}%')),
           ],
         ),
         const SizedBox(height: 20),
@@ -794,10 +763,9 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
             divisions: 19,
             activeColor: AppColors.catConverter,
             label: '${_compressQuality.round()}%',
-            onChanged: (val) {
-              setState(() => _compressQuality = val);
-              _runCompression();
-            },
+            onChanged: (val) => setState(() => _compressQuality = val),
+            // Re-encode once on release instead of on every drag tick.
+            onChangeEnd: (_) => _runCompression(),
           ),
           if (_compressedBytes != null) ...[
             const SizedBox(height: 16),
@@ -817,7 +785,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 ),
-                onPressed: () => Printing.sharePdf(bytes: _compressedBytes!, filename: 'Compressed_${_compressImage!.name}'),
+                onPressed: () => _share(_compressedBytes!, withExtension('Compressed_${_compressImage!.name}', 'jpg')),
               ),
             ),
           ],
@@ -870,13 +838,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
                   controller: _resizeWidthController,
                   keyboardType: TextInputType.number,
                   prefixIcon: Icons.swap_horiz_rounded,
-                  onChanged: (val) {
-                    if (_maintainAspectRatio) {
-                      final w = int.tryParse(val) ?? 0;
-                      final h = (w / _aspectRatioFactor).round();
-                      _resizeHeightController.text = h.toString();
-                    }
-                  },
+                  onChanged: (val) => _onResizeDimensionChanged(widthChanged: true, text: val),
                 ),
               ),
               const SizedBox(width: 12),
@@ -886,13 +848,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
                   controller: _resizeHeightController,
                   keyboardType: TextInputType.number,
                   prefixIcon: Icons.swap_vert_rounded,
-                  onChanged: (val) {
-                    if (_maintainAspectRatio) {
-                      final h = int.tryParse(val) ?? 0;
-                      final w = (h * _aspectRatioFactor).round();
-                      _resizeWidthController.text = w.toString();
-                    }
-                  },
+                  onChanged: (val) => _onResizeDimensionChanged(widthChanged: false, text: val),
                 ),
               ),
             ],
@@ -901,7 +857,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
             contentPadding: EdgeInsets.zero,
             title: const Text('Lock Aspect Ratio', style: TextStyle(fontWeight: FontWeight.w600)),
             value: _maintainAspectRatio,
-            activeColor: AppColors.catConverter,
+            activeThumbColor: AppColors.catConverter,
             onChanged: (val) => setState(() => _maintainAspectRatio = val),
           ),
           const SizedBox(height: 16),
@@ -934,7 +890,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
                 foregroundColor: Colors.white,
                 minimumSize: const Size(double.infinity, 44),
               ),
-              onPressed: () => Printing.sharePdf(bytes: _resizedBytes!, filename: 'Resized_${_resizeImage!.name}'),
+              onPressed: () => _share(_resizedBytes!, withExtension('Resized_${_resizeImage!.name}', 'png')),
             ),
           ],
         ],
@@ -949,7 +905,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
         ResultCard(
           title: 'Format Converter',
           primaryResult: _convertImage != null ? '${_convertImage!.format} ➔ $_targetFormat' : 'Select an Image',
-          subtitle: 'Converts between JPG, PNG, BMP, and GIF formats losslessly',
+          subtitle: 'Converts between JPG, PNG, BMP, and GIF formats',
           accentColor: AppColors.catConverter,
         ),
         const SizedBox(height: 20),
@@ -971,10 +927,16 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
               labelText: 'Target Format',
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
             ),
-            value: _targetFormat,
+            initialValue: _targetFormat,
             items: ['PNG', 'JPG', 'BMP', 'GIF'].map((f) => DropdownMenuItem(value: f, child: Text(f))).toList(),
             onChanged: (val) {
-              if (val != null) setState(() => _targetFormat = val);
+              // The old conversion is in the previous format, so drop it rather than mislabel it.
+              if (val != null) {
+                setState(() {
+                  _targetFormat = val;
+                  _convertedBytes = null;
+                });
+              }
             },
           ),
           const SizedBox(height: 20),
@@ -982,7 +944,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
             width: double.infinity,
             child: ElevatedButton.icon(
               icon: const Icon(Icons.change_circle_rounded),
-              label: Text('Convert to $_targetFormat & Share'),
+              label: Text('Convert to $_targetFormat'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.catConverter,
                 foregroundColor: Colors.white,
@@ -1001,13 +963,13 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
             const SizedBox(height: 12),
             ElevatedButton.icon(
               icon: const Icon(Icons.share_rounded),
-              label: Text('Share $_targetFormat File'),
+              label: Text('Share $_convertedFormat File'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.catConverter,
                 foregroundColor: Colors.white,
                 minimumSize: const Size(double.infinity, 44),
               ),
-              onPressed: () => Printing.sharePdf(bytes: _convertedBytes!, filename: 'Converted_${_convertImage!.name}.$_targetFormat'.toLowerCase()),
+              onPressed: () => _share(_convertedBytes!, withExtension('Converted_${_convertImage!.name}', _convertedFormat.toLowerCase())),
             ),
           ],
         ],
@@ -1022,7 +984,9 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
         ResultCard(
           title: 'Transform',
           primaryResult: '$_rotationAngle° Rotation',
-          subtitle: '${_flipHorizontal ? 'Horizontal Flip • ' : ''}${_flipVertical ? 'Vertical Flip' : 'Original orientation'}',
+          subtitle: !_flipHorizontal && !_flipVertical
+              ? 'Original orientation'
+              : [if (_flipHorizontal) 'Horizontal Flip', if (_flipVertical) 'Vertical Flip'].join(' • '),
           accentColor: AppColors.catConverter,
         ),
         const SizedBox(height: 20),
@@ -1043,20 +1007,17 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
               IconButton.filledTonal(
+                tooltip: 'Rotate left',
                 icon: const Icon(Icons.rotate_left_rounded),
-                onPressed: () {
-                  setState(() => _rotationAngle = (_rotationAngle - 90 + 360) % 360);
-                  _runTransform();
-                },
+                onPressed: () => _rotate(-90),
               ),
               IconButton.filledTonal(
+                tooltip: 'Rotate right',
                 icon: const Icon(Icons.rotate_right_rounded),
-                onPressed: () {
-                  setState(() => _rotationAngle = (_rotationAngle + 90) % 360);
-                  _runTransform();
-                },
+                onPressed: () => _rotate(90),
               ),
               IconButton.filledTonal(
+                tooltip: 'Flip horizontally',
                 icon: const Icon(Icons.flip_rounded),
                 onPressed: () {
                   setState(() => _flipHorizontal = !_flipHorizontal);
@@ -1064,6 +1025,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
                 },
               ),
               IconButton.filledTonal(
+                tooltip: 'Flip vertically',
                 icon: const Icon(Icons.swap_vert_rounded),
                 onPressed: () {
                   setState(() => _flipVertical = !_flipVertical);
@@ -1090,7 +1052,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 ),
-                onPressed: () => Printing.sharePdf(bytes: _transformedBytes!, filename: 'Transformed_${_rotateImage!.name}'),
+                onPressed: () => _share(_transformedBytes!, withExtension('Transformed_${_rotateImage!.name}', 'png')),
               ),
             ),
           ],
@@ -1122,18 +1084,34 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
           onPressed: _pickCombineImages,
         ),
         if (_combineImages.isNotEmpty) ...[
-          const SizedBox(height: 16),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              icon: const Icon(Icons.clear_all_rounded),
+              label: const Text('Clear selection'),
+              onPressed: () => setState(() {
+                _combineImages.clear();
+                _combinedResultBytes = null;
+              }),
+            ),
+          ),
+          const SizedBox(height: 8),
           DropdownButtonFormField<String>(
             decoration: InputDecoration(
               labelText: 'Combine Layout',
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
             ),
-            value: _combineLayout,
+            initialValue: _combineLayout,
             items: ['Side by Side', 'Stacked Vertical', '2x2 Grid']
                 .map((l) => DropdownMenuItem(value: l, child: Text(l)))
                 .toList(),
             onChanged: (val) {
-              if (val != null) setState(() => _combineLayout = val);
+              if (val != null) {
+                setState(() {
+                  _combineLayout = val;
+                  _combinedResultBytes = null;
+                });
+              }
             },
           ),
           const SizedBox(height: 20),
@@ -1166,7 +1144,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
                 foregroundColor: Colors.white,
                 minimumSize: const Size(double.infinity, 44),
               ),
-              onPressed: () => Printing.sharePdf(bytes: _combinedResultBytes!, filename: 'Combined_Image.png'),
+              onPressed: () => _share(_combinedResultBytes!, 'Combined_Image.png'),
             ),
           ],
         ],
@@ -1216,14 +1194,16 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
           controller: _base64StringController,
           hintText: 'Paste data:image/png;base64,... string here',
           maxLines: 5,
+          // Editing the box means the user now owns its text, not the stored full string.
+          onChanged: (_) => setState(() => _base64Full = null),
         ),
         const SizedBox(height: 12),
-        if (_base64StringController.text.isNotEmpty)
+        if (_base64Text.isNotEmpty)
           OutlinedButton.icon(
             icon: const Icon(Icons.copy_rounded),
             label: const Text('Copy Base64 Data'),
             onPressed: () {
-              Clipboard.setData(ClipboardData(text: _base64StringController.text));
+              Clipboard.setData(ClipboardData(text: _base64Text));
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Base64 copied!')));
             },
           ),
@@ -1242,7 +1222,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
               foregroundColor: Colors.white,
               minimumSize: const Size(double.infinity, 44),
             ),
-            onPressed: () => Printing.sharePdf(bytes: _base64DecodedBytes!, filename: 'Decoded_Image.png'),
+            onPressed: () => _share(_base64DecodedBytes!, 'Decoded_Image.${_base64DecodedExt()}'),
           ),
         ],
       ],
@@ -1292,7 +1272,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
-              onPressed: () => Printing.sharePdf(bytes: _cleanExifBytes!, filename: 'Clean_${_exifSourceImage!.name}'),
+              onPressed: () => _share(_cleanExifBytes!, withExtension('Clean_${_exifSourceImage!.name}', _cleanExifExt)),
             ),
           ),
         ],
@@ -1335,7 +1315,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
               labelText: 'Watermark Position',
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
             ),
-            value: _watermarkPosition,
+            initialValue: _watermarkPosition,
             items: ['Center', 'Bottom Right', 'Top Left', 'Repeat Diagonal']
                 .map((p) => DropdownMenuItem(value: p, child: Text(p)))
                 .toList(),
@@ -1382,7 +1362,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
                 foregroundColor: Colors.white,
                 minimumSize: const Size(double.infinity, 44),
               ),
-              onPressed: () => Printing.sharePdf(bytes: _watermarkedBytes!, filename: 'Watermarked_${_watermarkSourceImage!.name}'),
+              onPressed: () => _share(_watermarkedBytes!, withExtension('Watermarked_${_watermarkSourceImage!.name}', 'png')),
             ),
           ],
         ],
@@ -1397,7 +1377,9 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
         ResultCard(
           title: 'Passport Photo Maker',
           primaryResult: _passportPreset,
-          subtitle: 'Generates single photo & printable $_sheetCopies-photo 4x6" Sheet',
+          subtitle: _passportSheetBytes != null && _passportPlaced < _sheetCopies
+              ? 'Only $_passportPlaced of $_sheetCopies photos fit on a 4x6" sheet at true size'
+              : 'Generates single photo & printable $_sheetCopies-photo 4x6" Sheet',
           accentColor: AppColors.catConverter,
         ),
         const SizedBox(height: 20),
@@ -1419,7 +1401,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
               labelText: 'Passport Dimension Preset',
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
             ),
-            value: _passportPreset,
+            initialValue: _passportPreset,
             items: [
               'US Passport (2x2 in)',
               'Schengen / India (35x45mm)',
@@ -1438,7 +1420,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
               labelText: 'Sheet Print Copies',
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
             ),
-            value: _sheetCopies,
+            initialValue: _sheetCopies,
             items: [4, 6, 8, 12].map((c) => DropdownMenuItem(value: c, child: Text('$c Photos on 4x6" Sheet'))).toList(),
             onChanged: (val) {
               if (val != null) {
@@ -1463,7 +1445,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
                       const SizedBox(height: 8),
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(backgroundColor: AppColors.catConverter, foregroundColor: Colors.white),
-                        onPressed: () => Printing.sharePdf(bytes: _passportSingleBytes!, filename: 'Passport_Single.png'),
+                        onPressed: () => _share(_passportSingleBytes!, 'Passport_Single.png'),
                         child: const Text('Share Single'),
                       ),
                     ],
@@ -1482,7 +1464,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
                       const SizedBox(height: 8),
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(backgroundColor: AppColors.catConverter, foregroundColor: Colors.white),
-                        onPressed: () => Printing.sharePdf(bytes: _passportSheetBytes!, filename: 'Passport_Print_Sheet.jpg'),
+                        onPressed: () => _share(_passportSheetBytes!, 'Passport_Print_Sheet.jpg'),
                         child: const Text('Share Sheet'),
                       ),
                     ],
@@ -1496,3 +1478,324 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
     );
   }
 }
+
+// ===================== PURE HELPERS (tested in test/image_tools_test.dart) =====================
+
+/// Replaces the extension of [name] (or appends one) so shared files match their bytes.
+String withExtension(String name, String ext) {
+  final dot = name.lastIndexOf('.');
+  return '${dot > 0 ? name.substring(0, dot) : name}.$ext';
+}
+
+/// JPEG has no alpha channel: composite onto white so transparent areas don't turn black.
+img.Image flattenOnWhite(img.Image src) {
+  if (!src.hasAlpha) return src;
+  final bg = img.Image(width: src.width, height: src.height);
+  img.fill(bg, color: img.ColorRgb8(255, 255, 255));
+  return img.compositeImage(bg, src);
+}
+
+/// Centre-crops [src] to the [width]:[height] ratio, then resizes to exactly that size.
+img.Image cropToAspect(img.Image src, int width, int height) {
+  var cropW = src.width;
+  var cropH = src.height;
+  if (cropW * height > cropH * width) {
+    cropW = max(1, (cropH * width / height).round());
+  } else {
+    cropH = max(1, (cropW * height / width).round());
+  }
+  final cropped = img.copyCrop(
+    src,
+    x: (src.width - cropW) ~/ 2,
+    y: (src.height - cropH) ~/ 2,
+    width: cropW,
+    height: cropH,
+  );
+  return img.copyResize(cropped, width: width, height: height, interpolation: img.Interpolation.linear);
+}
+
+/// MIME type of encoded image [bytes], used for Base64 data URIs.
+String imageMimeType(Uint8List bytes) {
+  switch (img.findFormatForData(bytes)) {
+    case img.ImageFormat.jpg:
+      return 'image/jpeg';
+    case img.ImageFormat.gif:
+      return 'image/gif';
+    case img.ImageFormat.bmp:
+      return 'image/bmp';
+    case img.ImageFormat.webp:
+      return 'image/webp';
+    default:
+      return 'image/png';
+  }
+}
+
+/// Decodes a Base64 string or data URI into image bytes. Tolerates whitespace/newlines,
+/// URL-safe alphabets and missing padding. Throws [FormatException] for non-images.
+Uint8List decodeBase64Image(String input) {
+  var data = input.trim();
+  final comma = data.indexOf(',');
+  if (comma != -1) data = data.substring(comma + 1);
+  data = data.replaceAll(RegExp(r'\s'), '');
+  final bytes = base64Decode(base64.normalize(data));
+  const displayable = {
+    img.ImageFormat.jpg,
+    img.ImageFormat.png,
+    img.ImageFormat.gif,
+    img.ImageFormat.bmp,
+    img.ImageFormat.webp,
+  };
+  if (!displayable.contains(img.findFormatForData(bytes))) {
+    throw const FormatException('Decoded data is not a JPG, PNG, GIF, BMP or WebP image');
+  }
+  return bytes;
+}
+
+/// Re-encodes [bytes] without EXIF / text metadata. PNG stays PNG (keeping transparency);
+/// everything else becomes JPEG. Returns the clean bytes and their file extension.
+(Uint8List, String)? stripImageMetadata(Uint8List bytes) {
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return null;
+  final clean = img.Image.from(decoded)
+    ..exif.clear()
+    ..textData = null;
+  if (img.findFormatForData(bytes) == img.ImageFormat.png) {
+    return (Uint8List.fromList(img.encodePng(clean)), 'png');
+  }
+  return (Uint8List.fromList(img.encodeJpg(flattenOnWhite(clean), quality: 95)), 'jpg');
+}
+
+/// Rendered width of [text] in [font], matching how `img.drawString` advances.
+int bitmapTextWidth(img.BitmapFont font, String text) =>
+    text.codeUnits.fold(0, (w, c) => w + (font.characters[c]?.xAdvance ?? font.base ~/ 2));
+
+/// Largest bundled font whose rendering of [text] fits in 90% of [imageWidth].
+img.BitmapFont watermarkFont(String text, int imageWidth) {
+  for (final font in [img.arial48, img.arial24]) {
+    if (bitmapTextWidth(font, text) <= imageWidth * 0.9) return font;
+  }
+  return img.arial14;
+}
+
+/// Top-left origin for a [textW]×[textH] watermark so it stays inside the image.
+(int, int) watermarkOrigin(String position, int imageW, int imageH, int textW, int textH) {
+  const pad = 20;
+  final (x, y) = switch (position) {
+    'Bottom Right' => (imageW - textW - pad, imageH - textH - pad),
+    'Top Left' => (pad, pad),
+    _ => ((imageW - textW) ~/ 2, (imageH - textH) ~/ 2),
+  };
+  return (max(0, x), max(0, y));
+}
+
+/// Lays out up to [copies] photos of [photoW]×[photoH] px on a 300-dpi 4×6" sheet. Tries
+/// portrait (1200×1800) and landscape (1800×1200) and keeps whichever fits more; photos are
+/// never scaled, so fewer than [copies] slots may be returned. Gaps are spread evenly.
+({int width, int height, List<(int, int)> slots}) passportSheetLayout(int photoW, int photoH, int copies) {
+  ({int width, int height, List<(int, int)> slots})? best;
+  for (final (sheetW, sheetH) in const [(1200, 1800), (1800, 1200)]) {
+    final cols = sheetW ~/ photoW;
+    final rows = sheetH ~/ photoH;
+    final count = min(copies, cols * rows);
+    if (best != null && count <= best.slots.length) continue;
+    final usedCols = min(cols, count);
+    final usedRows = count == 0 ? 0 : (count + cols - 1) ~/ cols;
+    final gapX = (sheetW - usedCols * photoW) ~/ (usedCols + 1);
+    final gapY = (sheetH - usedRows * photoH) ~/ (usedRows + 1);
+    best = (
+      width: sheetW,
+      height: sheetH,
+      slots: [
+        for (var i = 0; i < count; i++)
+          (gapX + (i % cols) * (photoW + gapX), gapY + (i ~/ cols) * (photoH + gapY)),
+      ],
+    );
+  }
+  return best!;
+}
+
+// ===================== BACKGROUND PROCESSING =====================
+// Decoding, resizing and encoding photos takes seconds on a phone, so every tool runs its pixel
+// work in an isolate. The functions are plain top-level ones (no widget state) so they can be
+// sent to an isolate and unit tested directly; the `...InBackground` wrappers just call them.
+
+/// Largest output (width x height) the resize tool will build: 40 MP is ~160 MB of pixels.
+const int maxResizePixels = 40000000;
+
+/// Longest side / total length a combined picture is scaled down to, to bound memory.
+const int _combineMaxSide = 2400;
+const int _combineMaxTotal = 12000;
+
+/// Width and height of [bytes] after EXIF orientation, or null if it is not a decodable image.
+(int, int)? readImageSize(Uint8List bytes) {
+  final decoded = img.decodeImage(bytes);
+  return decoded == null ? null : (decoded.width, decoded.height);
+}
+
+Uint8List? compressImage(Uint8List bytes, int quality) {
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return null;
+  return Uint8List.fromList(img.encodeJpg(flattenOnWhite(decoded), quality: quality));
+}
+
+/// Centre-crops to the target ratio, resizes to exactly [width] x [height] and returns PNG bytes.
+Uint8List? resizeImage(Uint8List bytes, int width, int height) {
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return null;
+  return Uint8List.fromList(img.encodePng(cropToAspect(decoded, width, height)));
+}
+
+/// Re-encodes [bytes] as 'JPG', 'PNG', 'BMP' or 'GIF'.
+Uint8List? convertImage(Uint8List bytes, String format) {
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return null;
+  final List<int> out = switch (format) {
+    'JPG' => img.encodeJpg(flattenOnWhite(decoded), quality: 90),
+    'BMP' => img.encodeBmp(decoded),
+    'GIF' => img.encodeGif(decoded),
+    _ => img.encodePng(decoded),
+  };
+  return Uint8List.fromList(out);
+}
+
+/// Rotates clockwise by [angle] degrees, then mirrors. Works on a copy.
+img.Image applyTransform(img.Image src, int angle, bool flipH, bool flipV) {
+  var current = angle != 0 ? img.copyRotate(src, angle: angle.toDouble()) : img.Image.from(src);
+  if (flipH) current = img.flipHorizontal(current);
+  if (flipV) current = img.flipVertical(current);
+  return current;
+}
+
+/// The angle to store after the user turns the picture by [delta] degrees *as seen on screen*.
+/// [applyTransform] rotates first and mirrors second, and a mirror reverses the sense of a turn,
+/// so with exactly one mirror active the stored angle must move the other way.
+int nextRotation(int angle, int delta, bool flipH, bool flipV) {
+  final d = flipH != flipV ? -delta : delta;
+  return ((angle + d) % 360 + 360) % 360;
+}
+
+Uint8List? transformImage(Uint8List bytes, int angle, bool flipH, bool flipV) {
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return null;
+  return Uint8List.fromList(img.encodePng(applyTransform(decoded, angle, flipH, flipV)));
+}
+
+/// Stitches photos into one PNG: 'Side by Side', 'Stacked Vertical' or '2x2 Grid' (first four).
+/// Unreadable inputs are skipped; null if fewer than two remain. Large results are scaled down.
+Uint8List? combineImages(List<Uint8List> inputs, String layout, int spacing) {
+  final decodedList = <img.Image>[];
+  for (final bytes in inputs) {
+    final d = img.decodeImage(bytes);
+    if (d != null) decodedList.add(d);
+  }
+  if (decodedList.length < 2) return null;
+
+  final white = img.ColorRgba8(255, 255, 255, 255);
+  final n = decodedList.length;
+  img.Image canvas;
+
+  if (layout == 'Side by Side') {
+    // Common height, capped so the whole strip stays under _combineMaxTotal px wide.
+    final ratioSum = decodedList.fold<double>(0, (s, i) => s + i.width / i.height);
+    var targetH = decodedList.map((i) => i.height).reduce(max);
+    targetH = min(targetH, min(_combineMaxSide, ((_combineMaxTotal - spacing * (n + 1)) / ratioSum).floor()));
+    targetH = max(1, targetH);
+    final scaled = [for (final item in decodedList) img.copyResize(item, height: targetH, interpolation: img.Interpolation.linear)];
+    final totalW = scaled.fold<int>(spacing, (w, i) => w + i.width + spacing);
+    canvas = img.Image(width: totalW, height: targetH + spacing * 2);
+    img.fill(canvas, color: white);
+    var x = spacing;
+    for (final item in scaled) {
+      img.compositeImage(canvas, item, dstX: x, dstY: spacing);
+      x += item.width + spacing;
+    }
+  } else if (layout == 'Stacked Vertical') {
+    final ratioSum = decodedList.fold<double>(0, (s, i) => s + i.height / i.width);
+    var targetW = decodedList.map((i) => i.width).reduce(max);
+    targetW = min(targetW, min(_combineMaxSide, ((_combineMaxTotal - spacing * (n + 1)) / ratioSum).floor()));
+    targetW = max(1, targetW);
+    final scaled = [for (final item in decodedList) img.copyResize(item, width: targetW, interpolation: img.Interpolation.linear)];
+    final totalH = scaled.fold<int>(spacing, (h, i) => h + i.height + spacing);
+    canvas = img.Image(width: targetW + spacing * 2, height: totalH);
+    img.fill(canvas, color: white);
+    var y = spacing;
+    for (final item in scaled) {
+      img.compositeImage(canvas, item, dstX: spacing, dstY: y);
+      y += item.height + spacing;
+    }
+  } else {
+    // 2x2 grid: the first four images, each centre-cropped to a square cell.
+    const cell = 500;
+    canvas = img.Image(width: cell * 2 + spacing * 3, height: cell * 2 + spacing * 3);
+    img.fill(canvas, color: white);
+    for (var i = 0; i < n && i < 4; i++) {
+      final res = cropToAspect(decodedList[i], cell, cell);
+      img.compositeImage(canvas, res, dstX: spacing + (i % 2) * (cell + spacing), dstY: spacing + (i ~/ 2) * (cell + spacing));
+    }
+  }
+  return Uint8List.fromList(img.encodePng(canvas));
+}
+
+/// Draws red [text] at [position] ('Center', 'Bottom Right', 'Top Left' or 'Repeat Diagonal')
+/// with alpha [opacity] and returns PNG bytes.
+Uint8List? watermarkImage(Uint8List bytes, String text, String position, double opacity) {
+  final raw = img.decodeImage(bytes);
+  if (raw == null) return null;
+  // Palette / 16-bit images cannot take an RGBA8 text colour directly.
+  final decoded = PhotoEditorService.toRgba8(raw);
+  final font = watermarkFont(text, decoded.width);
+  final textW = bitmapTextWidth(font, text);
+  final textH = font.lineHeight;
+  final color = img.ColorRgba8(255, 0, 0, (opacity * 255).round());
+
+  if (position == 'Repeat Diagonal') {
+    // Tile with steps derived from the text size, staggering rows for a diagonal look.
+    final stepX = textW + 80;
+    final stepY = textH + 100;
+    for (int y = 20, row = 0; y < decoded.height; y += stepY, row++) {
+      for (int x = 20 - (row % 2) * (stepX ~/ 2); x < decoded.width; x += stepX) {
+        img.drawString(decoded, text, font: font, x: x, y: y, color: color);
+      }
+    }
+  } else {
+    final (x, y) = watermarkOrigin(position, decoded.width, decoded.height, textW, textH);
+    img.drawString(decoded, text, font: font, x: x, y: y, color: color);
+  }
+  return Uint8List.fromList(img.encodePng(decoded));
+}
+
+/// A centre-cropped [targetW] x [targetH] photo (PNG) and a 300-dpi 4x6" sheet (JPEG) holding
+/// up to [copies] of it at true size; `placed` is how many really fit.
+({Uint8List single, Uint8List sheet, int placed})? makePassportPhotos(Uint8List bytes, int targetW, int targetH, int copies) {
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return null;
+  // Centre-crop to the preset's aspect ratio, then resize (no stretching).
+  final single = cropToAspect(decoded, targetW, targetH);
+  final layout = passportSheetLayout(targetW, targetH, copies);
+  final sheet = img.Image(width: layout.width, height: layout.height);
+  img.fill(sheet, color: img.ColorRgba8(255, 255, 255, 255));
+  for (final (x, y) in layout.slots) {
+    img.compositeImage(sheet, single, dstX: x, dstY: y);
+  }
+  return (
+    single: Uint8List.fromList(img.encodePng(single)),
+    sheet: Uint8List.fromList(img.encodeJpg(sheet, quality: 98)),
+    placed: layout.slots.length,
+  );
+}
+
+Future<(int, int)?> readImageSizeInBackground(Uint8List bytes) => Isolate.run(() => readImageSize(bytes));
+Future<Uint8List?> compressImageInBackground(Uint8List bytes, int quality) => Isolate.run(() => compressImage(bytes, quality));
+Future<Uint8List?> resizeImageInBackground(Uint8List bytes, int width, int height) =>
+    Isolate.run(() => resizeImage(bytes, width, height));
+Future<Uint8List?> convertImageInBackground(Uint8List bytes, String format) => Isolate.run(() => convertImage(bytes, format));
+Future<Uint8List?> transformImageInBackground(Uint8List bytes, int angle, bool flipH, bool flipV) =>
+    Isolate.run(() => transformImage(bytes, angle, flipH, flipV));
+Future<Uint8List?> combineImagesInBackground(List<Uint8List> inputs, String layout, int spacing) =>
+    Isolate.run(() => combineImages(inputs, layout, spacing));
+Future<(Uint8List, String)?> stripImageMetadataInBackground(Uint8List bytes) => Isolate.run(() => stripImageMetadata(bytes));
+Future<Uint8List?> watermarkImageInBackground(Uint8List bytes, String text, String position, double opacity) =>
+    Isolate.run(() => watermarkImage(bytes, text, position, opacity));
+Future<({Uint8List single, Uint8List sheet, int placed})?> makePassportPhotosInBackground(
+        Uint8List bytes, int targetW, int targetH, int copies) =>
+    Isolate.run(() => makePassportPhotos(bytes, targetW, targetH, copies));

@@ -1,22 +1,26 @@
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart' as pw_format;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'office_document_service.dart';
 import 'office_pdf_toolkit_screen.dart';
+import 'scan_pdf_service.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/share_utils.dart';
 import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 
 enum PdfToolkitTab {
-  imagesToPdf('Images to PDF', Icons.photo_library_rounded),
+  imagesToPdf('Photo to PDF', Icons.photo_library_rounded),
   textToPdf('Text to PDF', Icons.text_snippet_rounded),
   merge('Merge PDFs', Icons.call_merge_rounded),
   split('Split PDF', Icons.call_split_rounded),
@@ -60,7 +64,9 @@ class SignaturePoint {
 }
 
 class PdfToolkitScreen extends StatefulWidget {
-  const PdfToolkitScreen({super.key});
+  /// Registry id for favourites/recents; 'photo_to_pdf' opens the same toolkit.
+  final String toolId;
+  const PdfToolkitScreen({super.key, this.toolId = 'pdf_toolkit'});
 
   @override
   State<PdfToolkitScreen> createState() => _PdfToolkitScreenState();
@@ -74,14 +80,18 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   pw_format.PdfPageFormat _pageFormat = pw_format.PdfPageFormat.a4;
   bool _isLandscape = false;
   bool _addPageNumbers = true;
+  bool _autoCropPhotos = true;
+  bool _autoFitPage = true;
   bool _isGeneratingPdf = false;
+  String? _photoProgress;
   final TextEditingController _imagePdfNameController = TextEditingController(text: 'Images_Document');
 
   // 2. Text to PDF
   final TextEditingController _docTitleController = TextEditingController(text: 'Document Report');
   final TextEditingController _authorController = TextEditingController(text: 'Author Name');
   final TextEditingController _docBodyController = TextEditingController(
-    text: 'This document was generated using the Omni Utility App PDF Toolkit.\n\n'
+    text:
+        'This document was generated using the ToolBox Pro PDF Toolkit.\n\n'
         'You can type or paste any formatted notes, meeting minutes, contracts, or summaries here. '
         'The engine automatically computes text pagination, headers, footers, and page numbers.\n\n'
         'Key Highlights:\n'
@@ -111,8 +121,9 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
 
   // 7. Protect PDF
   PdfFileItem? _protectPdf;
-  final TextEditingController _userPasswordController = TextEditingController(text: '123456');
-  final TextEditingController _ownerPasswordController = TextEditingController(text: 'admin123');
+  // Empty on purpose: a pre-filled default password would end up on real documents.
+  final TextEditingController _userPasswordController = TextEditingController();
+  final TextEditingController _ownerPasswordController = TextEditingController();
   bool _allowPrint = true;
   bool _allowCopy = false;
   bool _allowEdit = false;
@@ -121,6 +132,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   PdfFileItem? _pdfToImageSource;
   List<Uint8List> _renderedPageImages = [];
   bool _isRenderingImages = false;
+  static const _maxRasterPages = 60; // each page is a ~1-3 MB PNG held in memory
 
   // 9. Sign & Stamp
   PdfFileItem? _signPdf;
@@ -132,10 +144,12 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   PdfFileItem? _formPdf;
   final Map<String, TextEditingController> _formControllers = {};
   final Map<String, bool> _formCheckboxes = {};
+  int _formSkipped = 0; // dropdowns, radio groups, signatures: not editable here
 
   // 11. PDF to Text
   PdfFileItem? _pdfToTextSource;
   String _extractedText = '';
+  static const _textPreviewLimit = 20000; // SelectableText lays out its whole string
   final TextEditingController _searchWordController = TextEditingController();
   int _matchCount = 0;
 
@@ -160,19 +174,37 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
 
   // --- ACTIONS ---
 
-  Future<void> _pickImages() async {
+  bool get _scanPhotos => _autoCropPhotos && ScanPdfService.autoCropAvailable;
+
+  /// [scanner] routes through ML Kit's document scanner (gallery import on),
+  /// which detects the document edges and crops/straightens each photo.
+  Future<void> _pickImages({required bool scanner}) async {
     PreferencesService().triggerHaptic();
+    if (scanner && _scanPhotos) {
+      try {
+        final scans = await ScanPdfService.scanWithAutoCrop(pageLimit: 50, galleryImport: true);
+        if (scans == null || scans.isEmpty || !mounted) return;
+        final start = _selectedImages.length;
+        setState(() {
+          for (var i = 0; i < scans.length; i++) {
+            _selectedImages.add(ImageFileItem(name: 'Photo_${start + i + 1}.jpg', bytes: scans[i]));
+          }
+        });
+        return;
+      } catch (e) {
+        _showError('Auto-crop needs Google Play services; opening the gallery instead.');
+      }
+    }
     try {
-      final files = await FilePicker.pickFiles(
-        type: FileType.image,
-      );
+      final files = await FilePicker.pickFiles(type: FileType.image);
 
       if (files.isNotEmpty) {
+        final picked = <ImageFileItem>[];
         for (final file in files) {
-          final bytes = await file.readAsBytes();
-          _selectedImages.add(ImageFileItem(name: file.name, bytes: bytes));
+          picked.add(ImageFileItem(name: file.name, bytes: await file.readAsBytes()));
         }
-        setState(() {});
+        if (!mounted) return;
+        setState(() => _selectedImages.addAll(picked));
       }
     } catch (e) {
       _showError('Error picking images: $e');
@@ -180,57 +212,56 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   }
 
   Future<void> _generateImagesPdf() async {
-    if (_selectedImages.isEmpty) return;
+    if (_selectedImages.isEmpty || _isGeneratingPdf) return;
     setState(() => _isGeneratingPdf = true);
     PreferencesService().triggerHaptic();
 
     try {
-      final doc = pw.Document();
-      final resolvedFormat = _isLandscape ? _pageFormat.landscape : _pageFormat;
-
-      for (int i = 0; i < _selectedImages.length; i++) {
-        final img = _selectedImages[i];
-        final pdfImage = pw.MemoryImage(img.bytes);
-
-        doc.addPage(
-          pw.Page(
-            pageFormat: resolvedFormat,
-            margin: const pw.EdgeInsets.all(20),
-            build: (pw.Context context) {
-              return pw.Stack(
-                children: [
-                  pw.Center(
-                    child: pw.Image(pdfImage, fit: pw.BoxFit.contain),
-                  ),
-                  if (_addPageNumbers)
-                    pw.Positioned(
-                      bottom: 0,
-                      right: 0,
-                      child: pw.Text(
-                        'Page ${i + 1} of ${_selectedImages.length}',
-                        style: const pw.TextStyle(fontSize: 10, color: pw_format.PdfColors.grey700),
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
-        );
+      final images = List<ImageFileItem>.of(_selectedImages);
+      final pages = <ScanPdfPage>[];
+      final skipped = <String>[];
+      for (var i = 0; i < images.length; i++) {
+        if (!mounted) return;
+        setState(() => _photoProgress = 'Preparing photo ${i + 1} of ${images.length}…');
+        try {
+          // Bakes EXIF rotation, trims blank borders when fitting, caps size.
+          final r = await ScanPdfService.render((source: images[i].bytes, filter: ScanFilter.original, rotation: 0, maxSide: ScanQuality.high.maxSide, quality: 85, trim: _autoFitPage));
+          pages.add(ScanPdfPage(r.bytes));
+        } catch (_) {
+          skipped.add(images[i].name);
+        }
       }
-
-      final pdfName = _imagePdfNameController.text.trim().isEmpty ? 'Images_Document' : _imagePdfNameController.text.trim();
-      await Printing.sharePdf(
-        bytes: await doc.save(),
-        filename: '${pdfName.replaceAll(' ', '_')}.pdf',
+      if (pages.isEmpty) {
+        _showError('None of the selected images could be read.');
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _photoProgress = 'Building PDF…');
+      final pdf = await ScanPdfService.buildScanPdfInBackground(
+        ScanPdfRequest(
+          pages: pages,
+          format: _autoFitPage ? null : (_isLandscape ? _pageFormat.landscape : _pageFormat.portrait),
+          autoOrient: false,
+          marginPt: _autoFitPage ? 0 : 20,
+          pageNumbers: _addPageNumbers,
+        ),
       );
+      if (skipped.isNotEmpty) _showError('Skipped unreadable images: ${skipped.join(', ')}');
+      await shareFileBytes(pdf, ScanPdfService.pdfFileName(_imagePdfNameController.text, 'Photos_Document'));
     } catch (e) {
       _showError('Failed to generate PDF: $e');
     } finally {
-      if (mounted) setState(() => _isGeneratingPdf = false);
+      if (mounted) {
+        setState(() {
+          _isGeneratingPdf = false;
+          _photoProgress = null;
+        });
+      }
     }
   }
 
   Future<void> _generateTextPdf() async {
+    if (_isGeneratingPdf) return;
     setState(() => _isGeneratingPdf = true);
     PreferencesService().triggerHaptic();
 
@@ -243,8 +274,26 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
 
       doc.addPage(
         pw.MultiPage(
-          pageFormat: _isLandscape ? _pageFormat.landscape : _pageFormat,
-          margin: const pw.EdgeInsets.all(32),
+          // Watermark goes in the page background so it repeats on every page
+          // instead of being a flow widget that only appears once on page 1.
+          pageTheme: pw.PageTheme(
+            pageFormat: pw_format.PdfPageFormat.a4, // this tab has no page options; the Photo tab's must not leak in
+            margin: const pw.EdgeInsets.all(32),
+            buildBackground: _enableWatermark && watermark.isNotEmpty
+                ? (pw.Context context) => pw.FullPage(
+                    ignoreMargins: true,
+                    child: pw.Center(
+                      child: pw.Transform.rotate(
+                        angle: 0.6,
+                        child: pw.Text(
+                          watermark,
+                          style: pw.TextStyle(fontSize: 60, fontWeight: pw.FontWeight.bold, color: pw_format.PdfColors.grey300),
+                        ),
+                      ),
+                    ),
+                  )
+                : null,
+          ),
           header: (pw.Context context) {
             return pw.Container(
               margin: const pw.EdgeInsets.only(bottom: 16),
@@ -256,8 +305,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text(title, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
-                  if (author.isNotEmpty)
-                    pw.Text(author, style: const pw.TextStyle(color: pw_format.PdfColors.grey700, fontSize: 10)),
+                  if (author.isNotEmpty) pw.Text(author, style: const pw.TextStyle(color: pw_format.PdfColors.grey700, fontSize: 10)),
                 ],
               ),
             );
@@ -272,7 +320,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
               child: pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text('Generated by Omni Utility Tool', style: const pw.TextStyle(fontSize: 8, color: pw_format.PdfColors.grey500)),
+                  pw.Text('Generated by ToolBox Pro', style: const pw.TextStyle(fontSize: 8, color: pw_format.PdfColors.grey500)),
                   pw.Text('Page ${context.pageNumber} of ${context.pagesCount}', style: const pw.TextStyle(fontSize: 9, color: pw_format.PdfColors.grey700)),
                 ],
               ),
@@ -280,38 +328,15 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
           },
           build: (pw.Context context) {
             return [
-              if (_enableWatermark && watermark.isNotEmpty)
-                pw.Center(
-                  child: pw.Transform.rotate(
-                    angle: -0.5,
-                    child: pw.Text(
-                      watermark,
-                      style: pw.TextStyle(
-                        fontSize: 48,
-                        fontWeight: pw.FontWeight.bold,
-                        color: pw_format.PdfColors.grey300,
-                      ),
-                    ),
-                  ),
-                ),
-              pw.Text(
-                title,
-                style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
-              ),
+              pw.Text(title, style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
               pw.SizedBox(height: 12),
-              pw.Paragraph(
-                text: body,
-                style: const pw.TextStyle(fontSize: 12, lineSpacing: 2),
-              ),
+              pw.Paragraph(text: body, style: const pw.TextStyle(fontSize: 12, lineSpacing: 2)),
             ];
           },
         ),
       );
 
-      await Printing.sharePdf(
-        bytes: await doc.save(),
-        filename: '${title.replaceAll(' ', '_')}.pdf',
-      );
+      await shareFileBytes(await doc.save(), ScanPdfService.pdfFileName(title, 'Document'));
     } catch (e) {
       _showError('Failed to generate PDF: $e');
     } finally {
@@ -323,20 +348,25 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   Future<void> _pickMergePdfs() async {
     PreferencesService().triggerHaptic();
     try {
-      final files = await FilePicker.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-      );
+      final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
 
       if (files.isNotEmpty) {
+        final picked = <PdfFileItem>[];
+        final failed = <String>[];
         for (final file in files) {
-          final bytes = await file.readAsBytes();
-          final doc = PdfDocument(inputBytes: bytes);
-          final count = doc.pages.count;
-          doc.dispose();
-          _mergePdfs.add(PdfFileItem(name: file.name, bytes: bytes, pageCount: count));
+          try {
+            final bytes = await file.readAsBytes();
+            final doc = PdfDocument(inputBytes: bytes);
+            final count = doc.pages.count;
+            doc.dispose();
+            picked.add(PdfFileItem(name: file.name, bytes: bytes, pageCount: count));
+          } catch (_) {
+            failed.add(file.name);
+          }
         }
-        setState(() {});
+        if (!mounted) return;
+        setState(() => _mergePdfs.addAll(picked));
+        if (failed.isNotEmpty) _showError('Could not open (corrupt or password-protected): ${failed.join(', ')}');
       }
     } catch (e) {
       _showError('Error picking PDF files: $e');
@@ -349,30 +379,15 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
       return;
     }
 
+    if (_isGeneratingPdf) return;
     setState(() => _isGeneratingPdf = true);
     PreferencesService().triggerHaptic();
 
     try {
-      final PdfDocument outputDoc = PdfDocument();
+      final sources = [for (final item in _mergePdfs) item.bytes];
+      final bytes = await compute(OfficeDocumentService.mergePdfs, sources);
 
-      for (final item in _mergePdfs) {
-        final PdfDocument doc = PdfDocument(inputBytes: item.bytes);
-        for (int i = 0; i < doc.pages.count; i++) {
-          final PdfPage page = doc.pages[i];
-          final PdfTemplate template = page.createTemplate();
-          final newPage = outputDoc.pages.add();
-          newPage.graphics.drawPdfTemplate(template, Offset.zero, Size(newPage.size.width, newPage.size.height));
-        }
-        doc.dispose();
-      }
-
-      final List<int> bytes = outputDoc.saveSync();
-      outputDoc.dispose();
-
-      await Printing.sharePdf(
-        bytes: Uint8List.fromList(bytes),
-        filename: 'Merged_Document_${DateTime.now().millisecondsSinceEpoch}.pdf',
-      );
+      await shareFileBytes(bytes, 'Merged_Document_${DateTime.now().millisecondsSinceEpoch}.pdf');
     } catch (e) {
       _showError('Merge failed: $e');
     } finally {
@@ -384,13 +399,11 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   Future<void> _pickSplitPdf() async {
     PreferencesService().triggerHaptic();
     try {
-      final file = await FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-      );
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
 
       if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         final doc = PdfDocument(inputBytes: bytes);
         final count = doc.pages.count;
         doc.dispose();
@@ -404,62 +417,23 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
     }
   }
 
-  List<int> _parsePageRange(String input, int maxPages) {
-    final Set<int> pages = {};
-    final parts = input.split(',');
-    for (final part in parts) {
-      final clean = part.trim();
-      if (clean.contains('-')) {
-        final sub = clean.split('-');
-        if (sub.length == 2) {
-          final start = int.tryParse(sub[0].trim()) ?? 1;
-          final end = int.tryParse(sub[1].trim()) ?? maxPages;
-          for (int i = start; i <= end; i++) {
-            if (i >= 1 && i <= maxPages) pages.add(i);
-          }
-        }
-      } else {
-        final single = int.tryParse(clean);
-        if (single != null && single >= 1 && single <= maxPages) {
-          pages.add(single);
-        }
-      }
-    }
-    final sorted = pages.toList()..sort();
-    return sorted;
-  }
-
   Future<void> _executeSplit() async {
     if (_splitSourcePdf == null) return;
-    final pagesToExtract = _parsePageRange(_splitRangeController.text, _splitSourcePdf!.pageCount);
+    final pagesToExtract = OfficeDocumentService.parsePageRange(_splitRangeController.text, _splitSourcePdf!.pageCount);
     if (pagesToExtract.isEmpty) {
       _showError('Please enter valid page numbers (e.g. 1-3, 5).');
       return;
     }
 
+    if (_isGeneratingPdf) return;
     setState(() => _isGeneratingPdf = true);
     PreferencesService().triggerHaptic();
 
     try {
-      final srcDoc = PdfDocument(inputBytes: _splitSourcePdf!.bytes);
-      final outDoc = PdfDocument();
+      final source = _splitSourcePdf!.bytes;
+      final bytes = await OfficeDocumentService.extractPagesInBackground(source, pagesToExtract);
 
-      for (final p in pagesToExtract) {
-        final page = srcDoc.pages[p - 1];
-        final template = page.createTemplate();
-        final newPage = outDoc.pages.add();
-        newPage.graphics.drawPdfTemplate(template, Offset.zero, Size(newPage.size.width, newPage.size.height));
-      }
-
-      final List<int> bytes = outDoc.saveSync();
-      srcDoc.dispose();
-      outDoc.dispose();
-
-      final name = _splitNameController.text.trim().isEmpty ? 'Split_Document' : _splitNameController.text.trim();
-      await Printing.sharePdf(
-        bytes: Uint8List.fromList(bytes),
-        filename: '${name.replaceAll(' ', '_')}.pdf',
-      );
+      await shareFileBytes(bytes, ScanPdfService.pdfFileName(_splitNameController.text, 'Split_Document'));
     } catch (e) {
       _showError('Split failed: $e');
     } finally {
@@ -471,13 +445,11 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   Future<void> _pickOrganizePdf() async {
     PreferencesService().triggerHaptic();
     try {
-      final file = await FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-      );
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
 
       if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         final doc = PdfDocument(inputBytes: bytes);
         final count = doc.pages.count;
         doc.dispose();
@@ -507,29 +479,18 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
       final outDoc = PdfDocument();
 
       for (final p in activePages) {
+        // Setting rotation on a newly added page is a no-op in Syncfusion; it
+        // has to go on the section page settings, combined with the source's own.
         final page = srcDoc.pages[p.originalIndex];
-        final template = page.createTemplate();
-        final newPage = outDoc.pages.add();
-
-        if (p.rotation == 90) {
-          newPage.rotation = PdfPageRotateAngle.rotateAngle90;
-        } else if (p.rotation == 180) {
-          newPage.rotation = PdfPageRotateAngle.rotateAngle180;
-        } else if (p.rotation == 270) {
-          newPage.rotation = PdfPageRotateAngle.rotateAngle270;
-        }
-
-        newPage.graphics.drawPdfTemplate(template, Offset.zero, Size(newPage.size.width, newPage.size.height));
+        final rotation = PdfPageRotateAngle.values[(page.rotation.index + p.rotation ~/ 90) % 4];
+        OfficeDocumentService.appendPageCopy(outDoc, page, rotation: rotation);
       }
 
       final List<int> bytes = outDoc.saveSync();
       srcDoc.dispose();
       outDoc.dispose();
 
-      await Printing.sharePdf(
-        bytes: Uint8List.fromList(bytes),
-        filename: 'Organized_${_organizePdf!.name}',
-      );
+      await shareFileBytes(Uint8List.fromList(bytes), 'Organized_${_organizePdf!.name}');
     } catch (e) {
       _showError('Organize export failed: $e');
     } finally {
@@ -541,13 +502,11 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   Future<void> _pickCompressPdf() async {
     PreferencesService().triggerHaptic();
     try {
-      final file = await FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-      );
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
 
       if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         final doc = PdfDocument(inputBytes: bytes);
         final count = doc.pages.count;
         doc.dispose();
@@ -567,22 +526,19 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
     PreferencesService().triggerHaptic();
 
     try {
-      final doc = PdfDocument(inputBytes: _compressPdf!.bytes);
-      doc.compressionLevel = PdfCompressionLevel.best;
-      doc.fileStructure.crossReferenceType = PdfCrossReferenceType.crossReferenceStream;
+      final source = _compressPdf!.bytes;
+      final bytes = await compute(OfficeDocumentService.compressPdf, source);
+      if (!mounted) return;
 
-      final List<int> bytes = doc.saveSync();
-      doc.dispose();
+      final diff = bytes == null ? 0 : ((source.length - bytes.length) / source.length * 100).round();
+      if (bytes == null || diff <= 0) {
+        setState(() => _compressReduction = 0);
+        _showError('This PDF is already optimized; compression could not reduce its size.');
+        return;
+      }
+      setState(() => _compressReduction = diff);
 
-      final origSize = _compressPdf!.bytes.length;
-      final newSize = bytes.length;
-      final diff = ((origSize - newSize) / origSize * 100).round();
-      setState(() => _compressReduction = diff > 0 ? diff : 5);
-
-      await Printing.sharePdf(
-        bytes: Uint8List.fromList(bytes),
-        filename: 'Compressed_${_compressPdf!.name}',
-      );
+      await shareFileBytes(bytes, 'Compressed_${_compressPdf!.name}');
     } catch (e) {
       _showError('Compress failed: $e');
     } finally {
@@ -594,13 +550,11 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   Future<void> _pickProtectPdf() async {
     PreferencesService().triggerHaptic();
     try {
-      final file = await FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-      );
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
 
       if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         final doc = PdfDocument(inputBytes: bytes);
         final count = doc.pages.count;
         doc.dispose();
@@ -627,24 +581,9 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
     PreferencesService().triggerHaptic();
 
     try {
-      final doc = PdfDocument(inputBytes: _protectPdf!.bytes);
-      final security = doc.security;
-      security.userPassword = userPass;
-      security.ownerPassword = ownerPass.isNotEmpty ? ownerPass : userPass;
-      security.algorithm = PdfEncryptionAlgorithm.aesx256Bit;
-      security.permissions.clear();
+      final bytes = OfficeDocumentService.protectPdf(_protectPdf!.bytes, userPassword: userPass, ownerPassword: ownerPass, allowPrint: _allowPrint, allowCopy: _allowCopy, allowEdit: _allowEdit);
 
-      if (_allowPrint) security.permissions.add(PdfPermissionsFlags.print);
-      if (_allowCopy) security.permissions.add(PdfPermissionsFlags.copyContent);
-      if (_allowEdit) security.permissions.add(PdfPermissionsFlags.editAnnotations);
-
-      final List<int> bytes = doc.saveSync();
-      doc.dispose();
-
-      await Printing.sharePdf(
-        bytes: Uint8List.fromList(bytes),
-        filename: 'Protected_${_protectPdf!.name}',
-      );
+      await shareFileBytes(bytes, 'Protected_${_protectPdf!.name}');
     } catch (e) {
       _showError('Password protection failed: $e');
     } finally {
@@ -656,13 +595,11 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   Future<void> _pickPdfToImages() async {
     PreferencesService().triggerHaptic();
     try {
-      final file = await FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-      );
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
 
       if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         final doc = PdfDocument(inputBytes: bytes);
         final count = doc.pages.count;
         doc.dispose();
@@ -680,20 +617,25 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   }
 
   Future<void> _renderAllPdfPages() async {
-    if (_pdfToImageSource == null) return;
+    final source = _pdfToImageSource;
+    if (source == null) return;
     setState(() => _isRenderingImages = true);
 
     try {
       final List<Uint8List> images = [];
-      await for (final page in Printing.raster(_pdfToImageSource!.bytes, dpi: 150)) {
+      final shown = source.pageCount < _maxRasterPages ? source.pageCount : _maxRasterPages;
+      await for (final page in Printing.raster(source.bytes, pages: [for (var i = 0; i < shown; i++) i], dpi: 150)) {
         final pngBytes = await page.toPng();
         images.add(pngBytes);
       }
+      // Ignore results for a PDF that was replaced while rendering.
+      if (!mounted || !identical(source, _pdfToImageSource)) return;
       setState(() => _renderedPageImages = images);
+      if (source.pageCount > shown) _showError('Showing the first $shown of ${source.pageCount} pages to keep memory use down. Use Split PDF for the rest.');
     } catch (e) {
       _showError('Rasterization failed: $e');
     } finally {
-      if (mounted) setState(() => _isRenderingImages = false);
+      if (mounted && identical(source, _pdfToImageSource)) setState(() => _isRenderingImages = false);
     }
   }
 
@@ -701,13 +643,11 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   Future<void> _pickSignPdf() async {
     PreferencesService().triggerHaptic();
     try {
-      final file = await FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-      );
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
 
       if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         final doc = PdfDocument(inputBytes: bytes);
         final count = doc.pages.count;
         doc.dispose();
@@ -764,10 +704,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
       final List<int> bytes = doc.saveSync();
       doc.dispose();
 
-      await Printing.sharePdf(
-        bytes: Uint8List.fromList(bytes),
-        filename: 'Signed_${_signPdf!.name}',
-      );
+      await shareFileBytes(Uint8List.fromList(bytes), 'Signed_${_signPdf!.name}');
     } catch (e) {
       _showError('Signing/stamping failed: $e');
     } finally {
@@ -779,39 +716,60 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   Future<void> _pickFormPdf() async {
     PreferencesService().triggerHaptic();
     try {
-      final file = await FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-      );
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
 
       if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
+        // Parse into locals first so a corrupt PDF leaves the current form intact.
+        final controllers = <String, TextEditingController>{};
+        final checkboxes = <String, bool>{};
+        var skipped = 0;
         final doc = PdfDocument(inputBytes: bytes);
-        final count = doc.pages.count;
-
-        _formControllers.clear();
-        _formCheckboxes.clear();
-
-        final form = doc.form;
-        if (form.fields.count > 0) {
+        final int count;
+        try {
+          count = doc.pages.count;
+          final form = doc.form;
           for (int i = 0; i < form.fields.count; i++) {
             final field = form.fields[i];
             if (field is PdfTextBoxField) {
-              _formControllers[field.name ?? 'Field_$i'] = TextEditingController(text: field.text);
+              controllers[field.name ?? 'Field_$i'] = TextEditingController(text: field.text);
             } else if (field is PdfCheckBoxField) {
-              _formCheckboxes[field.name ?? 'Field_$i'] = field.isChecked;
+              checkboxes[field.name ?? 'Field_$i'] = field.isChecked;
+            } else {
+              skipped++;
             }
           }
+        } finally {
+          doc.dispose();
         }
-        doc.dispose();
 
+        _replaceFormFields(controllers, checkboxes);
         setState(() {
+          _formSkipped = skipped;
           _formPdf = PdfFileItem(name: file.name, bytes: bytes, pageCount: count);
         });
       }
     } catch (e) {
       _showError('Error loading PDF form: $e');
     }
+  }
+
+  /// Swaps in new form fields. Old controllers are still attached to TextFields
+  /// until the next frame, so they're disposed after it rather than now.
+  void _replaceFormFields(Map<String, TextEditingController> controllers, Map<String, bool> checkboxes) {
+    final old = _formControllers.values.toList();
+    _formControllers
+      ..clear()
+      ..addAll(controllers);
+    _formCheckboxes
+      ..clear()
+      ..addAll(checkboxes);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final c in old) {
+        c.dispose();
+      }
+    });
   }
 
   Future<void> _saveFilledForm() async {
@@ -836,10 +794,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
       final List<int> bytes = doc.saveSync();
       doc.dispose();
 
-      await Printing.sharePdf(
-        bytes: Uint8List.fromList(bytes),
-        filename: 'Filled_${_formPdf!.name}',
-      );
+      await shareFileBytes(Uint8List.fromList(bytes), 'Filled_${_formPdf!.name}');
     } catch (e) {
       _showError('Saving filled form failed: $e');
     } finally {
@@ -851,24 +806,22 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   Future<void> _pickPdfToText() async {
     PreferencesService().triggerHaptic();
     try {
-      final file = await FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-      );
+      final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
 
       if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         final doc = PdfDocument(inputBytes: bytes);
         final count = doc.pages.count;
-
-        final PdfTextExtractor extractor = PdfTextExtractor(doc);
-        final String text = extractor.extractText();
         doc.dispose();
+        final text = await compute(OfficeDocumentService.extractText, bytes);
+        if (!mounted) return;
 
         setState(() {
           _pdfToTextSource = PdfFileItem(name: file.name, bytes: bytes, pageCount: count);
-          _extractedText = text.trim().isEmpty ? '(No readable text could be extracted. The document may contain scanned images)' : text;
+          _extractedText = text.trim().isEmpty ? '' : text; // empty = scanned/image-only; the UI says so
           _matchCount = 0;
+          _searchWordController.clear();
         });
       }
     } catch (e) {
@@ -885,15 +838,17 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
     setState(() => _matchCount = matches.length);
   }
 
+  Future<void> _share(Uint8List bytes, String filename) async {
+    try {
+      await shareFileBytes(bytes, filename);
+    } catch (e) {
+      _showError('Could not share $filename: $e');
+    }
+  }
+
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: AppColors.error,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: AppColors.error, behavior: SnackBarBehavior.floating));
   }
 
   @override
@@ -901,9 +856,9 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return ToolScaffold(
-      title: 'Advanced PDF Toolkit',
-      category: ToolCategory.filesText,
-      toolId: 'pdf_toolkit',
+      title: widget.toolId == 'photo_to_pdf' ? 'Photo to PDF' : 'Advanced PDF Toolkit',
+      category: ToolCategory.pdfDocuments,
+      toolId: widget.toolId,
       onReset: () {
         setState(() {
           _selectedImages.clear();
@@ -917,6 +872,14 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
           _formPdf = null;
           _pdfToTextSource = null;
           _extractedText = '';
+          // These lists render whenever non-empty, so reset must clear them too.
+          _renderedPageImages = [];
+          _pageItems = [];
+          _compressReduction = 0;
+          _matchCount = 0;
+          _searchWordController.clear();
+          _replaceFormFields({}, {});
+          _formSkipped = 0;
         });
       },
       body: Column(
@@ -932,10 +895,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
               margin: const EdgeInsets.only(bottom: 14),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                gradient: LinearGradient(colors: [
-                  AppColors.catPdf.withValues(alpha: 0.15),
-                  AppColors.catPdf.withValues(alpha: 0.05),
-                ]),
+                gradient: LinearGradient(colors: [AppColors.catPdf.withValues(alpha: 0.15), AppColors.catPdf.withValues(alpha: 0.05)]),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: AppColors.catPdf.withValues(alpha: 0.3)),
               ),
@@ -944,10 +904,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
                   const Icon(Icons.snippet_folder_rounded, color: AppColors.catPdf, size: 20),
                   const SizedBox(width: 10),
                   const Expanded(
-                    child: Text(
-                      'Need Office tools? Open Office & Advanced PDF Suite (Word, Excel, PPT, OCR & Compare)',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
+                    child: Text('Need Office tools? Open Office & Advanced PDF Suite (Word, Excel, PPT, OCR & Compare)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   ),
                   const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.catPdf),
                 ],
@@ -956,9 +913,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
           ),
           // Sub-tabs
           FeatureTabSelector<PdfToolkitTab>(
-            tabs: PdfToolkitTab.values
-                .map((tab) => FeatureTabItem(value: tab, label: tab.label, icon: tab.icon))
-                .toList(),
+            tabs: PdfToolkitTab.values.map((tab) => FeatureTabItem(value: tab, label: tab.label, icon: tab.icon)).toList(),
             activeTab: _activeTab,
             accentColor: AppColors.catPdf,
             title: 'PDF Studio Tools',
@@ -1006,147 +961,204 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
   // ===================== TAB BUILDERS =====================
 
   Widget _buildImagesToPdf(bool isDark) {
+    final formatName = _pageFormat == pw_format.PdfPageFormat.a4
+        ? 'A4'
+        : _pageFormat == pw_format.PdfPageFormat.legal
+        ? 'Legal'
+        : 'Letter';
+    final muted = isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary;
+    final switchTitle = TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ResultCard(
-          title: 'PDF Summary',
+          title: 'Photo to PDF',
           primaryResult: '${_selectedImages.length} ${_selectedImages.length == 1 ? 'Page' : 'Pages'}',
-          subtitle: 'Page Format: ${_pageFormat == pw_format.PdfPageFormat.a4 ? 'A4' : 'Letter'} • ${_isLandscape ? 'Landscape' : 'Portrait'}',
+          subtitle: _autoFitPage ? 'Pages fitted to each photo, blank borders trimmed' : 'Page Format: $formatName • ${_isLandscape ? 'Landscape' : 'Portrait'}',
           accentColor: AppColors.catPdf,
           breakdowns: [
-            BreakdownItem(label: 'Total Images', value: _selectedImages.length.toString()),
-            BreakdownItem(label: 'Page Numbers', value: _addPageNumbers ? 'Enabled' : 'Disabled'),
-            BreakdownItem(label: 'Status', value: _selectedImages.isEmpty ? 'Ready' : 'Prepared'),
+            BreakdownItem(label: 'Auto-Crop', value: _scanPhotos ? 'On' : 'Off'),
+            BreakdownItem(label: 'Page Size', value: _autoFitPage ? 'Fit to photo' : formatName),
+            BreakdownItem(label: 'Page Numbers', value: _addPageNumbers ? 'On' : 'Off'),
           ],
         ),
         const SizedBox(height: 20),
-        ModernTextField(
-          label: 'PDF File Name',
-          controller: _imagePdfNameController,
-          hintText: 'e.g. Scanned_Docs',
-          prefixIcon: Icons.insert_drive_file_rounded,
-        ),
+        ModernTextField(label: 'PDF File Name', controller: _imagePdfNameController, hintText: 'e.g. Scanned_Docs', prefixIcon: Icons.insert_drive_file_rounded),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.add_photo_alternate_rounded),
-                label: const Text('Add Images'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.catPdf,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                onPressed: _pickImages,
-              ),
+        if (_scanPhotos) ...[
+          ElevatedButton.icon(
+            icon: const Icon(Icons.crop_rounded),
+            label: const Text('Add Photos with Auto-Crop'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.catPdf,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(double.infinity, 52),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             ),
-            if (_selectedImages.isNotEmpty) ...[
-              const SizedBox(width: 10),
-              OutlinedButton.icon(
-                icon: const Icon(Icons.clear_all_rounded),
-                label: const Text('Clear'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                onPressed: () => setState(() => _selectedImages.clear()),
-              ),
-            ],
-          ],
+            onPressed: _isGeneratingPdf ? null : () => _pickImages(scanner: true),
+          ),
+          const SizedBox(height: 10),
+        ],
+        OutlinedButton.icon(
+          icon: const Icon(Icons.add_photo_alternate_rounded),
+          label: Text(_scanPhotos ? 'Pick from Gallery (no crop)' : 'Pick from Gallery'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.catPdf,
+            side: BorderSide(color: AppColors.catPdf.withValues(alpha: 0.6)),
+            minimumSize: const Size(double.infinity, 48),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+          onPressed: _isGeneratingPdf ? null : () => _pickImages(scanner: false),
         ),
         const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+        // Material (not a decorated Container) so the switch tiles' ink shows.
+        Material(
+          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+            side: BorderSide(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
           ),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Page Size', style: TextStyle(fontWeight: FontWeight.w600)),
-                  DropdownButton<pw_format.PdfPageFormat>(
-                    value: _pageFormat,
-                    underline: const SizedBox.shrink(),
-                    items: const [
-                      DropdownMenuItem(value: pw_format.PdfPageFormat.a4, child: Text('A4 (Standard)')),
-                      DropdownMenuItem(value: pw_format.PdfPageFormat.letter, child: Text('US Letter')),
-                    ],
-                    onChanged: (f) {
-                      if (f != null) setState(() => _pageFormat = f);
-                    },
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Column(
+              children: [
+                if (ScanPdfService.autoCropAvailable) ...[
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('Auto-Crop Photos', style: switchTitle),
+                    subtitle: const Text('Detects document edges, then crops and straightens'),
+                    value: _autoCropPhotos,
+                    activeThumbColor: AppColors.catPdf,
+                    onChanged: (val) => setState(() => _autoCropPhotos = val),
+                  ),
+                  const Divider(height: 1),
+                ],
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('Auto-fit page to image', style: switchTitle),
+                  subtitle: const Text('No letterboxing; trims blank white or black borders'),
+                  value: _autoFitPage,
+                  activeThumbColor: AppColors.catPdf,
+                  onChanged: (val) => setState(() => _autoFitPage = val),
+                ),
+                if (!_autoFitPage) ...[
+                  const Divider(height: 1),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        Expanded(child: Text('Page Size', style: switchTitle)),
+                        DropdownButton<pw_format.PdfPageFormat>(
+                          value: _pageFormat,
+                          underline: const SizedBox.shrink(),
+                          items: const [
+                            DropdownMenuItem(value: pw_format.PdfPageFormat.a4, child: Text('A4')),
+                            DropdownMenuItem(value: pw_format.PdfPageFormat.letter, child: Text('US Letter')),
+                            DropdownMenuItem(value: pw_format.PdfPageFormat.legal, child: Text('US Legal')),
+                          ],
+                          onChanged: (f) {
+                            if (f != null) setState(() => _pageFormat = f);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('Landscape Orientation', style: switchTitle),
+                    value: _isLandscape,
+                    activeThumbColor: AppColors.catPdf,
+                    onChanged: (val) => setState(() => _isLandscape = val),
                   ),
                 ],
-              ),
-              const Divider(),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Landscape Orientation', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                value: _isLandscape,
-                activeColor: AppColors.catPdf,
-                onChanged: (val) => setState(() => _isLandscape = val),
-              ),
-              const Divider(),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Add Page Numbers', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                value: _addPageNumbers,
-                activeColor: AppColors.catPdf,
-                onChanged: (val) => setState(() => _addPageNumbers = val),
-              ),
-            ],
+                const Divider(height: 1),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('Add Page Numbers', style: switchTitle),
+                  value: _addPageNumbers,
+                  activeThumbColor: AppColors.catPdf,
+                  onChanged: (val) => setState(() => _addPageNumbers = val),
+                ),
+              ],
+            ),
           ),
         ),
         if (_selectedImages.isNotEmpty) ...[
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              const Expanded(
+                child: Text('Pages', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              ),
+              TextButton.icon(icon: const Icon(Icons.clear_all_rounded), label: const Text('Clear'), onPressed: _isGeneratingPdf ? null : () => setState(() => _selectedImages.clear())),
+            ],
+          ),
+          Text('Long-press and drag to reorder', style: TextStyle(fontSize: 12, color: muted)),
+          const SizedBox(height: 10),
           SizedBox(
-            height: 110,
-            child: ListView.separated(
+            height: 132,
+            child: ReorderableListView.builder(
               scrollDirection: Axis.horizontal,
               itemCount: _selectedImages.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              onReorderItem: (oldIdx, newIdx) => setState(() => ScanPdfService.moveItem(_selectedImages, oldIdx, newIdx)),
               itemBuilder: (context, idx) {
                 final img = _selectedImages[idx];
-                return Stack(
-                  children: [
-                    Container(
-                      width: 90,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.catPdf.withOpacity(0.5)),
-                        image: DecorationImage(image: MemoryImage(img.bytes), fit: BoxFit.cover),
-                      ),
-                    ),
-                    Positioned(
-                      top: 4,
-                      right: 4,
-                      child: InkWell(
-                        onTap: () => setState(() => _selectedImages.removeAt(idx)),
-                        child: Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-                          child: const Icon(Icons.close, color: Colors.white, size: 14),
+                return Padding(
+                  key: ObjectKey(img),
+                  padding: const EdgeInsets.only(right: 10),
+                  child: SizedBox(
+                    width: 96,
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: isDark ? AppColors.darkBg : AppColors.lightBg,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: Image.memory(img.bytes, fit: BoxFit.cover, cacheWidth: 240, gaplessPlayback: true),
+                          ),
                         ),
-                      ),
+                        Positioned(
+                          left: 6,
+                          bottom: 6,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.65), borderRadius: BorderRadius.circular(8)),
+                            child: Text(
+                              '${idx + 1}',
+                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          top: 2,
+                          right: 2,
+                          child: IconButton(
+                            tooltip: 'Remove page ${idx + 1}',
+                            visualDensity: VisualDensity.compact,
+                            style: IconButton.styleFrom(backgroundColor: Colors.black54),
+                            icon: const Icon(Icons.close, color: Colors.white, size: 16),
+                            onPressed: _isGeneratingPdf ? null : () => setState(() => _selectedImages.removeAt(idx)),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 );
               },
             ),
           ),
-          const SizedBox(height: 24),
+          if (_photoProgress != null) ...[const SizedBox(height: 14), Text(_photoProgress!, style: TextStyle(fontSize: 13, color: muted))],
+          const SizedBox(height: 20),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              icon: _isGeneratingPdf
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Icon(Icons.picture_as_pdf_rounded),
+              icon: _isGeneratingPdf ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.picture_as_pdf_rounded),
               label: Text(_isGeneratingPdf ? 'Building PDF...' : 'Export & Share PDF'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.catPdf,
@@ -1176,7 +1188,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
           contentPadding: EdgeInsets.zero,
           title: const Text('Add Watermark Stamp', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
           value: _enableWatermark,
-          activeColor: AppColors.catPdf,
+          activeThumbColor: AppColors.catPdf,
           onChanged: (val) => setState(() => _enableWatermark = val),
         ),
         if (_enableWatermark) ...[
@@ -1195,7 +1207,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             ),
-            onPressed: _generateTextPdf,
+            onPressed: _isGeneratingPdf ? null : _generateTextPdf,
           ),
         ),
       ],
@@ -1235,17 +1247,11 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: _mergePdfs.length,
-            onReorder: (oldIdx, newIdx) {
-              setState(() {
-                if (newIdx > oldIdx) newIdx -= 1;
-                final item = _mergePdfs.removeAt(oldIdx);
-                _mergePdfs.insert(newIdx, item);
-              });
-            },
+            onReorderItem: (oldIdx, newIdx) => setState(() => ScanPdfService.moveItem(_mergePdfs, oldIdx, newIdx)),
             itemBuilder: (context, idx) {
               final pdf = _mergePdfs[idx];
               return ListTile(
-                key: ValueKey(pdf.name + idx.toString()),
+                key: ObjectKey(pdf),
                 leading: const Icon(Icons.picture_as_pdf_rounded, color: AppColors.catPdf),
                 title: Text(pdf.name, maxLines: 1, overflow: TextOverflow.ellipsis),
                 subtitle: Text('${pdf.pageCount} pages'),
@@ -1300,19 +1306,9 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
         ),
         if (_splitSourcePdf != null) ...[
           const SizedBox(height: 16),
-          ModernTextField(
-            label: 'Page Range / Pages to Extract',
-            controller: _splitRangeController,
-            hintText: 'e.g. 1-3, 5, 8-10',
-            prefixIcon: Icons.format_list_numbered_rounded,
-          ),
+          ModernTextField(label: 'Page Range / Pages to Extract', controller: _splitRangeController, hintText: 'e.g. 1-3, 5, 8-10', prefixIcon: Icons.format_list_numbered_rounded),
           const SizedBox(height: 16),
-          ModernTextField(
-            label: 'Output File Name',
-            controller: _splitNameController,
-            hintText: 'Split_Document',
-            prefixIcon: Icons.drive_file_rename_outline_rounded,
-          ),
+          ModernTextField(label: 'Output File Name', controller: _splitNameController, hintText: 'Split_Document', prefixIcon: Icons.drive_file_rename_outline_rounded),
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
@@ -1340,7 +1336,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
         ResultCard(
           title: 'Organize Pages',
           primaryResult: _organizePdf != null ? '${_pageItems.where((p) => !p.isDeleted).length} Active Pages' : 'No PDF Loaded',
-          subtitle: 'Reorder, rotate, or delete individual pages',
+          subtitle: 'Long-press & drag to reorder; rotate or delete pages',
           accentColor: AppColors.catPdf,
         ),
         const SizedBox(height: 20),
@@ -1360,68 +1356,72 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-              childAspectRatio: 0.8,
-            ),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 0.8),
             itemCount: _pageItems.length,
             itemBuilder: (context, idx) {
               final page = _pageItems[idx];
-              return Container(
+              final tile = Container(
                 decoration: BoxDecoration(
-                  color: page.isDeleted
-                      ? AppColors.error.withOpacity(0.1)
-                      : (isDark ? AppColors.darkSurface : AppColors.lightSurface),
+                  color: page.isDeleted ? AppColors.error.withValues(alpha: 0.1) : (isDark ? AppColors.darkSurface : AppColors.lightSurface),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: page.isDeleted ? AppColors.error : AppColors.catPdf,
+                  border: Border.all(color: page.isDeleted ? AppColors.error : AppColors.catPdf),
+                ),
+                // scaleDown keeps the icon + label + buttons inside the tile at large font scales.
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.description_outlined, size: 36, color: page.isDeleted ? AppColors.error : AppColors.catPdf),
+                      Text(
+                        'Page ${page.originalIndex + 1}',
+                        style: TextStyle(fontWeight: FontWeight.bold, decoration: page.isDeleted ? TextDecoration.lineThrough : null),
+                      ),
+                      if (page.rotation > 0) Text('${page.rotation}°', style: const TextStyle(fontSize: 10, color: AppColors.catPdf)),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          IconButton(
+                            tooltip: 'Rotate page',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.rotate_right_rounded, size: 18),
+                            onPressed: () {
+                              setState(() {
+                                page.rotation = (page.rotation + 90) % 360;
+                              });
+                            },
+                          ),
+                          IconButton(
+                            tooltip: page.isDeleted ? 'Restore page' : 'Delete page',
+                            visualDensity: VisualDensity.compact,
+                            icon: Icon(page.isDeleted ? Icons.restore_rounded : Icons.delete_outline_rounded, size: 18, color: page.isDeleted ? AppColors.success : AppColors.error),
+                            onPressed: () {
+                              setState(() {
+                                page.isDeleted = !page.isDeleted;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.description_outlined,
-                      size: 36,
-                      color: page.isDeleted ? AppColors.error : AppColors.catPdf,
-                    ),
-                    Text(
-                      'Page ${page.originalIndex + 1}',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        decoration: page.isDeleted ? TextDecoration.lineThrough : null,
-                      ),
-                    ),
-                    if (page.rotation > 0)
-                      Text('${page.rotation}°', style: const TextStyle(fontSize: 10, color: AppColors.catPdf)),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.rotate_right_rounded, size: 18),
-                          onPressed: () {
-                            setState(() {
-                              page.rotation = (page.rotation + 90) % 360;
-                            });
-                          },
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            page.isDeleted ? Icons.restore_rounded : Icons.delete_outline_rounded,
-                            size: 18,
-                            color: page.isDeleted ? AppColors.success : AppColors.error,
-                          ),
-                          onPressed: () {
-                            setState(() {
-                              page.isDeleted = !page.isDeleted;
-                            });
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
+              );
+              // Reorder was advertised but the grid had no way to move pages.
+              return DragTarget<PageItemState>(
+                onWillAcceptWithDetails: (d) => d.data != page,
+                onAcceptWithDetails: (d) => setState(() {
+                  _pageItems.remove(d.data);
+                  _pageItems.insert(idx, d.data);
+                }),
+                builder: (context, candidates, _) => LongPressDraggable<PageItemState>(
+                  data: page,
+                  feedback: Material(
+                    color: Colors.transparent,
+                    child: SizedBox(width: 90, height: 112, child: Opacity(opacity: 0.85, child: tile)),
+                  ),
+                  childWhenDragging: Opacity(opacity: 0.3, child: tile),
+                  child: candidates.isNotEmpty ? Opacity(opacity: 0.6, child: tile) : tile,
                 ),
               );
             },
@@ -1453,7 +1453,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
         ResultCard(
           title: 'PDF Compressor',
           primaryResult: _compressPdf != null ? '${(_compressPdf!.bytes.length / 1024).toStringAsFixed(1)} KB' : 'No PDF Selected',
-          subtitle: _compressReduction > 0 ? 'Estimated $_compressReduction% Size Reduction' : 'Optimizes internal streams and fonts',
+          subtitle: _compressReduction > 0 ? '$_compressReduction% Size Reduction' : 'Optimizes internal streams and fonts',
           accentColor: AppColors.catPdf,
         ),
         const SizedBox(height: 20),
@@ -1513,39 +1513,29 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
         ),
         if (_protectPdf != null) ...[
           const SizedBox(height: 16),
-          ModernTextField(
-            label: 'User Open Password',
-            controller: _userPasswordController,
-            hintText: 'Required to open document',
-            prefixIcon: Icons.password_rounded,
-          ),
+          ModernTextField(label: 'User Open Password', controller: _userPasswordController, hintText: 'Required to open document', prefixIcon: Icons.password_rounded),
           const SizedBox(height: 16),
-          ModernTextField(
-            label: 'Owner / Master Password',
-            controller: _ownerPasswordController,
-            hintText: 'Admin password for permissions',
-            prefixIcon: Icons.admin_panel_settings_rounded,
-          ),
+          ModernTextField(label: 'Owner / Master Password', controller: _ownerPasswordController, hintText: 'Admin password for permissions', prefixIcon: Icons.admin_panel_settings_rounded),
           const SizedBox(height: 16),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Allow Printing', style: TextStyle(fontWeight: FontWeight.w600)),
             value: _allowPrint,
-            activeColor: AppColors.catPdf,
+            activeThumbColor: AppColors.catPdf,
             onChanged: (val) => setState(() => _allowPrint = val),
           ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Allow Text/Content Copying', style: TextStyle(fontWeight: FontWeight.w600)),
             value: _allowCopy,
-            activeColor: AppColors.catPdf,
+            activeThumbColor: AppColors.catPdf,
             onChanged: (val) => setState(() => _allowCopy = val),
           ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Allow Annotations & Modifications', style: TextStyle(fontWeight: FontWeight.w600)),
             value: _allowEdit,
-            activeColor: AppColors.catPdf,
+            activeThumbColor: AppColors.catPdf,
             onChanged: (val) => setState(() => _allowEdit = val),
           ),
           const SizedBox(height: 24),
@@ -1590,17 +1580,14 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
           ),
           onPressed: _pickPdfToImages,
         ),
-        if (_isRenderingImages) ...[
-          const SizedBox(height: 20),
-          const Center(child: CircularProgressIndicator()),
-        ],
+        if (_isRenderingImages) ...[const SizedBox(height: 20), const Center(child: CircularProgressIndicator())],
         if (_renderedPageImages.isNotEmpty) ...[
           const SizedBox(height: 20),
           ListView.separated(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: _renderedPageImages.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 16),
+            separatorBuilder: (_, _) => const SizedBox(height: 16),
             itemBuilder: (context, idx) {
               final imgBytes = _renderedPageImages[idx];
               return Container(
@@ -1617,18 +1604,14 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
                     const SizedBox(height: 8),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.memory(imgBytes, fit: BoxFit.contain),
+                      child: Image.memory(imgBytes, fit: BoxFit.contain, cacheWidth: 1080),
                     ),
                     const SizedBox(height: 12),
                     ElevatedButton.icon(
                       icon: const Icon(Icons.share_rounded, size: 16),
                       label: Text('Share Page ${idx + 1} Image'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.catPdf,
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(double.infinity, 40),
-                      ),
-                      onPressed: () => Printing.sharePdf(bytes: imgBytes, filename: 'Page_${idx + 1}.png'),
+                      style: ElevatedButton.styleFrom(backgroundColor: AppColors.catPdf, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 40)),
+                      onPressed: () => _share(imgBytes, 'Page_${idx + 1}.png'),
                     ),
                   ],
                 ),
@@ -1664,25 +1647,20 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
         ),
         if (_signPdf != null) ...[
           const SizedBox(height: 16),
-          ModernTextField(
-            label: 'Stamp Text / Signature Text',
-            controller: _stampTextController,
-            hintText: 'e.g. APPROVED or John Doe',
-            prefixIcon: Icons.verified_rounded,
-          ),
+          ModernTextField(label: 'Stamp Text / Signature Text', controller: _stampTextController, hintText: 'e.g. APPROVED or John Doe', prefixIcon: Icons.verified_rounded),
           const SizedBox(height: 16),
           Row(
             children: [
               Expanded(
                 child: DropdownButtonFormField<int>(
+                  key: ObjectKey(_signPdf),
+                  isExpanded: true,
                   decoration: InputDecoration(
                     labelText: 'Target Page',
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  value: _stampPage,
-                  items: List.generate(_signPdf!.pageCount, (i) => i + 1)
-                      .map((p) => DropdownMenuItem(value: p, child: Text('Page $p')))
-                      .toList(),
+                  initialValue: _stampPage,
+                  items: List.generate(_signPdf!.pageCount, (i) => i + 1).map((p) => DropdownMenuItem(value: p, child: Text('Page $p'))).toList(),
                   onChanged: (val) {
                     if (val != null) setState(() => _stampPage = val);
                   },
@@ -1691,11 +1669,12 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: DropdownButtonFormField<String>(
+                  isExpanded: true,
                   decoration: InputDecoration(
                     labelText: 'Position',
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  value: _stampPosition,
+                  initialValue: _stampPosition,
                   items: const [
                     DropdownMenuItem(value: 'Bottom Right', child: Text('Bottom Right')),
                     DropdownMenuItem(value: 'Top Right', child: Text('Top Right')),
@@ -1753,26 +1732,23 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
         if (_formPdf != null) ...[
           const SizedBox(height: 16),
           if (_formControllers.isEmpty && _formCheckboxes.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Text('No interactive form fields found in this PDF document.', style: TextStyle(color: AppColors.warning)),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(_formSkipped > 0 ? 'This form has no text or check-box fields to fill.' : 'No interactive form fields found in this PDF document.', style: const TextStyle(color: AppColors.warning)),
+            ),
+          if (_formSkipped > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text('$_formSkipped other field(s) (drop-downs, radio buttons, signatures) cannot be edited here and are kept as they are.', style: const TextStyle(fontSize: 12.5, color: AppColors.warning)),
             ),
           ..._formControllers.entries.map((e) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 12.0),
-              child: ModernTextField(
-                label: e.key,
-                controller: e.value,
-                prefixIcon: Icons.edit_note_rounded,
-              ),
+              child: ModernTextField(label: e.key, controller: e.value, prefixIcon: Icons.edit_note_rounded),
             );
           }),
           ..._formCheckboxes.entries.map((e) {
-            return CheckboxListTile(
-              title: Text(e.key),
-              value: e.value,
-              onChanged: (val) => setState(() => _formCheckboxes[e.key] = val ?? false),
-            );
+            return CheckboxListTile(title: Text(e.key), value: e.value, onChanged: (val) => setState(() => _formCheckboxes[e.key] = val ?? false));
           }),
           const SizedBox(height: 24),
           SizedBox(
@@ -1800,7 +1776,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
       children: [
         ResultCard(
           title: 'PDF Text Extractor',
-          primaryResult: _extractedText.isNotEmpty ? '${_extractedText.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).length} Words' : 'Select a PDF',
+          primaryResult: _pdfToTextSource == null ? 'Select a PDF' : '${_extractedText.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).length} Words',
           subtitle: _matchCount > 0
               ? '$_matchCount search matches found'
               : (_pdfToTextSource != null ? '${_pdfToTextSource!.name} (${_pdfToTextSource!.pageCount} pages)' : 'Extracts all machine-readable text into plain text'),
@@ -1818,6 +1794,11 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
           ),
           onPressed: _pickPdfToText,
         ),
+        if (_pdfToTextSource != null && _extractedText.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: 16),
+            child: Text('No readable text found. This PDF probably holds scanned images; run it through the Document Scanner with OCR to make it searchable.', style: TextStyle(color: AppColors.warning)),
+          ),
         if (_extractedText.isNotEmpty) ...[
           const SizedBox(height: 16),
           ModernTextField(
@@ -1838,10 +1819,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
               border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
             ),
             child: SingleChildScrollView(
-              child: SelectableText(
-                _extractedText,
-                style: const TextStyle(fontSize: 13, height: 1.5, fontFamily: 'monospace'),
-              ),
+              child: SelectableText(_extractedText.length > _textPreviewLimit ? '${_extractedText.substring(0, _textPreviewLimit)}\n\n… preview truncated; Copy or Export includes the full text.' : _extractedText, style: const TextStyle(fontSize: 13, height: 1.5, fontFamily: 'monospace')),
             ),
           ),
           const SizedBox(height: 16),
@@ -1864,14 +1842,9 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
                 child: ElevatedButton.icon(
                   icon: const Icon(Icons.share_rounded),
                   label: const Text('Export .TXT'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.catPdf,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.catPdf, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
                   onPressed: () {
-                    final bytes = Uint8List.fromList(utf8.encode(_extractedText));
-                    Printing.sharePdf(bytes: bytes, filename: 'Extracted_Text.txt');
+                    _share(Uint8List.fromList(utf8.encode(_extractedText)), 'Extracted_Text.txt');
                   },
                 ),
               ),

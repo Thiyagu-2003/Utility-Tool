@@ -6,6 +6,20 @@ import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 
+String toTitleCase(String text) => text.replaceAllMapped(
+      RegExp(r'\S+'),
+      (m) => m[0]![0].toUpperCase() + m[0]!.substring(1).toLowerCase(),
+    );
+
+String toSlug(String text) => text
+    .toLowerCase()
+    .replaceAll(RegExp(r'[^a-z0-9\s-]'), '')
+    .trim()
+    .replaceAll(RegExp(r'[\s-]+'), '-')
+    .replaceAll(RegExp(r'^-+|-+$'), '');
+
+String reverseText(String text) => String.fromCharCodes(text.runes.toList().reversed);
+
 class TextAnalyzerScreen extends StatefulWidget {
   const TextAnalyzerScreen({super.key});
 
@@ -29,7 +43,8 @@ class _TextAnalyzerScreenState extends State<TextAnalyzerScreen> {
 
     final sentences = text.trim().isEmpty
         ? <String>[]
-        : text.split(RegExp(r'[.!?]+')).where((s) => s.trim().isNotEmpty).toList();
+        // A terminator only ends a sentence before whitespace/end, so "3.14" stays one.
+        : text.split(RegExp(r'[.!?]+(?=\s|$)')).where((s) => s.trim().isNotEmpty).toList();
     final sentenceCount = sentences.length;
 
     final paragraphs = text.trim().isEmpty
@@ -61,22 +76,8 @@ class _TextAnalyzerScreenState extends State<TextAnalyzerScreen> {
     });
   }
 
-  String _toTitleCase(String text) {
-    return text.split(' ').map((word) {
-      if (word.isEmpty) return '';
-      return word[0].toUpperCase() + word.substring(1).toLowerCase();
-    }).join(' ');
-  }
-
-  String _toSlug(String text) {
-    return text
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9\s-]'), '')
-        .replaceAll(RegExp(r'\s+'), '-');
-  }
-
   String _cleanExtraSpaces(String text) {
-    return text.replaceAll(RegExp(r'[ \t]+'), ' ').trim();
+    return text.replaceAll(RegExp(r'[ \t]+'), ' ').replaceAll(RegExp(r' ?\n ?'), '\n').trim();
   }
 
   @override
@@ -163,7 +164,7 @@ class _TextAnalyzerScreenState extends State<TextAnalyzerScreen> {
               ),
               ActionChip(
                 label: const Text('Title Case'),
-                onPressed: () => _applyTransformation(_toTitleCase),
+                onPressed: () => _applyTransformation(toTitleCase),
               ),
               ActionChip(
                 label: const Text('Clean Spaces'),
@@ -171,11 +172,11 @@ class _TextAnalyzerScreenState extends State<TextAnalyzerScreen> {
               ),
               ActionChip(
                 label: const Text('text-slug'),
-                onPressed: () => _applyTransformation(_toSlug),
+                onPressed: () => _applyTransformation(toSlug),
               ),
               ActionChip(
                 label: const Text('Reverse'),
-                onPressed: () => _applyTransformation((t) => t.split('').reversed.join()),
+                onPressed: () => _applyTransformation(reverseText),
               ),
             ],
           ),

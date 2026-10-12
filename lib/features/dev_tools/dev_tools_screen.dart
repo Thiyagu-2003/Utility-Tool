@@ -20,6 +20,43 @@ enum DevToolTab {
   const DevToolTab(this.label, this.icon);
 }
 
+/// Decodes Base64 ignoring whitespace/line breaks, accepting the URL-safe
+/// alphabet and missing padding. Throws [FormatException] on invalid input.
+List<int> decodeBase64Lenient(String input) =>
+    base64.decode(base64.normalize(input.replaceAll(RegExp(r'\s'), '')));
+
+/// Parses CSS-style hex colours: #RGB, #RGBA, #RRGGBB and #RRGGBBAA.
+/// Returns null for anything else.
+Color? parseHexColor(String hex) {
+  var clean = hex.trim();
+  if (clean.startsWith('#')) clean = clean.substring(1);
+  if (!RegExp(r'^[0-9a-fA-F]+$').hasMatch(clean)) return null;
+  if (clean.length == 3 || clean.length == 4) {
+    clean = clean.split('').map((c) => '$c$c').join();
+  }
+  if (clean.length == 6) clean = '${clean}FF';
+  if (clean.length != 8) return null;
+  final rgba = int.parse(clean, radix: 16);
+  // Colour expects 0xAARRGGBB, so move the trailing alpha byte to the front.
+  return Color(((rgba & 0xFF) << 24) | (rgba >> 8));
+}
+
+int _channel(double v) => (v * 255).round().clamp(0, 255);
+
+/// `#RRGGBB`, or `#RRGGBBAA` when [withAlpha] is set (CSS order, alpha last).
+String colorToHex(Color c, {bool withAlpha = false}) {
+  String h(double v) => _channel(v).toRadixString(16).padLeft(2, '0').toUpperCase();
+  return '#${h(c.r)}${h(c.g)}${h(c.b)}${withAlpha ? h(c.a) : ''}';
+}
+
+/// Builds a colour from 0-255 channels; null when any channel is out of range.
+Color? colorFromRgb(int r, int g, int b, {double alpha = 1}) {
+  if ([r, g, b].any((v) => v < 0 || v > 255)) return null;
+  return Color.fromRGBO(r, g, b, alpha);
+}
+
+String _jsonError(Object e) => e is FormatException ? e.message : e.toString();
+
 class DevToolsScreen extends StatefulWidget {
   const DevToolsScreen({super.key});
 
@@ -46,11 +83,16 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
 
   // Color Tab state
   final TextEditingController _hexController = TextEditingController(text: '#FF6D00');
-  Color _previewColor = AppColors.primaryOrange;
+  final TextEditingController _rController = TextEditingController();
+  final TextEditingController _gController = TextEditingController();
+  final TextEditingController _bController = TextEditingController();
+  Color _previewColor = const Color(0xFFFF6D00);
+  bool _colorInputValid = true;
 
   @override
   void initState() {
     super.initState();
+    _syncRgbFields(_previewColor);
     _formatJson();
     _encodeBase64();
     _generateUuid();
@@ -69,7 +111,7 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
     } catch (e) {
       setState(() {
         _isJsonValid = false;
-        _jsonStatus = 'Invalid JSON: ${e.toString()}';
+        _jsonStatus = 'Invalid JSON: ${_jsonError(e)}';
       });
     }
   }
@@ -86,7 +128,7 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
     } catch (e) {
       setState(() {
         _isJsonValid = false;
-        _jsonStatus = 'Invalid JSON: ${e.toString()}';
+        _jsonStatus = 'Invalid JSON: ${_jsonError(e)}';
       });
     }
   }
@@ -100,7 +142,7 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
 
   void _decodeBase64() {
     try {
-      final bytes = base64.decode(_base64InputController.text.trim());
+      final bytes = decodeBase64Lenient(_base64InputController.text);
       setState(() {
         _base64OutputController.text = utf8.decode(bytes);
       });
@@ -131,7 +173,7 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
 
   void _generateUuid() {
     PreferencesService().triggerHaptic();
-    final random = math.Random();
+    final random = math.Random.secure();
     final bytes = List<int>.generate(16, (_) => random.nextInt(256));
     bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
     bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 1
@@ -143,19 +185,35 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
     });
   }
 
+  void _syncRgbFields(Color c) {
+    _rController.text = _channel(c.r).toString();
+    _gController.text = _channel(c.g).toString();
+    _bController.text = _channel(c.b).toString();
+  }
+
   void _parseHexColor(String hex) {
-    String clean = hex.replaceAll('#', '').trim();
-    if (clean.length == 6) {
-      clean = 'FF$clean';
-    }
-    if (clean.length == 8) {
-      final intVal = int.tryParse(clean, radix: 16);
-      if (intVal != null) {
-        setState(() {
-          _previewColor = Color(intVal);
-        });
+    final color = parseHexColor(hex);
+    setState(() {
+      _colorInputValid = color != null;
+      if (color != null) {
+        _previewColor = color;
+        _syncRgbFields(color);
       }
-    }
+    });
+  }
+
+  void _parseRgb(String _) {
+    final r = int.tryParse(_rController.text.trim());
+    final g = int.tryParse(_gController.text.trim());
+    final b = int.tryParse(_bController.text.trim());
+    final color = (r == null || g == null || b == null) ? null : colorFromRgb(r, g, b, alpha: _previewColor.a);
+    setState(() {
+      _colorInputValid = color != null;
+      if (color != null) {
+        _previewColor = color;
+        _hexController.text = colorToHex(color, withAlpha: color.a < 1);
+      }
+    });
   }
 
   @override
@@ -164,6 +222,9 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
     _base64InputController.dispose();
     _base64OutputController.dispose();
     _hexController.dispose();
+    _rController.dispose();
+    _gController.dispose();
+    _bController.dispose();
     super.dispose();
   }
 
@@ -218,7 +279,7 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
                 } catch (e) {
                   setState(() {
                     _isJsonValid = false;
-                    _jsonStatus = 'Error: ${e.toString()}';
+                    _jsonStatus = 'Error: ${_jsonError(e)}';
                   });
                 }
               },
@@ -330,7 +391,7 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
                 borderRadius: BorderRadius.circular(18),
                 boxShadow: [
                   BoxShadow(
-                    color: _previewColor.withOpacity(0.4),
+                    color: _previewColor.withValues(alpha: 0.4),
                     blurRadius: 16,
                     offset: const Offset(0, 6),
                   ),
@@ -349,35 +410,35 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
             const SizedBox(height: 20),
             ResultCard(
               title: 'Color Formats',
-              primaryResult: '#${_previewColor.value.toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}',
-              subtitle: 'RGB(${_previewColor.red}, ${_previewColor.green}, ${_previewColor.blue})',
-              accentColor: _previewColor,
+              primaryResult: colorToHex(_previewColor, withAlpha: _previewColor.a < 1),
+              subtitle: _colorInputValid
+                  ? 'RGB(${_channel(_previewColor.r)}, ${_channel(_previewColor.g)}, ${_channel(_previewColor.b)})'
+                  : 'Invalid input, showing the last valid colour',
+              accentColor: _colorInputValid ? _previewColor : AppColors.error,
               breakdowns: [
-                BreakdownItem(
-                  label: 'Red (R)',
-                  value: _previewColor.red.toString(),
-                ),
-                BreakdownItem(
-                  label: 'Green (G)',
-                  value: _previewColor.green.toString(),
-                ),
-                BreakdownItem(
-                  label: 'Blue (B)',
-                  value: _previewColor.blue.toString(),
-                ),
-                BreakdownItem(
-                  label: 'Opacity',
-                  value: '${(_previewColor.opacity * 100).toInt()}%',
-                ),
+                BreakdownItem(label: 'Red (R)', value: _channel(_previewColor.r).toString()),
+                BreakdownItem(label: 'Green (G)', value: _channel(_previewColor.g).toString()),
+                BreakdownItem(label: 'Blue (B)', value: _channel(_previewColor.b).toString()),
+                BreakdownItem(label: 'Opacity', value: '${(_previewColor.a * 100).round()}%'),
               ],
             ),
             const SizedBox(height: 20),
             ModernTextField(
-              label: 'Enter Hex Color (e.g. #FF6D00)',
+              label: 'Enter Hex Color (#RGB, #RRGGBB or #RRGGBBAA)',
               controller: _hexController,
               hintText: '#FF6D00',
               prefixIcon: Icons.colorize_rounded,
               onChanged: _parseHexColor,
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(child: ModernTextField(label: 'R (0-255)', controller: _rController, keyboardType: TextInputType.number, onChanged: _parseRgb)),
+                const SizedBox(width: 8),
+                Expanded(child: ModernTextField(label: 'G (0-255)', controller: _gController, keyboardType: TextInputType.number, onChanged: _parseRgb)),
+                const SizedBox(width: 8),
+                Expanded(child: ModernTextField(label: 'B (0-255)', controller: _bController, keyboardType: TextInputType.number, onChanged: _parseRgb)),
+              ],
             ),
           ],
         ],

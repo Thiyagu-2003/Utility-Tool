@@ -1,6 +1,9 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../core/localization/app_localizations.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/registry/tool_registry.dart';
 import '../../core/services/preferences_service.dart';
@@ -56,6 +59,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final compactHeader = MediaQuery.textScalerOf(context).scale(1) > 1.15 && MediaQuery.sizeOf(context).width < 420;
     final prefs = PreferencesService();
 
     if (widget.isFinanceFocused) {
@@ -90,7 +94,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                             borderRadius: BorderRadius.circular(14),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(isDark ? 0.35 : 0.1),
+                                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.1),
                                 blurRadius: 6,
                                 offset: const Offset(0, 2),
                               ),
@@ -122,7 +126,11 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Row(
+                              // scaleDown keeps "ToolBox Pro" on one line next to the pill at 360dp / 1.3x font.
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Text(
@@ -146,6 +154,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                                   ),
                                 ],
                               ),
+                              ),
                               Text(
                                 'All Your Tools. One App.',
                                 style: GoogleFonts.outfit(
@@ -159,6 +168,8 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                             ],
                           ),
                         ),
+                        // At large font scales on narrow phones the pill would squeeze the title; drop it.
+                        if (!compactHeader) ...[
                         const SizedBox(width: 6),
                         // "100% Offline" pill: bg #CCFBF1, 1.5 border #0D9488, text #115E59 bold 13sp
                         Container(
@@ -180,6 +191,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                             ),
                           ),
                         ),
+                        ],
                         const SizedBox(width: 8),
                         // History button: 44x44 circle, white, 1.5 border #CBD5E1, bold clock-history icon
                         Material(
@@ -204,7 +216,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                                 ),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.black.withOpacity(isDark ? 0.2 : 0.04),
+                                    color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
                                     blurRadius: 6,
                                     offset: const Offset(0, 2),
                                   ),
@@ -234,7 +246,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(isDark ? 0.15 : 0.04),
+                            color: Colors.black.withValues(alpha: isDark ? 0.15 : 0.04),
                             blurRadius: 8,
                             offset: const Offset(0, 2),
                           ),
@@ -251,7 +263,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                         ),
                         decoration: InputDecoration(
                           isDense: true,
-                          hintText: 'Search tools, math (e.g. 25 * 40), or units...',
+                          hintText: AppLocalizations.of(context).tr('search_hint'),
                           hintStyle: GoogleFonts.outfit(
                             fontSize: 13,
                             fontWeight: FontWeight.w400,
@@ -308,7 +320,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                               const Icon(Icons.history_rounded, size: 15, color: AppColors.primaryOrange),
                               const SizedBox(width: 6),
                               Text(
-                                'RECENT TOOLS',
+                                AppLocalizations.of(context).tr('recents').toUpperCase(),
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
@@ -336,7 +348,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                             child: ListView.separated(
                               scrollDirection: Axis.horizontal,
                               itemCount: recentTools.length,
-                              separatorBuilder: (_, __) => const SizedBox(width: 8),
+                              separatorBuilder: (_, _) => const SizedBox(width: 8),
                               itemBuilder: (context, i) {
                                 final tool = recentTools[i];
                                 return Material(
@@ -350,7 +362,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                                       decoration: BoxDecoration(
                                         borderRadius: BorderRadius.circular(12),
                                         border: Border.all(
-                                          color: tool.color.withOpacity(0.3),
+                                          color: tool.color.withValues(alpha: 0.3),
                                         ),
                                       ),
                                       child: Row(
@@ -381,9 +393,19 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                 },
               ),
 
-            // FAVORITES
+            // FAVORITES (driven by the user's pinned tools; unknown/removed ids are skipped)
             if (!isSearching)
-              SliverToBoxAdapter(
+              AnimatedBuilder(
+                animation: prefs,
+                builder: (context, _) {
+                  final favoriteTools = prefs.favoriteToolIds
+                      .map((id) => ToolRegistry.findById(id))
+                      .whereType<ToolItem>()
+                      .toList();
+                  if (!prefs.showFavorites || favoriteTools.isEmpty) {
+                    return const SliverToBoxAdapter(child: SizedBox.shrink());
+                  }
+                  return SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
                   child: Column(
@@ -394,7 +416,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                           const Icon(Icons.star_rounded, size: 18, color: Color(0xFFEA580C)),
                           const SizedBox(width: 6),
                           Text(
-                            'FAVORITES',
+                            AppLocalizations.of(context).tr('favorites').toUpperCase(),
                             style: GoogleFonts.outfit(
                               fontSize: 14,
                               fontWeight: FontWeight.w700,
@@ -407,56 +429,29 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                       const SizedBox(height: 10),
                       SizedBox(
                         height: 44,
-                        child: ListView(
+                        child: ListView.separated(
                           scrollDirection: Axis.horizontal,
                           physics: const BouncingScrollPhysics(),
                           clipBehavior: Clip.none,
-                          children: [
-                            _buildFavoriteChip(
-                              title: 'Slate',
-                              toolId: 'slate',
-                              circleColor: const Color(0xFF111827),
-                              icon: Icons.edit_outlined,
+                          itemCount: favoriteTools.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 8),
+                          itemBuilder: (context, i) {
+                            final tool = favoriteTools[i];
+                            return _buildFavoriteChip(
+                              title: tool.title,
+                              toolId: tool.id,
+                              circleColor: tool.id == 'slate' ? const Color(0xFF111827) : tool.color,
+                              icon: tool.icon,
                               isDark: isDark,
-                            ),
-                            const SizedBox(width: 8),
-                            _buildFavoriteChip(
-                              title: 'Age',
-                              toolId: 'age_calc',
-                              circleColor: const Color(0xFF7C3AED),
-                              icon: Icons.cake_outlined,
-                              isDark: isDark,
-                            ),
-                            const SizedBox(width: 8),
-                            _buildFavoriteChip(
-                              title: 'GST Calculator',
-                              toolId: 'gst_calc',
-                              circleColor: const Color(0xFF16A34A),
-                              icon: Icons.receipt_long_outlined,
-                              isDark: isDark,
-                            ),
-                            const SizedBox(width: 8),
-                            _buildFavoriteChip(
-                              title: 'Discount Calculator',
-                              toolId: 'discount_calc',
-                              circleColor: const Color(0xFFE11D48),
-                              icon: Icons.local_offer_outlined,
-                              isDark: isDark,
-                            ),
-                            const SizedBox(width: 8),
-                            _buildFavoriteChip(
-                              title: 'Unit Converter',
-                              toolId: 'unit_converter',
-                              circleColor: const Color(0xFF0891B2),
-                              icon: Icons.swap_horiz_rounded,
-                              isDark: isDark,
-                            ),
-                          ],
+                            );
+                          },
                         ),
                       ),
                     ],
                   ),
                 ),
+                  );
+                },
               ),
 
             // Section header
@@ -478,16 +473,19 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          Text(
-                            _isEditMode ? 'CUSTOMIZE TOOLBOX' : 'CATEGORIES',
-                            style: GoogleFonts.outfit(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
-                              letterSpacing: 0.5,
+                          Expanded(
+                            child: Text(
+                              (_isEditMode ? AppLocalizations.of(context).tr('customize_toolbox') : AppLocalizations.of(context).tr('categories')).toUpperCase(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.outfit(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                                letterSpacing: 0.5,
+                              ),
                             ),
                           ),
-                          const Spacer(),
                           if (_isEditMode) ...[
                             TextButton.icon(
                               onPressed: () {
@@ -501,7 +499,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                                 );
                               },
                               icon: const Icon(Icons.refresh_rounded, size: 14),
-                              label: const Text('Reset', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                              label: Text(AppLocalizations.of(context).tr('reset'), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                               style: TextButton.styleFrom(
                                 foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -516,7 +514,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                                 setState(() => _isEditMode = false);
                               },
                               icon: const Icon(Icons.check_rounded, size: 14),
-                              label: const Text('Done', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                              label: Text(AppLocalizations.of(context).tr('done'), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                               style: FilledButton.styleFrom(
                                 backgroundColor: const Color(0xFFEA580C),
                                 foregroundColor: Colors.white,
@@ -550,7 +548,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                                     const Icon(Icons.tune_rounded, size: 13, color: Color(0xFFEA580C)),
                                     const SizedBox(width: 5),
                                     Text(
-                                      'Edit',
+                                      AppLocalizations.of(context).tr('edit'),
                                       style: GoogleFonts.outfit(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w700,
@@ -570,7 +568,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                                 borderRadius: BorderRadius.circular(16),
                               ),
                               child: Text(
-                                '${ToolRegistry.allTools.length} tools',
+                                '${ToolRegistry.allTools.length} ${AppLocalizations.of(context).tr('tools').toLowerCase()}',
                                 style: GoogleFonts.outfit(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w700,
@@ -594,9 +592,9 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
-                      color: AppColors.primaryOrange.withOpacity(0.08),
+                      color: AppColors.primaryOrange.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.primaryOrange.withOpacity(0.25)),
+                      border: Border.all(color: AppColors.primaryOrange.withValues(alpha: 0.25)),
                     ),
                     child: Row(
                       children: [
@@ -646,7 +644,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.search_off_rounded, size: 54, color: AppColors.darkTextMuted.withOpacity(0.5)),
+                            Icon(Icons.search_off_rounded, size: 54, color: AppColors.darkTextMuted.withValues(alpha: 0.5)),
                             const SizedBox(height: 12),
                             Text(
                               'No tools found for "$_searchQuery"',
@@ -661,15 +659,19 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                   },
                 )
               else
-                SliverPadding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  sliver: SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        final tool = searchResults[index];
-                        return _buildSearchResultTile(context, tool, isDark, prefs);
-                      },
-                      childCount: searchResults.length,
+                // Rebuild on prefs changes so the favorite star reflects a tap immediately.
+                AnimatedBuilder(
+                  animation: prefs,
+                  builder: (context, _) => SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final tool = searchResults[index];
+                          return _buildSearchResultTile(context, tool, isDark, prefs);
+                        },
+                        childCount: searchResults.length,
+                      ),
                     ),
                   ),
                 ),
@@ -686,9 +688,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       sliver: SliverReorderableList(
                         itemCount: categories.length,
-                        onReorder: (oldIndex, newIndex) {
-                          prefs.reorderCategory(oldIndex, newIndex);
-                        },
+                        onReorderItem: prefs.moveCategory,
                         proxyDecorator: (child, index, animation) {
                           return Material(
                             elevation: 8,
@@ -715,15 +715,23 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                     );
                   }
 
-                  // Normal Mode: 2 columns, customized order
+                  // Normal Mode: 2 columns, customized order.
+                  // Card height follows the text scale (tile 60 + title + 2-line description +
+                  // padding) so 1.3x fonts never clip; never shorter than the 1.05 ratio.
+                  final scaler = MediaQuery.textScalerOf(context);
+                  final cellWidth = (MediaQuery.sizeOf(context).width - 44) / 2;
+                  final cardHeight = math.max(
+                    cellWidth / 1.05,
+                    28 + 60 + 10 + scaler.scale(17) * 1.2 + 4 + scaler.scale(13) * 1.25 * 2,
+                  );
                   return SliverPadding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     sliver: SliverGrid(
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 2,
                         mainAxisSpacing: 12,
                         crossAxisSpacing: 12,
-                        childAspectRatio: 1.05,
+                        mainAxisExtent: cardHeight,
                       ),
                       delegate: SliverChildBuilderDelegate(
                         (context, index) {
@@ -770,7 +778,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(isDark ? 0.2 : 0.04),
+                color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
                 blurRadius: 10,
                 offset: const Offset(0, 3),
               ),
@@ -793,7 +801,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                       borderRadius: BorderRadius.circular(17),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF111827).withOpacity(0.35),
+                          color: const Color(0xFF111827).withValues(alpha: 0.35),
                           blurRadius: 8,
                           offset: const Offset(0, 3),
                         ),
@@ -808,8 +816,8 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                               colors: [
-                                Colors.white.withOpacity(0.25),
-                                Colors.white.withOpacity(0.0),
+                                Colors.white.withValues(alpha: 0.25),
+                                Colors.white.withValues(alpha: 0.0),
                               ],
                             ),
                           ),
@@ -859,16 +867,19 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
               ),
               const SizedBox(height: 4),
               // Description "Draw, write & sketch on a full-screen canvas" (13sp, #475569, up to 2 lines)
-              Text(
-                'Draw, write & sketch on a full-screen canvas',
-                style: GoogleFonts.outfit(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
-                  height: 1.25,
+              // Flexible: on ~360dp phones / large font scale two lines don't fit the 1.05 cell.
+              Flexible(
+                child: Text(
+                  'Draw, write & sketch on a full-screen canvas',
+                  style: GoogleFonts.outfit(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                    height: 1.25,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -914,7 +925,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(isDark ? 0.15 : 0.03),
+                color: Colors.black.withValues(alpha: isDark ? 0.15 : 0.03),
                 blurRadius: 6,
                 offset: const Offset(0, 2),
               ),
@@ -972,7 +983,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
           setState(() => _isEditMode = true);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Customizing Toolbox: Drag "${category.label}" to the top or custom order'),
+              content: Text('Customizing Toolbox: Drag "${categoryLabel(context, category)}" to the top or custom order'),
               duration: const Duration(seconds: 3),
               behavior: SnackBarBehavior.floating,
               action: SnackBarAction(
@@ -995,7 +1006,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(isDark ? 0.2 : 0.04),
+                color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
                 blurRadius: 10,
                 offset: const Offset(0, 3),
               ),
@@ -1020,7 +1031,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                       borderRadius: BorderRadius.circular(17),
                       boxShadow: [
                         BoxShadow(
-                          color: category.color.withOpacity(0.35),
+                          color: category.color.withValues(alpha: 0.35),
                           blurRadius: 8,
                           offset: const Offset(0, 3),
                         ),
@@ -1035,8 +1046,8 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                               colors: [
-                                Colors.white.withOpacity(0.25),
-                                Colors.white.withOpacity(0.0),
+                                Colors.white.withValues(alpha: 0.25),
+                                Colors.white.withValues(alpha: 0.0),
                               ],
                             ),
                           ),
@@ -1074,7 +1085,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
               const SizedBox(height: 10),
               // Below: title 17sp bold #0F172A
               Text(
-                category.label,
+                categoryLabel(context, category),
                 style: GoogleFonts.outfit(
                   fontSize: 17,
                   fontWeight: FontWeight.w700,
@@ -1086,16 +1097,19 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
               ),
               const SizedBox(height: 4),
               // Description: 13sp #475569, up to 2 lines (do NOT truncate with ellipsis on one line)
-              Text(
-                category.description,
-                style: GoogleFonts.outfit(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
-                  height: 1.25,
+              // Flexible: on ~360dp phones / large font scale two lines don't fit the 1.05 cell.
+              Flexible(
+                child: Text(
+                  categoryDescription(context, category),
+                  style: GoogleFonts.outfit(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                    height: 1.25,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -1122,13 +1136,13 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: index == 0
-              ? AppColors.primaryOrange.withOpacity(0.6)
+              ? AppColors.primaryOrange.withValues(alpha: 0.6)
               : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
           width: index == 0 ? 1.5 : 0.8,
         ),
         boxShadow: [
           BoxShadow(
-            color: category.color.withOpacity(isDark ? 0.08 : 0.06),
+            color: category.color.withValues(alpha: isDark ? 0.08 : 0.06),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
@@ -1147,8 +1161,8 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: index == 0
-                      ? AppColors.primaryOrange.withOpacity(0.18)
-                      : (isDark ? Colors.white10 : Colors.black.withOpacity(0.05)),
+                      ? AppColors.primaryOrange.withValues(alpha: 0.18)
+                      : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05)),
                   shape: BoxShape.circle,
                 ),
                 child: Text(
@@ -1169,8 +1183,8 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                      category.color.withOpacity(0.22),
-                      category.color.withOpacity(0.08),
+                      category.color.withValues(alpha: 0.22),
+                      category.color.withValues(alpha: 0.08),
                     ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -1190,7 +1204,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                       children: [
                         Flexible(
                           child: Text(
-                            category.label,
+                            categoryLabel(context, category),
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 14,
@@ -1203,7 +1217,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
                             decoration: BoxDecoration(
-                              color: AppColors.primaryOrange.withOpacity(0.15),
+                              color: AppColors.primaryOrange.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: const Text(
@@ -1220,7 +1234,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '$count tools • ${category.description}',
+                      '$count ${AppLocalizations.of(context).tr('tools').toLowerCase()} • ${categoryDescription(context, category)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -1235,9 +1249,9 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
               // Quick "Move to Top" button
               if (index > 0)
                 Tooltip(
-                  message: 'Move ${category.label} to top',
+                  message: 'Move ${categoryLabel(context, category)} to top',
                   child: Material(
-                    color: AppColors.primaryOrange.withOpacity(0.1),
+                    color: AppColors.primaryOrange.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(10),
@@ -1313,22 +1327,33 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                 child: Icon(icon, size: 16, color: accentColor),
               ),
               const SizedBox(width: 8),
-              Text(
-                isConversion ? 'QUICK UNIT CONVERSION' : 'QUICK CALCULATION SHORTCUT',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.8,
-                  color: accentColor,
+              Flexible(
+                flex: 3,
+                child: Text(
+                  isConversion ? 'QUICK UNIT CONVERSION' : 'QUICK CALCULATION SHORTCUT',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                    color: accentColor,
+                  ),
                 ),
               ),
-              const Spacer(),
-              Text(
-                shortcut.expression,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                  color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+              const SizedBox(width: 8),
+              // Long typed expressions used to overflow this row.
+              Expanded(
+                child: Text(
+                  shortcut.expression,
+                  textAlign: TextAlign.end,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+                  ),
                 ),
               ),
             ],
@@ -1394,15 +1419,16 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
   ) {
     final isFav = prefs.isFavorite(tool.id);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkSurface : Colors.white,
+    // Material (not a decorated Container) so the tile's ink splash stays visible.
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+      color: isDark ? AppColors.darkSurface : Colors.white,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-        ),
+        side: BorderSide(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
       ),
+      clipBehavior: Clip.antiAlias,
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
         onTap: () => _openTool(context, tool),
@@ -1432,13 +1458,16 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
+              constraints: const BoxConstraints(maxWidth: 110),
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
                 color: tool.category.color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                tool.category.label,
+                categoryLabel(context, tool.category),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
@@ -1459,6 +1488,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -1477,15 +1507,15 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    const Color(0xFF10B981).withOpacity(0.15),
-                    const Color(0xFF059669).withOpacity(0.04),
+                    const Color(0xFF10B981).withValues(alpha: 0.15),
+                    const Color(0xFF059669).withValues(alpha: 0.04),
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: const Color(0xFF10B981).withOpacity(0.25),
+                  color: const Color(0xFF10B981).withValues(alpha: 0.25),
                 ),
               ),
               child: Row(
@@ -1494,7 +1524,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                     width: 52,
                     height: 52,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withOpacity(0.15),
+                      color: const Color(0xFF10B981).withValues(alpha: 0.15),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
@@ -1570,7 +1600,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                             width: 44,
                             height: 44,
                             decoration: BoxDecoration(
-                              color: tool.color.withOpacity(0.12),
+                              color: tool.color.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Icon(tool.icon, color: tool.color, size: 22),

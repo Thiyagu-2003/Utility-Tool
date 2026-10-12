@@ -38,7 +38,7 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
   @override
   void dispose() {
     _tts.stop();
-    _speech.stop();
+    _speech.cancel();
     super.dispose();
   }
 
@@ -55,11 +55,30 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
         });
       }
     });
+    // Without this a failed utterance (no TTS engine/voice) leaves every button disabled.
+    _tts.setErrorHandler((msg) {
+      if (mounted) {
+        setState(() {
+          _isPlayingAudio = false;
+          _speakerTestStatus = 'Speaker test failed: $msg';
+        });
+      }
+    });
   }
 
   Future<void> _initSpeech() async {
     try {
       final available = await _speech.initialize(
+        // The recognizer ends by itself after silence or a final result; reflect
+        // that so the button doesn't stay on "Stop Recording" forever.
+        onStatus: (status) {
+          if (status == stt.SpeechToText.doneStatus && mounted && _isListening) {
+            setState(() {
+              _isListening = false;
+              if (_transcribedWords.isEmpty) _micTestStatus = 'No speech detected. Tap to try again.';
+            });
+          }
+        },
         onError: (err) {
           if (mounted) {
             setState(() {
@@ -83,22 +102,24 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
   }
 
   // --- SPEAKER TESTS ---
-  Future<void> _testStereoChannel(String channel, String phrase) async {
+  // Text-to-speech cannot be panned to one speaker, so these are voice playback
+  // checks (is the speaker audible and clear), not left/right channel tests.
+  Future<void> _speakTest(String label, String phrase) async {
     setState(() {
       _isPlayingAudio = true;
-      _speakerTestStatus = 'Testing $channel audio channel...';
+      _speakerTestStatus = 'Playing $label...';
     });
     await _tts.setPitch(1.0);
     await _tts.speak(phrase);
   }
 
-  Future<void> _testFrequency(double pitch, String label) async {
+  Future<void> _testPitch(double pitch, String label) async {
     setState(() {
       _isPlayingAudio = true;
-      _speakerTestStatus = 'Playing $label frequency test...';
+      _speakerTestStatus = 'Playing $label voice...';
     });
     await _tts.setPitch(pitch);
-    await _tts.speak('This is a $label audio frequency clarity test. Checking phone loudspeaker output.');
+    await _tts.speak('This is a $label voice clarity test. Checking phone speaker output.');
   }
 
   Future<bool> _showMicPermissionDialog() async {
@@ -137,6 +158,7 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
   Future<void> _toggleMicListening() async {
     if (_isListening) {
       await _speech.stop();
+      if (!mounted) return;
       setState(() {
         _isListening = false;
         _micTestStatus = _transcribedWords.isNotEmpty
@@ -170,7 +192,8 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
       _micTestStatus = 'Speak clearly into your phone microphone...';
     });
 
-    await _speech.listen(
+    try {
+      await _speech.listen(
       onResult: (result) {
         if (mounted) {
           setState(() {
@@ -188,7 +211,15 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
           });
         }
       },
-    );
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isListening = false;
+          _micTestStatus = 'Could not start the microphone: $e';
+        });
+      }
+    }
   }
 
   @override
@@ -197,7 +228,7 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
 
     return ToolScaffold(
       title: 'Microphone & Speaker Tester',
-      category: ToolCategory.moreTools,
+      category: ToolCategory.deviceTests,
       toolId: 'mic_speaker_tester',
       isScrollable: false,
       body: ListView(
@@ -261,27 +292,32 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
                 const SizedBox(height: 16),
                 const Divider(),
                 const SizedBox(height: 12),
+                Text(
+                  "Uses the phone's text-to-speech voice, so it checks that the speaker is audible and clear. It cannot test left/right stereo balance or exact frequencies.",
+                  style: TextStyle(fontSize: 12, color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted),
+                ),
+                const SizedBox(height: 12),
 
                 // Channel tests
                 Row(
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        icon: const Icon(Icons.speaker_phone_rounded, size: 16),
-                        label: const Text('Left Channel'),
+                        icon: const Icon(Icons.record_voice_over_rounded, size: 16),
+                        label: const Text('Voice Playback'),
                         onPressed: _isPlayingAudio
                             ? null
-                            : () => _testStereoChannel('Left', 'Testing left audio channel. Can you hear this clearly?'),
+                            : () => _speakTest('voice playback', 'Testing speaker output. Can you hear this clearly?'),
                       ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: OutlinedButton.icon(
-                        icon: const Icon(Icons.speaker_phone_rounded, size: 16),
-                        label: const Text('Right Channel'),
+                        icon: const Icon(Icons.pin_outlined, size: 16),
+                        label: const Text('Count 1 to 10'),
                         onPressed: _isPlayingAudio
                             ? null
-                            : () => _testStereoChannel('Right', 'Testing right audio channel. Can you hear this clearly?'),
+                            : () => _speakTest('counting test', 'One. Two. Three. Four. Five. Six. Seven. Eight. Nine. Ten.'),
                       ),
                     ),
                   ],
@@ -295,18 +331,18 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
                   children: [
                     ActionChip(
                       avatar: const Icon(Icons.graphic_eq_rounded, size: 16),
-                      label: const Text('Bass (250 Hz Low)'),
-                      onPressed: () => _testFrequency(0.5, 'Low-Pitch Bass'),
+                      label: const Text('Low Pitch Voice'),
+                      onPressed: _isPlayingAudio ? null : () => _testPitch(0.5, 'low-pitch'),
                     ),
                     ActionChip(
                       avatar: const Icon(Icons.graphic_eq_rounded, size: 16),
-                      label: const Text('Mid Vocal (1 kHz)'),
-                      onPressed: () => _testFrequency(1.0, 'Mid Vocal'),
+                      label: const Text('Normal Pitch Voice'),
+                      onPressed: _isPlayingAudio ? null : () => _testPitch(1.0, 'normal-pitch'),
                     ),
                     ActionChip(
                       avatar: const Icon(Icons.graphic_eq_rounded, size: 16),
-                      label: const Text('Treble (4 kHz High)'),
-                      onPressed: () => _testFrequency(1.8, 'High-Pitch Treble'),
+                      label: const Text('High Pitch Voice'),
+                      onPressed: _isPlayingAudio ? null : () => _testPitch(1.8, 'high-pitch'),
                     ),
                   ],
                 ),
@@ -375,7 +411,7 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: LinearProgressIndicator(
-                      value: ((_soundLevel + 10) / 20).clamp(0.05, 1.0),
+                      value: ((_soundLevel + 2) / 12).clamp(0.05, 1.0), // Android reports about -2..10
                       minHeight: 8,
                       backgroundColor: isDark ? AppColors.darkBorder : Colors.grey.shade200,
                       valueColor: const AlwaysStoppedAnimation(AppColors.primaryOrange),

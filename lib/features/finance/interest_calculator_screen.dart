@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/validation_utils.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
@@ -23,9 +24,9 @@ class _InterestCalculatorScreenState extends State<InterestCalculatorScreen> {
   int _compoundFrequency = 1; // 1 = Annually, 4 = Quarterly, 12 = Monthly
 
   Map<String, double> _calculateInterest() {
-    final p = double.tryParse(_principalController.text.trim()) ?? 0;
-    final r = (double.tryParse(_rateController.text.trim()) ?? 0) / 100;
-    final t = double.tryParse(_timeController.text.trim()) ?? 0;
+    final p = ValidationUtils.safeParseDouble(_principalController.text).clamp(0.0, double.infinity);
+    final r = ValidationUtils.safeParseDouble(_rateController.text).clamp(0.0, double.infinity) / 100;
+    final t = ValidationUtils.safeParseDouble(_timeController.text).clamp(0.0, double.infinity);
 
     double totalAmount = 0;
     double interestEarned = 0;
@@ -39,6 +40,10 @@ class _InterestCalculatorScreenState extends State<InterestCalculatorScreen> {
       totalAmount = p + interestEarned;
     }
 
+    // Huge rate/period overflow a double; show zeros instead of Infinity/NaN.
+    if (!totalAmount.isFinite || !interestEarned.isFinite) {
+      return {'principal': p, 'interestEarned': 0, 'totalAmount': p, 'growthPercent': 0};
+    }
     final growthPercent = p > 0 ? (interestEarned / p) * 100 : 0.0;
 
     return {

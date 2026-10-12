@@ -3,10 +3,91 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:utility_tool/core/models/tool_model.dart';
 import 'package:utility_tool/core/registry/tool_registry.dart';
 import 'package:utility_tool/features/productivity/productivity_models.dart';
+import 'package:utility_tool/features/productivity/productivity_pdf.dart';
 import 'package:utility_tool/features/productivity/productivity_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  // Must run first: ProductivityService is a singleton that only init()s once.
+  group('ProductivityService init with corrupt storage', () {
+    test('malformed JSON and bad entries are skipped instead of throwing', () async {
+      SharedPreferences.setMockInitialValues({
+        'prod_notes_list': '{not json',
+        'prod_todos_list': '[{"id":"t_ok","title":"Keep me"}, 5, "x"]',
+        'prod_subscriptions_list': '[{"id":"s","name":"N","cost":5,"alertDaysBefore":2.0,"nextRenewalDate":"2026-01-01"}]',
+      });
+      final service = ProductivityService();
+      await service.init();
+      expect(service.notes, isEmpty);
+      expect(service.todos.map((t) => t.id), ['t_ok']);
+      expect(service.subscriptions.single.alertDaysBefore, 2);
+    });
+  });
+
+  group('Date countdown logic', () {
+    test('calendarDaysBetween ignores time of day', () {
+      expect(calendarDaysBetween(DateTime(2026, 3, 8, 23, 59), DateTime(2026, 3, 9, 0, 1)), 1);
+      expect(calendarDaysBetween(DateTime(2026, 3, 9, 0, 1), DateTime(2026, 3, 8, 23, 59)), -1);
+      expect(calendarDaysBetween(DateTime(2026, 10, 24), DateTime(2026, 11, 2)), 9);
+      expect(calendarDaysBetween(DateTime(2026, 12, 31, 18), DateTime(2027, 1, 1, 6)), 1);
+    });
+
+    test('past subscription renewals roll forward by billing cycle', () {
+      final monthly = SubscriptionItem(
+        id: 'm',
+        name: 'M',
+        cost: 1,
+        nextRenewalDate: DateTime(2026, 1, 31),
+      );
+      // Jan 31 -> Feb 28 (passed) -> Mar 31, clamped per month and never Mar 3.
+      expect(monthly.nextRenewalFrom(DateTime(2026, 3, 5, 15)), DateTime(2026, 3, 31));
+      expect(monthly.nextRenewalFrom(DateTime(2026, 2, 10)), DateTime(2026, 2, 28));
+      // Renewal day itself is "today", not rolled.
+      expect(monthly.nextRenewalFrom(DateTime(2026, 1, 31, 20)), DateTime(2026, 1, 31));
+
+      final yearly = SubscriptionItem(
+        id: 'y',
+        name: 'Y',
+        cost: 1,
+        billingCycle: 'Yearly',
+        nextRenewalDate: DateTime(2024, 2, 29),
+      );
+      expect(yearly.nextRenewalFrom(DateTime(2025, 3, 1)), DateTime(2026, 2, 28));
+
+      final lapsed = SubscriptionItem(
+        id: 'l',
+        name: 'L',
+        cost: 1,
+        nextRenewalDate: DateTime.now().subtract(const Duration(days: 40)),
+      );
+      expect(lapsed.daysUntilRenewal, greaterThanOrEqualTo(0));
+    });
+
+    test('bill due today is not overdue, yesterday is', () {
+      final now = DateTime.now();
+      final dueToday = BillItem(id: 'a', title: 'A', payee: 'P', amount: 1, dueDate: DateTime(now.year, now.month, now.day));
+      final dueYesterday = BillItem(id: 'b', title: 'B', payee: 'P', amount: 1, dueDate: DateTime(now.year, now.month, now.day - 1, 23, 59));
+      expect(dueToday.daysUntilDue, 0);
+      expect(dueToday.isOverdue, isFalse);
+      expect(dueYesterday.daysUntilDue, -1);
+      expect(dueYesterday.isOverdue, isTrue);
+    });
+
+    test('work session spanning midnight counts the hours across both days', () {
+      final session = WorkSessionItem(
+        id: 'n',
+        startTime: DateTime(2026, 10, 10, 22, 0),
+        endTime: DateTime(2026, 10, 11, 6, 30),
+        breakMinutes: 30,
+        hourlyRate: 10,
+      );
+      expect(session.durationHours, closeTo(8.0, 0.001));
+      final roundTrip = WorkSessionItem.fromJson(session.toJson());
+      expect(roundTrip.durationHours, closeTo(8.0, 0.001));
+      expect(roundTrip.endTime, session.endTime);
+    });
+  });
 
   group('Productivity Models & Logic Tests', () {
     test('NoteItem serialization and copyWith', () {
@@ -305,6 +386,114 @@ void main() {
       expect(tool.keywords.contains('bill'), isTrue);
       expect(tool.keywords.contains('work hours'), isTrue);
       expect(tool.keywords.contains('todo'), isTrue);
+    });
+  });
+
+  group('To-do filters and subtasks', () {
+    final todos = [
+      TodoItem(id: 'a', title: 'A', category: 'Finance'),
+      TodoItem(id: 'b', title: 'B', category: 'Finance', isCompleted: true),
+      TodoItem(id: 'c', title: 'C', category: 'Tasks', isCompleted: true),
+      TodoItem(id: 'd', title: 'D', category: 'Tasks'),
+    ];
+
+    test('status tabs combine with the category chip', () {
+      List<String> ids(List<TodoItem> l) => l.map((t) => t.id).toList();
+      expect(ids(filterTodos(todos)), ['a', 'b', 'c', 'd']);
+      expect(ids(filterTodos(todos, status: TodoFilter.active)), ['a', 'd']);
+      expect(ids(filterTodos(todos, status: TodoFilter.completed)), ['b', 'c']);
+      expect(ids(filterTodos(todos, category: 'Finance')), ['a', 'b']);
+      expect(ids(filterTodos(todos, category: 'Finance', status: TodoFilter.completed)), ['b']);
+      expect(filterTodos(todos, category: 'Nope'), isEmpty);
+    });
+
+    test('subtasks can be added, ticked, removed and survive JSON', () {
+      var t = TodoItem(id: 't', title: 'Trip');
+      t = t.addSubtask('  Book hotel ').addSubtask('Pack').addSubtask('Buy tickets').addSubtask('   ');
+      expect(t.subtasks, ['Book hotel', 'Pack', 'Buy tickets']);
+
+      t = t.toggleSubtask(1).toggleSubtask(2);
+      expect(t.doneSubtasks, [1, 2]);
+      expect(t.isSubtaskDone(0), isFalse);
+      t = t.toggleSubtask(1);
+      expect(t.doneSubtasks, [2]);
+
+      // Removing an earlier subtask shifts the done marker of the later one.
+      t = t.removeSubtask(0);
+      expect(t.subtasks, ['Pack', 'Buy tickets']);
+      expect(t.doneSubtasks, [1]);
+      expect(t.isSubtaskDone(1), isTrue);
+
+      expect(t.toggleSubtask(9), same(t)); // out of range is a no-op
+      final back = TodoItem.fromJson(t.toJson());
+      expect(back.subtasks, t.subtasks);
+      expect(back.doneSubtasks, [1]);
+    });
+
+    test('old stored todos without doneSubtasks, or with bad indexes, load cleanly', () {
+      final old = TodoItem.fromJson({'id': 'o', 'title': 'Old', 'subtasks': ['x', 'y']});
+      expect(old.doneSubtasks, isEmpty);
+      final bad = TodoItem.fromJson({'id': 'b', 'title': 'Bad', 'subtasks': ['x'], 'doneSubtasks': [0, 5, -1, 'z']});
+      expect(bad.doneSubtasks, [0]);
+    });
+  });
+
+  group('ProductivityService additions', () {
+    late ProductivityService service;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      service = ProductivityService();
+      await service.init();
+    });
+
+    test('updateTodo persists a subtask change', () async {
+      final todo = TodoItem(id: 'upd_todo', title: 'Plan').addSubtask('Step 1');
+      await service.addTodo(todo);
+      await service.updateTodo(service.todos.firstWhere((t) => t.id == 'upd_todo').toggleSubtask(0));
+      expect(service.todos.firstWhere((t) => t.id == 'upd_todo').doneSubtasks, [0]);
+      await service.updateTodo(TodoItem(id: 'unknown', title: 'x')); // unknown id is ignored
+      expect(service.todos.any((t) => t.id == 'unknown'), isFalse);
+      await service.deleteTodo('upd_todo');
+    });
+
+    test('upcomingEventsCount ignores past days but counts today', () async {
+      final now = DateTime(2026, 6, 15, 18, 30);
+      final before = service.upcomingEventsCount(now);
+      await service.addEvent(CalendarEventItem(id: 'ev_past', title: 'Past', date: DateTime(2026, 6, 14, 23)));
+      await service.addEvent(CalendarEventItem(id: 'ev_today', title: 'Today', date: DateTime(2026, 6, 15, 8)));
+      await service.addEvent(CalendarEventItem(id: 'ev_next', title: 'Next', date: DateTime(2026, 6, 16)));
+      expect(service.upcomingEventsCount(now), before + 2);
+      await service.deleteEvent('ev_past');
+      await service.deleteEvent('ev_today');
+      await service.deleteEvent('ev_next');
+    });
+  });
+
+  group('Notes and agenda PDFs', () {
+    test('buildNotesPdf and buildAgendaPdf return real PDF bytes', () async {
+      final notes = [
+        NoteItem(id: '1', title: 'Groceries', content: 'Milk\nEggs', category: 'Personal', updatedAt: DateTime(2026, 1, 2), isPinned: true),
+        NoteItem(id: '2', title: 'Tamil title தமிழ்', content: 'x' * 6000, updatedAt: DateTime(2026, 1, 3)),
+        NoteItem(id: '3', title: 'Long prose', content: 'lorem ipsum dolor ' * 1500, updatedAt: DateTime(2026, 1, 4)),
+      ];
+      final notesPdf = await buildNotesPdf(notes);
+      expect(String.fromCharCodes(notesPdf.take(5)), '%PDF-');
+
+      final agendaPdf = await buildAgendaPdf(
+        DateTime(2026, 1, 2),
+        [CalendarEventItem(id: 'e', title: 'Standup', date: DateTime(2026, 1, 2), time: '10:00 AM', location: 'Room 4')],
+      );
+      expect(String.fromCharCodes(agendaPdf.take(5)), '%PDF-');
+      expect((await buildAgendaPdf(DateTime(2026, 1, 2), const [])).isNotEmpty, isTrue);
+    });
+
+    test('pdfSafe replaces characters the built-in PDF fonts cannot draw', () {
+      expect(pdfSafe('café plain'), 'café plain'); // Latin-1 is fine
+      expect(pdfSafe('aதb'), 'a?b');
+      // Unbreakable runs get a space every 60 chars so the PDF can paginate; normal text is untouched.
+      expect(pdfSafe('hello world'), 'hello world');
+      expect(pdfSafe('x' * 130), '${'x' * 60} ${'x' * 60} ${'x' * 10}');
     });
   });
 }

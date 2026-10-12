@@ -69,6 +69,8 @@ class PreferencesService extends ChangeNotifier {
   factory PreferencesService() => _instance;
   PreferencesService._internal();
 
+  static const int _maxHistory = 50;
+
   late SharedPreferences _prefs;
   bool _initialized = false;
 
@@ -87,12 +89,21 @@ class PreferencesService extends ChangeNotifier {
     ToolCategory.health,
     ToolCategory.education,
     ToolCategory.homeTravel,
-    ToolCategory.filesText,
+    ToolCategory.pdfDocuments,
+    ToolCategory.imagePhoto,
+    ToolCategory.compression,
+    ToolCategory.textTools,
+    ToolCategory.media,
+    ToolCategory.qrBarcode,
     ToolCategory.developer,
+    ToolCategory.deviceTests,
     ToolCategory.security,
     ToolCategory.kitchen,
     ToolCategory.moreTools,
   ];
+
+  /// Language codes the app ships translations for (see AppLocalizations).
+  static const List<String> supportedLanguages = ['en', 'ta', 'hi', 'es'];
 
   final List<ToolCategory> _categoryOrder = [];
   List<ToolCategory> get categoryOrder => List.unmodifiable(_categoryOrder);
@@ -121,7 +132,7 @@ class PreferencesService extends ChangeNotifier {
     _prefs = await SharedPreferences.getInstance();
 
     // Favorites
-    final favList = _prefs.getStringList('favorite_tools') ?? ['age_calc', 'gst_calc', 'discount_calc', 'unit_converter'];
+    final favList = _prefs.getStringList('favorite_tools') ?? ['slate', 'age_calc', 'gst_calc', 'discount_calc', 'unit_converter'];
     _favoriteToolIds.addAll(favList);
 
     // Recents
@@ -191,14 +202,16 @@ class PreferencesService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> reorderCategory(int oldIndex, int newIndex) async {
+  /// Legacy `onReorder` semantics: [newIndex] is the slot before the old
+  /// item was removed, so moving down needs `newIndex - 1`.
+  Future<void> reorderCategory(int oldIndex, int newIndex) =>
+      moveCategory(oldIndex, oldIndex < newIndex ? newIndex - 1 : newIndex);
+
+  /// `onReorderItem` semantics: [newIndex] is the item's final position.
+  Future<void> moveCategory(int oldIndex, int newIndex) async {
     triggerSelectionHaptic();
     if (oldIndex < 0 || oldIndex >= _categoryOrder.length) return;
-    if (newIndex < 0 || newIndex > _categoryOrder.length) return;
-
-    if (oldIndex < newIndex) {
-      newIndex -= 1;
-    }
+    if (newIndex < 0 || newIndex >= _categoryOrder.length) return;
     final item = _categoryOrder.removeAt(oldIndex);
     _categoryOrder.insert(newIndex, item);
     await _prefs.setStringList(
@@ -266,7 +279,7 @@ class PreferencesService extends ChangeNotifier {
       timestamp: DateTime.now(),
     );
     _calculationHistory.insert(0, record);
-    if (_calculationHistory.length > 50) {
+    if (_calculationHistory.length > _maxHistory) {
       _calculationHistory.removeLast();
     }
     final encoded = _calculationHistory.map((r) => jsonEncode(r.toJson())).toList();
@@ -292,7 +305,7 @@ class PreferencesService extends ChangeNotifier {
     );
     _qrScanHistory.removeWhere((r) => r.content == content);
     _qrScanHistory.insert(0, record);
-    if (_qrScanHistory.length > 50) {
+    if (_qrScanHistory.length > _maxHistory) {
       _qrScanHistory.removeLast();
     }
     final encoded = _qrScanHistory.map((r) => jsonEncode(r.toJson())).toList();
@@ -374,24 +387,28 @@ class PreferencesService extends ChangeNotifier {
     // Favorites
     if (data['favorite_tools'] is List) {
       _favoriteToolIds.clear();
-      _favoriteToolIds.addAll((data['favorite_tools'] as List).map((e) => e.toString()));
+      _favoriteToolIds.addAll((data['favorite_tools'] as List).whereType<String>());
       await _prefs.setStringList('favorite_tools', _favoriteToolIds.toList());
     }
 
-    // Recents
+    // Recents (deduplicated and capped like addRecent)
     if (data['recent_tools'] is List) {
       _recentToolIds.clear();
-      _recentToolIds.addAll((data['recent_tools'] as List).map((e) => e.toString()));
+      for (final id in (data['recent_tools'] as List).whereType<String>()) {
+        if (!_recentToolIds.contains(id) && _recentToolIds.length < 12) _recentToolIds.add(id);
+      }
       await _prefs.setStringList('recent_tools', _recentToolIds);
     }
 
-    // Category Order
+    // Category Order (same rules as init: only real home categories, no duplicates)
     if (data['custom_category_order'] is List) {
       _categoryOrder.clear();
       for (final name in data['custom_category_order']) {
         try {
           final cat = ToolCategory.values.firstWhere((c) => c.name == name);
-          _categoryOrder.add(cat);
+          if (defaultCategories.contains(cat) && !_categoryOrder.contains(cat)) {
+            _categoryOrder.add(cat);
+          }
         } catch (_) {}
       }
       for (final cat in defaultCategories) {
@@ -404,6 +421,7 @@ class PreferencesService extends ChangeNotifier {
     if (data['calc_history'] is List) {
       _calculationHistory.clear();
       for (final item in data['calc_history']) {
+        if (_calculationHistory.length >= _maxHistory) break; // same cap as addCalculationRecord
         try {
           _calculationHistory.add(CalculationRecord.fromJson(item));
         } catch (_) {}
@@ -416,6 +434,7 @@ class PreferencesService extends ChangeNotifier {
     if (data['qr_scan_history'] is List) {
       _qrScanHistory.clear();
       for (final item in data['qr_scan_history']) {
+        if (_qrScanHistory.length >= _maxHistory) break;
         try {
           _qrScanHistory.add(QrScanRecord.fromJson(item));
         } catch (_) {}
@@ -434,7 +453,8 @@ class PreferencesService extends ChangeNotifier {
       } else {
         _themeMode = ThemeMode.system;
       }
-      await _prefs.setString('theme_mode', themeStr);
+      // Store the normalised value so a garbage string cannot sit in storage.
+      await _prefs.setString('theme_mode', _themeMode.name);
     }
 
     // Haptics
@@ -444,12 +464,13 @@ class PreferencesService extends ChangeNotifier {
     }
 
     // Language & Accessibility & Home
-    if (data['app_language'] is String) {
+    if (data['app_language'] is String && supportedLanguages.contains(data['app_language'])) {
       _appLanguage = data['app_language'] as String;
       await _prefs.setString('app_language', _appLanguage);
     }
-    if (data['font_scale'] is num) {
-      _fontScale = (data['font_scale'] as num).toDouble();
+    if (data['font_scale'] is num && (data['font_scale'] as num).isFinite) {
+      // Keep within the range Settings offers so a bad backup can't break layouts.
+      _fontScale = (data['font_scale'] as num).toDouble().clamp(1.0, 1.3);
       await _prefs.setDouble('font_scale', _fontScale);
     }
     if (data['show_favorites'] is bool) {

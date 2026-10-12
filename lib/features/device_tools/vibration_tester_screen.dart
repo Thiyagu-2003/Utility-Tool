@@ -64,13 +64,14 @@ class _VibrationTesterScreenState extends State<VibrationTesterScreen> with Sing
     int step = 0;
     _patternTimer = Timer.periodic(const Duration(milliseconds: 180), (timer) {
       step = (step + 1) % 6;
+      // Only the lub (step 0) and dub (step 1) ticks vibrate; the rest is rest time.
+      if (step > 1) return;
       if (step == 0) {
         VibrationService.mediumImpact();
-        _playWave();
-      } else if (step == 1) {
+      } else {
         VibrationService.heavyImpact();
-        _playWave();
       }
+      _playWave();
       setState(() => _totalVibrationsTriggered++);
     });
   }
@@ -156,7 +157,7 @@ class _VibrationTesterScreenState extends State<VibrationTesterScreen> with Sing
 
     return ToolScaffold(
       title: 'Vibration & Haptics Tester',
-      category: ToolCategory.moreTools,
+      category: ToolCategory.deviceTests,
       toolId: 'vibration_tester',
       isScrollable: false,
       body: ListView(
@@ -239,7 +240,7 @@ class _VibrationTesterScreenState extends State<VibrationTesterScreen> with Sing
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Trigger count: $_totalVibrationsTriggered • Hardware Motor: Active',
+                  'Triggers sent: $_totalVibrationsTriggered',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
@@ -380,12 +381,16 @@ class _VibrationTesterScreenState extends State<VibrationTesterScreen> with Sing
               children: [
                 Icon(icon, size: 20, color: AppColors.primaryOrange),
                 const SizedBox(width: 10),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                    ),
                   ),
                 ),
               ],
@@ -484,8 +489,11 @@ class _VibrationTesterScreenState extends State<VibrationTesterScreen> with Sing
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 12,
+                    runSpacing: 4,
                     children: [
                       Text(
                         'MORSE PATTERN:',

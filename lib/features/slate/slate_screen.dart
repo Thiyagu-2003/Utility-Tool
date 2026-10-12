@@ -16,7 +16,7 @@ class SlateScreen extends StatefulWidget {
   State<SlateScreen> createState() => _SlateScreenState();
 }
 
-class _SlateScreenState extends State<SlateScreen> {
+class _SlateScreenState extends State<SlateScreen> with WidgetsBindingObserver {
   final SlateService _slateService = SlateService();
 
   late SlateDocument _currentDocument;
@@ -30,6 +30,7 @@ class _SlateScreenState extends State<SlateScreen> {
   // Strokes & History
   List<SlateStroke> _strokes = [];
   SlateStroke? _currentStroke;
+  int? _drawingPointer; // only one finger draws; others are ignored
 
   final List<List<SlateStroke>> _undoStack = [];
   final List<List<SlateStroke>> _redoStack = [];
@@ -74,6 +75,7 @@ class _SlateScreenState extends State<SlateScreen> {
         );
 
     _strokes = List.from(_currentDocument.strokes);
+    WidgetsBinding.instance.addObserver(this);
 
     if (widget.initialSlate == null) {
       _loadLastActiveSlate();
@@ -91,7 +93,17 @@ class _SlateScreenState extends State<SlateScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Persist immediately when backgrounded; the 2s debounce may never fire if the OS kills the app.
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _autoSaveDebounce?.cancel();
+      _triggerAutoSaveSync();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _autoSaveDebounce?.cancel();
     _triggerAutoSaveSync();
     if (_isFullScreen) {
@@ -200,11 +212,17 @@ class _SlateScreenState extends State<SlateScreen> {
 
   void _saveSlate() async {
     PreferencesService().triggerHaptic();
-    final size = MediaQuery.of(context).size;
+    final size = MediaQuery.sizeOf(context);
+    final strokes = List<SlateStroke>.of(_strokes);
+    final paper = _currentDocument.paperType;
+    final title = _currentDocument.title;
+    // Only a small preview is stored; the full-size PNG is rendered when exported, so
+    // saving (and every later auto-save/list rewrite) stays light.
     final bytes = await _slateService.renderCanvasToPng(
-      strokes: _strokes,
-      paperType: _currentDocument.paperType,
+      strokes: strokes,
+      paperType: paper,
       size: size,
+      pixelRatio: 0.5,
     );
 
     // Update thumbnail in document
@@ -232,20 +250,24 @@ class _SlateScreenState extends State<SlateScreen> {
         action: SnackBarAction(
           label: 'Export PNG',
           textColor: const Color(0xFFEA580C),
-          onPressed: () {
-            _slateService.sharePng(bytes, _currentDocument.title);
-          },
+          onPressed: () => _exportPng(strokes, paper, title),
         ),
       ),
     );
   }
 
-  void _renameSlate() {
-    final controller = TextEditingController(text: _currentDocument.title);
-    showDialog(
+  /// Asks for a slate title; null when cancelled or left blank.
+  Future<String?> _askSlateTitle(String initial) {
+    final controller = TextEditingController(text: initial);
+    return showDialog<String>(
       context: context,
       builder: (ctx) {
         final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        void submit() {
+          final text = controller.text.trim();
+          Navigator.pop(ctx, text.isEmpty ? null : text);
+        }
+
         return AlertDialog(
           backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -260,6 +282,7 @@ class _SlateScreenState extends State<SlateScreen> {
           content: TextField(
             controller: controller,
             autofocus: true,
+            onSubmitted: (_) => submit(),
             style: GoogleFonts.outfit(
               color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
             ),
@@ -289,16 +312,7 @@ class _SlateScreenState extends State<SlateScreen> {
               ),
             ),
             FilledButton(
-              onPressed: () {
-                final text = controller.text.trim();
-                if (text.isNotEmpty) {
-                  setState(() {
-                    _currentDocument.title = text;
-                  });
-                  _triggerAutoSave();
-                }
-                Navigator.pop(ctx);
-              },
+              onPressed: submit,
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFFEA580C),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -312,6 +326,47 @@ class _SlateScreenState extends State<SlateScreen> {
         );
       },
     );
+  }
+
+  /// Renames the slate being drawn on (top bar title).
+  Future<void> _renameSlate() async {
+    final text = await _askSlateTitle(_currentDocument.title);
+    if (text == null || !mounted) return;
+    setState(() => _currentDocument.title = text);
+    _triggerAutoSave();
+  }
+
+  /// Confirms before permanently deleting a saved slate.
+  Future<bool> _confirmDeleteSlate(String title) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Delete slate?', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: 18)),
+        content: Text('"$title" will be permanently removed from My Slates.', style: GoogleFonts.outfit(fontSize: 14)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancel', style: GoogleFonts.outfit())),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE11D48)),
+            child: Text('Delete', style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  /// Renders [strokes] at full size and opens the share sheet (as a PNG).
+  Future<void> _exportPng(List<SlateStroke> strokes, SlatePaperType paper, String title) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final size = MediaQuery.sizeOf(context);
+    try {
+      final bytes = await _slateService.renderCanvasToPng(strokes: strokes, paperType: paper, size: size);
+      await _slateService.sharePng(bytes, title);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Could not export PNG: $e')));
+    }
   }
 
   void _toggleFocusMode() {
@@ -339,7 +394,8 @@ class _SlateScreenState extends State<SlateScreen> {
 
   // Pointer & Gesture Event Handlers
   void _onPointerDown(PointerDownEvent event) {
-    if (_isFocusMode) return;
+    if (_isFocusMode || _drawingPointer != null) return;
+    _drawingPointer = event.pointer;
     _pushUndoState();
     final point = SlatePoint(event.localPosition.dx, event.localPosition.dy);
     setState(() {
@@ -354,7 +410,7 @@ class _SlateScreenState extends State<SlateScreen> {
   }
 
   void _onPointerMove(PointerMoveEvent event) {
-    if (_currentStroke == null) return;
+    if (_currentStroke == null || event.pointer != _drawingPointer) return;
     final point = SlatePoint(event.localPosition.dx, event.localPosition.dy);
 
     setState(() {
@@ -375,7 +431,8 @@ class _SlateScreenState extends State<SlateScreen> {
   }
 
   void _onPointerUp(PointerUpEvent event) {
-    if (_currentStroke == null) return;
+    if (_currentStroke == null || event.pointer != _drawingPointer) return;
+    _drawingPointer = null;
     setState(() {
       _strokes.add(_currentStroke!);
       _currentStroke = null;
@@ -384,9 +441,12 @@ class _SlateScreenState extends State<SlateScreen> {
   }
 
   void _onPointerCancel(PointerCancelEvent event) {
-    if (_currentStroke == null) return;
+    if (_currentStroke == null || event.pointer != _drawingPointer) return;
+    _drawingPointer = null;
     setState(() {
       _currentStroke = null;
+      // Nothing was committed, so drop the snapshot pushed on pointer-down.
+      if (_undoStack.isNotEmpty) _undoStack.removeLast();
     });
   }
 
@@ -394,13 +454,23 @@ class _SlateScreenState extends State<SlateScreen> {
     showDialog(
       context: context,
       builder: (ctx) {
-        double hue = 0;
-        double saturation = 1.0;
-        double lightness = 0.5;
+        // The picked colour is the source of truth so a hex entry (e.g. pure white,
+        // outside the lightness slider range) is kept exactly; sliders just mirror it.
+        var picked = _activeColor;
+        final hexCtrl = TextEditingController(text: colorToHex(picked));
+        var hexInvalid = false;
 
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            final currentColor = HSLColor.fromAHSL(1.0, hue, saturation, lightness).toColor();
+            final hsl = HSLColor.fromColor(picked);
+
+            void setFromHsl({double? h, double? s, double? l}) {
+              setDialogState(() {
+                picked = HSLColor.fromAHSL(1.0, h ?? hsl.hue, s ?? hsl.saturation, l ?? hsl.lightness).toColor();
+                hexCtrl.text = colorToHex(picked);
+                hexInvalid = false;
+              });
+            }
 
             return AlertDialog(
               backgroundColor: Theme.of(context).brightness == Brightness.dark
@@ -411,44 +481,68 @@ class _SlateScreenState extends State<SlateScreen> {
                 'Custom Colour',
                 style: GoogleFonts.outfit(fontWeight: FontWeight.w700),
               ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    height: 54,
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: currentColor,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFFCBD5E1), width: 1.5),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      height: 54,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: picked,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFCBD5E1), width: 1.5),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text('Hue', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w600)),
-                  Slider(
-                    value: hue,
-                    min: 0,
-                    max: 360,
-                    activeColor: const Color(0xFFEA580C),
-                    onChanged: (v) => setDialogState(() => hue = v),
-                  ),
-                  Text('Saturation', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w600)),
-                  Slider(
-                    value: saturation,
-                    min: 0,
-                    max: 1.0,
-                    activeColor: const Color(0xFFEA580C),
-                    onChanged: (v) => setDialogState(() => saturation = v),
-                  ),
-                  Text('Lightness', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w600)),
-                  Slider(
-                    value: lightness,
-                    min: 0.1,
-                    max: 0.9,
-                    activeColor: const Color(0xFFEA580C),
-                    onChanged: (v) => setDialogState(() => lightness = v),
-                  ),
-                ],
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: hexCtrl,
+                      autocorrect: false,
+                      textCapitalization: TextCapitalization.characters,
+                      style: GoogleFonts.outfit(fontWeight: FontWeight.w600),
+                      decoration: InputDecoration(
+                        labelText: 'Hex colour',
+                        hintText: '#RRGGBB',
+                        errorText: hexInvalid ? 'Use 6 hex digits, e.g. #EA580C' : null,
+                        isDense: true,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onChanged: (text) {
+                        final parsed = parseHexColor(text);
+                        setDialogState(() {
+                          if (parsed != null) picked = parsed;
+                          hexInvalid = parsed == null;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Text('Hue', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w600)),
+                    Slider(
+                      value: hsl.hue.clamp(0.0, 360.0),
+                      min: 0,
+                      max: 360,
+                      activeColor: const Color(0xFFEA580C),
+                      onChanged: (v) => setFromHsl(h: v),
+                    ),
+                    Text('Saturation', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w600)),
+                    Slider(
+                      value: hsl.saturation.clamp(0.0, 1.0),
+                      min: 0,
+                      max: 1.0,
+                      activeColor: const Color(0xFFEA580C),
+                      onChanged: (v) => setFromHsl(s: v),
+                    ),
+                    Text('Lightness', style: GoogleFonts.outfit(fontSize: 12, fontWeight: FontWeight.w600)),
+                    Slider(
+                      value: hsl.lightness.clamp(0.0, 1.0),
+                      min: 0,
+                      max: 1.0,
+                      activeColor: const Color(0xFFEA580C),
+                      onChanged: (v) => setFromHsl(l: v),
+                    ),
+                  ],
+                ),
               ),
               actions: [
                 TextButton(
@@ -457,15 +551,17 @@ class _SlateScreenState extends State<SlateScreen> {
                 ),
                 FilledButton(
                   style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEA580C)),
-                  onPressed: () {
-                    setState(() {
-                      _activeColor = currentColor;
-                      if (_activeTool == SlateToolType.eraser) {
-                        _activeTool = SlateToolType.pen;
-                      }
-                    });
-                    Navigator.pop(ctx);
-                  },
+                  onPressed: hexInvalid
+                      ? null
+                      : () {
+                          setState(() {
+                            _activeColor = picked;
+                            if (_activeTool == SlateToolType.eraser) {
+                              _activeTool = SlateToolType.pen;
+                            }
+                          });
+                          Navigator.pop(ctx);
+                        },
                   child: Text('Select', style: GoogleFonts.outfit(fontWeight: FontWeight.w700)),
                 ),
               ],
@@ -616,27 +712,29 @@ class _SlateScreenState extends State<SlateScreen> {
                                             _redoStack.clear();
                                           });
                                         } else if (val == 'rename') {
-                                          Navigator.pop(ctx);
-                                          _renameSlate();
+                                          final text = await _askSlateTitle(item.title);
+                                          if (text == null) return;
+                                          await _slateService.renameSlate(item.id, text);
+                                          item.title = text;
+                                          if (item.id == _currentDocument.id && mounted) {
+                                            setState(() => _currentDocument.title = text);
+                                            _triggerAutoSave();
+                                          }
+                                          if (ctx.mounted) setSheetState(() {});
                                         } else if (val == 'duplicate') {
                                           final dup = await _slateService.duplicateSlate(item);
-                                          setSheetState(() {
-                                            slates.insert(0, dup);
-                                          });
+                                          if (ctx.mounted) setSheetState(() => slates.insert(0, dup));
                                         } else if (val == 'delete') {
+                                          if (!await _confirmDeleteSlate(item.title)) return;
                                           await _slateService.deleteSlate(item.id);
-                                          setSheetState(() {
-                                            slates.removeAt(index);
-                                          });
+                                          if (ctx.mounted) setSheetState(() => slates.removeWhere((s) => s.id == item.id));
                                         } else if (val == 'share') {
-                                          if (item.thumbnailBase64 != null) {
-                                            final bytes = base64Decode(item.thumbnailBase64!);
-                                            _slateService.sharePng(bytes, item.title);
-                                          }
+                                          _exportPng(item.strokes, item.paperType, item.title);
                                         }
                                       },
                                       itemBuilder: (context) => [
                                         const PopupMenuItem(value: 'open', child: Text('Open')),
+                                        const PopupMenuItem(value: 'rename', child: Text('Rename')),
                                         const PopupMenuItem(value: 'duplicate', child: Text('Duplicate')),
                                         const PopupMenuItem(value: 'share', child: Text('Share PNG')),
                                         const PopupMenuItem(
@@ -681,13 +779,32 @@ class _SlateScreenState extends State<SlateScreen> {
                 onPointerMove: _onPointerMove,
                 onPointerUp: _onPointerUp,
                 onPointerCancel: _onPointerCancel,
-                child: CustomPaint(
-                  painter: _SlateCanvasPainter(
-                    strokes: _strokes,
-                    currentStroke: _currentStroke,
-                    paperType: _currentDocument.paperType,
-                  ),
-                  size: Size.infinite,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    RepaintBoundary(
+                      child: CustomPaint(
+                        painter: _SlateCanvasPainter(
+                          strokes: _strokes,
+                          liveStroke: _currentStroke?.tool == SlateToolType.eraser ? _currentStroke : null,
+                          paperType: _currentDocument.paperType,
+                          drawPaper: true,
+                        ),
+                        size: Size.infinite,
+                      ),
+                    ),
+                    RepaintBoundary(
+                      child: CustomPaint(
+                        painter: _SlateCanvasPainter(
+                          strokes: const [],
+                          liveStroke: _currentStroke?.tool == SlateToolType.eraser ? null : _currentStroke,
+                          paperType: _currentDocument.paperType,
+                          drawPaper: false,
+                        ),
+                        size: Size.infinite,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -1513,172 +1630,43 @@ class _SlateScreenState extends State<SlateScreen> {
 }
 
 // --- Custom Painter for Smooth Canvas Drawing with Layers ---
+// Two stacked painters keep long drawings smooth: the base layer (paper + committed
+// strokes) only repaints when the stroke list changes, while the live stroke sits on
+// a light overlay that repaints on every pointer move. The eraser is the exception:
+// BlendMode.clear has to run on the same layer as the strokes it erases.
 class _SlateCanvasPainter extends CustomPainter {
   final List<SlateStroke> strokes;
-  final SlateStroke? currentStroke;
+  final int strokeCount; // snapshot: `strokes` is mutated in place
+  final SlateStroke? liveStroke;
   final SlatePaperType paperType;
+  final bool drawPaper;
 
   _SlateCanvasPainter({
     required this.strokes,
-    required this.currentStroke,
+    required this.liveStroke,
     required this.paperType,
-  });
+    required this.drawPaper,
+  }) : strokeCount = strokes.length;
 
   @override
   void paint(Canvas canvas, Size size) {
-    // 1. Draw Paper Background
-    _drawPaper(canvas, size);
-
-    // 2. Save Layer for strokes so BlendMode.clear only clears strokes and reveals the paper!
-    canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
-
-    for (final stroke in strokes) {
-      _drawStroke(canvas, stroke);
-    }
-
-    if (currentStroke != null) {
-      _drawStroke(canvas, currentStroke!);
-    }
-
-    canvas.restore();
-  }
-
-  void _drawPaper(Canvas canvas, Size size) {
-    Color bgColor;
-    switch (paperType) {
-      case SlatePaperType.dark:
-        bgColor = const Color(0xFF1E293B);
-        break;
-      case SlatePaperType.blank:
-      case SlatePaperType.grid:
-      case SlatePaperType.lined:
-        bgColor = Colors.white;
-        break;
-    }
-
-    final bgPaint = Paint()..color = bgColor;
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
-
-    if (paperType == SlatePaperType.grid) {
-      final linePaint = Paint()
-        ..color = const Color(0xFFE2E8F0)
-        ..strokeWidth = 1.0;
-      const step = 24.0;
-      for (double x = 0; x < size.width; x += step) {
-        canvas.drawLine(Offset(x, 0), Offset(x, size.height), linePaint);
-      }
-      for (double y = 0; y < size.height; y += step) {
-        canvas.drawLine(Offset(0, y), Offset(size.width, y), linePaint);
-      }
-    } else if (paperType == SlatePaperType.lined) {
-      final linePaint = Paint()
-        ..color = const Color(0xFFBFDBFE)
-        ..strokeWidth = 1.0;
-      const step = 32.0;
-      for (double y = 48.0; y < size.height; y += step) {
-        canvas.drawLine(Offset(0, y), Offset(size.width, y), linePaint);
-      }
-    } else if (paperType == SlatePaperType.dark) {
-      final linePaint = Paint()
-        ..color = const Color(0xFF334155).withValues(alpha: 0.45)
-        ..strokeWidth = 0.8;
-      const step = 28.0;
-      for (double x = 0; x < size.width; x += step) {
-        canvas.drawLine(Offset(x, 0), Offset(x, size.height), linePaint);
-      }
-      for (double y = 0; y < size.height; y += step) {
-        canvas.drawLine(Offset(0, y), Offset(size.width, y), linePaint);
+    if (drawPaper) {
+      SlateService.drawPaperBackground(canvas, size, paperType);
+      // saveLayer so BlendMode.clear only clears strokes and reveals the paper.
+      canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
+      for (final stroke in strokes) {
+        SlateService.drawStroke(canvas, stroke);
       }
     }
-  }
-
-  void _drawStroke(Canvas canvas, SlateStroke stroke) {
-    if (stroke.points.isEmpty) return;
-
-    final paint = Paint()
-      ..strokeWidth = stroke.size
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..style = PaintingStyle.stroke;
-
-    switch (stroke.tool) {
-      case SlateToolType.pen:
-        paint.color = stroke.color.withValues(alpha: stroke.opacity);
-        break;
-      case SlateToolType.brush:
-        paint.color = stroke.color.withValues(alpha: stroke.opacity);
-        paint.strokeWidth = stroke.size * 1.5;
-        paint.maskFilter = MaskFilter.blur(BlurStyle.normal, (stroke.size * 1.5) * 0.22);
-        break;
-      case SlateToolType.marker:
-        final markerOpacity = (stroke.opacity * 0.38).clamp(0.08, 0.40);
-        paint.color = stroke.color.withValues(alpha: markerOpacity);
-        paint.strokeWidth = stroke.size * 3.0;
-        paint.strokeCap = StrokeCap.square;
-        paint.strokeJoin = StrokeJoin.miter;
-        break;
-      case SlateToolType.eraser:
-        paint.blendMode = BlendMode.clear;
-        paint.strokeWidth = stroke.size * 2.0;
-        break;
-      case SlateToolType.line:
-      case SlateToolType.box:
-      case SlateToolType.circle:
-        paint.color = stroke.color.withValues(alpha: stroke.opacity);
-        break;
-    }
-
-    if (stroke.tool == SlateToolType.line) {
-      if (stroke.points.length >= 2) {
-        canvas.drawLine(stroke.points.first.toOffset(), stroke.points.last.toOffset(), paint);
-      }
-      return;
-    }
-
-    if (stroke.tool == SlateToolType.box) {
-      if (stroke.points.length >= 2) {
-        canvas.drawRect(
-          Rect.fromPoints(stroke.points.first.toOffset(), stroke.points.last.toOffset()),
-          paint,
-        );
-      }
-      return;
-    }
-
-    if (stroke.tool == SlateToolType.circle) {
-      if (stroke.points.length >= 2) {
-        canvas.drawOval(
-          Rect.fromPoints(stroke.points.first.toOffset(), stroke.points.last.toOffset()),
-          paint,
-        );
-      }
-      return;
-    }
-
-    // Freehand with midpoint quadratic smoothing
-    if (stroke.points.length == 1) {
-      final p = stroke.points.first.toOffset();
-      canvas.drawCircle(p, paint.strokeWidth / 2, paint..style = PaintingStyle.fill);
-      return;
-    }
-
-    final path = Path();
-    path.moveTo(stroke.points[0].x, stroke.points[0].y);
-
-    for (int i = 1; i < stroke.points.length; i++) {
-      final pPrev = stroke.points[i - 1];
-      final pCurr = stroke.points[i];
-      final midX = (pPrev.x + pCurr.x) / 2;
-      final midY = (pPrev.y + pCurr.y) / 2;
-      path.quadraticBezierTo(pPrev.x, pPrev.y, midX, midY);
-    }
-    path.lineTo(stroke.points.last.x, stroke.points.last.y);
-
-    canvas.drawPath(path, paint);
+    if (liveStroke != null) SlateService.drawStroke(canvas, liveStroke!);
+    if (drawPaper) canvas.restore();
   }
 
   @override
-  bool shouldRepaint(covariant _SlateCanvasPainter oldDelegate) {
-    return true;
-  }
+  bool shouldRepaint(covariant _SlateCanvasPainter old) =>
+      drawPaper != old.drawPaper ||
+      paperType != old.paperType ||
+      strokeCount != old.strokeCount ||
+      !identical(strokes, old.strokes) ||
+      !identical(liveStroke, old.liveStroke);
 }

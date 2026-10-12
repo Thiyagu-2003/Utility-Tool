@@ -18,6 +18,16 @@ enum EverydayTab {
   const EverydayTab(this.label, this.icon);
 }
 
+/// Uniform random integer in [a, b] (either order). Random.nextInt only takes
+/// ranges up to 2^32, so wider ranges fall back to nextDouble.
+int randomIntInRange(math.Random random, int a, int b) {
+  final lo = math.min(a, b);
+  final span = math.max(a, b) - lo + 1;
+  if (span <= 0) return lo; // overflowed int64; nothing sensible to pick from
+  if (span <= 1 << 32) return lo + random.nextInt(span);
+  return lo + (random.nextDouble() * span).floor();
+}
+
 class RandomUtilitiesScreen extends StatefulWidget {
   const RandomUtilitiesScreen({super.key});
 
@@ -48,11 +58,7 @@ class _RandomUtilitiesScreenState extends State<RandomUtilitiesScreen> {
     PreferencesService().triggerHaptic();
     final min = int.tryParse(_minController.text.trim()) ?? 1;
     final max = int.tryParse(_maxController.text.trim()) ?? 100;
-    if (min >= max) {
-      setState(() => _randomNumberResult = min.toString());
-      return;
-    }
-    final res = min + _random.nextInt(max - min + 1);
+    final res = randomIntInRange(_random, min, max);
     setState(() => _randomNumberResult = res.toString());
   }
 
@@ -127,7 +133,8 @@ class _RandomUtilitiesScreenState extends State<RandomUtilitiesScreen> {
                     label: 'Min Value',
                     controller: _minController,
                     hintText: '1',
-                    keyboardType: TextInputType.number,
+                    keyboardType: const TextInputType.numberWithOptions(signed: true),
+                    onChanged: (_) => setState(() {}),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -136,7 +143,8 @@ class _RandomUtilitiesScreenState extends State<RandomUtilitiesScreen> {
                     label: 'Max Value',
                     controller: _maxController,
                     hintText: '100',
-                    keyboardType: TextInputType.number,
+                    keyboardType: const TextInputType.numberWithOptions(signed: true),
+                    onChanged: (_) => setState(() {}),
                   ),
                 ),
               ],
@@ -181,7 +189,7 @@ class _RandomUtilitiesScreenState extends State<RandomUtilitiesScreen> {
                     border: Border.all(color: AppColors.catEveryday, width: 2),
                     boxShadow: [
                       BoxShadow(
-                        color: AppColors.catEveryday.withOpacity(0.15),
+                        color: AppColors.catEveryday.withValues(alpha: 0.15),
                         blurRadius: 10,
                       ),
                     ],
@@ -195,11 +203,13 @@ class _RandomUtilitiesScreenState extends State<RandomUtilitiesScreen> {
               }).toList(),
             ),
             const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              runSpacing: 8,
               children: [
                 const Text('Dice count: ', style: TextStyle(fontWeight: FontWeight.bold)),
-                ...[1, 2, 3, 4].map((c) {
+                ...[1, 2, 3, 4, 5, 6].map((c) {
                   return Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4.0),
                     child: ChoiceChip(
@@ -208,10 +218,8 @@ class _RandomUtilitiesScreenState extends State<RandomUtilitiesScreen> {
                       selectedColor: AppColors.catEveryday,
                       onSelected: (val) {
                         if (val) {
-                          setState(() {
-                            _diceCount = c;
-                            _rollDice();
-                          });
+                          _diceCount = c;
+                          _rollDice();
                         }
                       },
                     ),
@@ -255,7 +263,7 @@ class _RandomUtilitiesScreenState extends State<RandomUtilitiesScreen> {
                 height: 120,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: AppColors.catEveryday.withOpacity(0.15),
+                  color: AppColors.catEveryday.withValues(alpha: 0.15),
                   border: Border.all(color: AppColors.catEveryday, width: 3),
                 ),
                 alignment: Alignment.center,

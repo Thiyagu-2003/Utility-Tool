@@ -18,26 +18,37 @@ class _DiscountCalculatorScreenState extends State<DiscountCalculatorScreen> {
   final TextEditingController _priceController = TextEditingController(text: '2499');
   final TextEditingController _discountController = TextEditingController(text: '30');
   final TextEditingController _extraDiscountController = TextEditingController(text: '10');
+  final TextEditingController _taxController = TextEditingController(text: '0');
   bool _enableExtraDiscount = false;
 
   final List<double> _presetDiscounts = [10, 15, 20, 25, 30, 50];
 
+  // Empty, invalid or non-finite ("1e999") input counts as 0.
+  double _num(TextEditingController c) {
+    final v = double.tryParse(c.text.trim());
+    return v != null && v.isFinite ? v : 0.0;
+  }
+
   Map<String, double> _calculateDiscount() {
-    final originalPrice = double.tryParse(_priceController.text.trim()) ?? 0;
-    final discountPercent = double.tryParse(_discountController.text.trim()) ?? 0;
-    final extraDiscountPercent = _enableExtraDiscount
-        ? (double.tryParse(_extraDiscountController.text.trim()) ?? 0)
-        : 0;
+    final originalPrice = _num(_priceController);
+    // Discounts are clamped to 0-100% so the price can't go negative.
+    final discountPercent = _num(_discountController).clamp(0.0, 100.0);
+    final extraDiscountPercent = _enableExtraDiscount ? _num(_extraDiscountController).clamp(0.0, 100.0) : 0.0;
+    final taxPercent = _num(_taxController).clamp(0.0, 100.0);
 
     final firstDiscountAmount = originalPrice * (discountPercent / 100);
     final priceAfterFirst = originalPrice - firstDiscountAmount;
 
     final extraDiscountAmount = priceAfterFirst * (extraDiscountPercent / 100);
-    final finalPrice = priceAfterFirst - extraDiscountAmount;
-    final totalSavings = originalPrice - finalPrice;
+    final discountedPrice = priceAfterFirst - extraDiscountAmount;
+    // Sales tax applies to the discounted price; savings are discount-only.
+    final taxAmount = discountedPrice * (taxPercent / 100);
+    final finalPrice = discountedPrice + taxAmount;
+    final totalSavings = originalPrice - discountedPrice;
     final effectiveDiscountPercent = originalPrice > 0 ? (totalSavings / originalPrice) * 100 : 0.0;
 
     return {
+      'taxAmount': taxAmount,
       'finalPrice': finalPrice,
       'totalSavings': totalSavings,
       'effectivePercent': effectiveDiscountPercent,
@@ -50,6 +61,7 @@ class _DiscountCalculatorScreenState extends State<DiscountCalculatorScreen> {
     _priceController.dispose();
     _discountController.dispose();
     _extraDiscountController.dispose();
+    _taxController.dispose();
     super.dispose();
   }
 
@@ -67,6 +79,7 @@ class _DiscountCalculatorScreenState extends State<DiscountCalculatorScreen> {
           _priceController.text = '2499';
           _discountController.text = '30';
           _extraDiscountController.text = '10';
+          _taxController.text = '0';
           _enableExtraDiscount = false;
         });
       },
@@ -90,6 +103,10 @@ class _DiscountCalculatorScreenState extends State<DiscountCalculatorScreen> {
               BreakdownItem(
                 label: 'Total Savings %',
                 value: '${data['effectivePercent']!.toStringAsFixed(1)}%',
+              ),
+              BreakdownItem(
+                label: 'Sales Tax',
+                value: currencyFmt.format(data['taxAmount']),
               ),
             ],
           ),
@@ -137,7 +154,7 @@ class _DiscountCalculatorScreenState extends State<DiscountCalculatorScreen> {
             ),
             subtitle: const Text('Calculate multi-tier stackable promo discount'),
             value: _enableExtraDiscount,
-            activeColor: AppColors.catFinance,
+            activeThumbColor: AppColors.catFinance,
             onChanged: (val) {
               PreferencesService().triggerHaptic();
               setState(() => _enableExtraDiscount = val);
@@ -154,6 +171,15 @@ class _DiscountCalculatorScreenState extends State<DiscountCalculatorScreen> {
               onChanged: (_) => setState(() {}),
             ),
           ],
+          const SizedBox(height: 16),
+          ModernTextField(
+            label: 'Sales Tax Rate (%) - optional',
+            controller: _taxController,
+            hintText: '0',
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            suffixText: '%',
+            onChanged: (_) => setState(() {}),
+          ),
         ],
       ),
     );

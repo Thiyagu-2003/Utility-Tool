@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
@@ -9,6 +10,7 @@ import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 import 'productivity_models.dart';
+import 'productivity_pdf.dart';
 import 'productivity_service.dart';
 
 enum ProductivityTab {
@@ -39,7 +41,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
   // 1. Notes State
   String _noteSearchQuery = '';
   String _selectedNoteCategory = 'All';
-  final List<String> _noteCategories = ['All', 'Work', 'Personal', 'Ideas', 'Urgent'];
+  final List<String> _noteCategories = ['All', 'General', 'Work', 'Personal', 'Ideas', 'Urgent'];
 
   // 2. Calendar State
   DateTime _calendarMonth = DateTime(DateTime.now().year, DateTime.now().month);
@@ -51,6 +53,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
 
   // 6. To-Do State
   String _selectedTodoCategory = 'All';
+  TodoFilter _todoFilter = TodoFilter.all;
 
   @override
   void initState() {
@@ -78,6 +81,8 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
 
   void _startPunchTimer(DateTime startTime) {
     _punchTimer?.cancel();
+    // Show the real elapsed time at once (e.g. reopening while clocked in) instead of 00:00:00.
+    _activeSessionDuration = DateTime.now().difference(startTime);
     _punchTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) {
         setState(() {
@@ -91,6 +96,40 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
   void dispose() {
     _punchTimer?.cancel();
     super.dispose();
+  }
+
+  Future<DateTime?> _pickDate(BuildContext ctx, DateTime initial) {
+    final year = DateTime.now().year;
+    return showDatePicker(
+      context: ctx,
+      initialDate: initial,
+      firstDate: DateTime(year - 2),
+      lastDate: DateTime(year + 10),
+    );
+  }
+
+  Widget _dateTile(BuildContext ctx, String label, DateTime value, ValueChanged<DateTime> onPicked) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Icons.event_rounded),
+      title: Text(label),
+      subtitle: Text(DateFormat('EEE, MMM d, yyyy').format(value)),
+      trailing: const Icon(Icons.edit_calendar_rounded, size: 20),
+      onTap: () async {
+        final picked = await _pickDate(ctx, value);
+        if (picked != null) onPicked(picked);
+      },
+    );
+  }
+
+  /// Opens the system print dialog (which also offers "Save as PDF").
+  Future<void> _printPdf(String name, Future<Uint8List> Function() build) async {
+    try {
+      final bytes = await build();
+      await Printing.layoutPdf(name: name, onLayout: (_) async => bytes);
+    } catch (e) {
+      if (mounted) _showToast('Could not open the print dialog: $e');
+    }
   }
 
   void _showToast(String message) {
@@ -198,16 +237,30 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
           ),
         ),
         const SizedBox(height: 14),
-        ElevatedButton.icon(
-          icon: const Icon(Icons.note_add_rounded),
-          label: const Text('Create New Note'),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.note_add_rounded),
+                label: const Text('Create New Note'),
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.catDate,
             foregroundColor: Colors.white,
             minimumSize: const Size(double.infinity, 48),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           ),
-          onPressed: () => _openNoteEditorDialog(null),
+                onPressed: () => _openNoteEditorDialog(null),
+              ),
+            ),
+            const SizedBox(width: 10),
+            IconButton.filledTonal(
+              icon: const Icon(Icons.print_rounded),
+              tooltip: 'Print / save notes as PDF',
+              onPressed: filteredNotes.isEmpty
+                  ? null
+                  : () => _printPdf('Notes', () => buildNotesPdf(filteredNotes)),
+            ),
+          ],
         ),
         const SizedBox(height: 16),
         if (filteredNotes.isEmpty)
@@ -270,7 +323,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                             ),
                             onPressed: () async {
                               await _service.togglePinNote(note.id);
-                              setState(() {});
+                              if (mounted) setState(() {});
                             },
                           ),
                         ],
@@ -286,9 +339,13 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            DateFormat('MMM d, yyyy • h:mm a').format(note.updatedAt),
-                            style: const TextStyle(fontSize: 11, color: Colors.grey),
+                          Expanded(
+                            child: Text(
+                              DateFormat('MMM d, yyyy • h:mm a').format(note.updatedAt),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 11, color: Colors.grey),
+                            ),
                           ),
                           Row(
                             children: [
@@ -310,7 +367,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                                 tooltip: 'Delete',
                                 onPressed: () async {
                                   await _service.deleteNote(note.id);
-                                  setState(() {});
+                                  if (mounted) setState(() {});
                                 },
                               ),
                             ],
@@ -349,7 +406,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                 TextField(controller: contentCtrl, maxLines: 5, decoration: const InputDecoration(labelText: 'Content')),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: category,
+                  initialValue: category,
                   decoration: const InputDecoration(labelText: 'Category'),
                   items: ['Personal', 'Work', 'Ideas', 'Urgent', 'General']
                       .map((c) => DropdownMenuItem(value: c, child: Text(c)))
@@ -357,7 +414,8 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                   onChanged: (v) => setDialogState(() => category = v ?? 'Personal'),
                 ),
                 const SizedBox(height: 12),
-                Row(
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     const Text('Color: '),
                     ...colorOptions.map((cv) {
@@ -370,7 +428,8 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                           decoration: BoxDecoration(
                             color: Color(cv),
                             shape: BoxShape.circle,
-                            border: Border.all(color: colorVal == cv ? Colors.white : Colors.transparent, width: 2),
+                            // White ring was invisible on the light dialog surface.
+                            border: Border.all(color: colorVal == cv ? Theme.of(ctx).colorScheme.onSurface : Colors.transparent, width: 2),
                           ),
                         ),
                       );
@@ -428,7 +487,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
       children: [
         ResultCard(
           title: 'Event & Meeting Schedule',
-          primaryResult: '${_service.events.length} Upcoming Events',
+          primaryResult: '${_service.upcomingEventsCount()} Upcoming Events',
           subtitle: 'Day planner, location alerts, and calendar agenda view',
           accentColor: AppColors.catDate,
         ),
@@ -458,10 +517,8 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
         const SizedBox(height: 8),
         // Weekday header
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) {
-            return SizedBox(
-              width: 38,
+            return Expanded(
               child: Center(
                 child: Text(d, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
               ),
@@ -533,9 +590,18 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              'Agenda for ${DateFormat('MMM d, yyyy').format(_selectedCalendarDay)}',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            Expanded(
+              child: Text(
+                'Agenda for ${DateFormat('MMM d, yyyy').format(_selectedCalendarDay)}',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.print_rounded),
+              tooltip: 'Print / save agenda as PDF',
+              onPressed: dayEvents.isEmpty
+                  ? null
+                  : () => _printPdf('Agenda', () => buildAgendaPdf(_selectedCalendarDay, dayEvents)),
             ),
             ElevatedButton.icon(
               icon: const Icon(Icons.add, size: 16),
@@ -583,7 +649,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                   icon: const Icon(Icons.delete_outline, color: AppColors.error),
                   onPressed: () async {
                     await _service.deleteEvent(ev.id);
-                    setState(() {});
+                    if (mounted) setState(() {});
                   },
                 ),
               );
@@ -616,7 +682,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                 TextField(controller: locCtrl, decoration: const InputDecoration(labelText: 'Location / Link')),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  value: category,
+                  initialValue: category,
                   decoration: const InputDecoration(labelText: 'Category'),
                   items: ['Meeting', 'Milestone', 'Work', 'Personal', 'Appointment']
                       .map((c) => DropdownMenuItem(value: c, child: Text(c)))
@@ -625,7 +691,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<PriorityLevel>(
-                  value: priority,
+                  initialValue: priority,
                   decoration: const InputDecoration(labelText: 'Priority'),
                   items: PriorityLevel.values
                       .map((p) => DropdownMenuItem(value: p, child: Text(p.label)))
@@ -723,7 +789,14 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                         children: [
                           Row(
                             children: [
-                              Text(s.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                              Flexible(
+                                child: Text(
+                                  s.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                ),
+                              ),
                               const SizedBox(width: 8),
                               Chip(label: Text(s.category, style: const TextStyle(fontSize: 10)), padding: EdgeInsets.zero),
                             ],
@@ -734,7 +807,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                             style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.catFinance),
                           ),
                           Text(
-                            days < 0 ? 'Renewed recently' : 'Renews in $days days (${DateFormat('MMM d').format(s.nextRenewalDate)})',
+                            days == 0 ? 'Renews today' : 'Renews in $days ${days == 1 ? 'day' : 'days'} (${DateFormat('MMM d').format(s.upcomingRenewalDate)})',
                             style: TextStyle(fontSize: 12, color: days <= s.alertDaysBefore ? AppColors.warning : Colors.grey),
                           ),
                         ],
@@ -742,17 +815,17 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                     ),
                     Switch(
                       value: s.isActive,
-                      activeColor: AppColors.catFinance,
+                      activeThumbColor: AppColors.catFinance,
                       onChanged: (_) async {
                         await _service.toggleSubscriptionActive(s.id);
-                        setState(() {});
+                        if (mounted) setState(() {});
                       },
                     ),
                     IconButton(
                       icon: const Icon(Icons.delete_outline, size: 20, color: Colors.grey),
                       onPressed: () async {
                         await _service.deleteSubscription(s.id);
-                        setState(() {});
+                        if (mounted) setState(() {});
                       },
                     ),
                   ],
@@ -790,20 +863,21 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  value: cycle,
+                  initialValue: cycle,
                   decoration: const InputDecoration(labelText: 'Billing Cycle'),
                   items: ['Monthly', 'Yearly'].map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
                   onChanged: (v) => setDialogState(() => cycle = v ?? 'Monthly'),
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  value: category,
+                  initialValue: category,
                   decoration: const InputDecoration(labelText: 'Category'),
                   items: ['Streaming', 'Software', 'Cloud', 'Gym', 'Gaming', 'Other']
                       .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                       .toList(),
                   onChanged: (v) => setDialogState(() => category = v ?? 'Streaming'),
                 ),
+                _dateTile(ctx, 'Next renewal date', renewalDate, (d) => setDialogState(() => renewalDate = d)),
               ],
             ),
           ),
@@ -896,7 +970,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                       ),
                       onPressed: () async {
                         await _service.toggleBillPaid(b.id);
-                        setState(() {});
+                        if (mounted) setState(() {});
                       },
                     ),
                     const SizedBox(width: 8),
@@ -918,8 +992,10 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                             b.isPaid
                                 ? 'Paid'
                                 : (b.isOverdue
-                                    ? 'OVERDUE by ${days.abs()} days'
-                                    : 'Due in $days days (${DateFormat('MMM d').format(b.dueDate)})'),
+                                    ? 'OVERDUE by ${days.abs()} ${days.abs() == 1 ? 'day' : 'days'}'
+                                    : (days == 0
+                                        ? 'Due today'
+                                        : 'Due in $days ${days == 1 ? 'day' : 'days'} (${DateFormat('MMM d').format(b.dueDate)})')),
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
@@ -937,7 +1013,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                       icon: const Icon(Icons.delete_outline, size: 20, color: Colors.grey),
                       onPressed: () async {
                         await _service.deleteBill(b.id);
-                        setState(() {});
+                        if (mounted) setState(() {});
                       },
                     ),
                   ],
@@ -977,13 +1053,14 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  value: category,
+                  initialValue: category,
                   decoration: const InputDecoration(labelText: 'Category'),
                   items: ['Utilities', 'Rent', 'Credit Card', 'Internet', 'Phone', 'Insurance', 'Other']
                       .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                       .toList(),
                   onChanged: (v) => setDialogState(() => category = v ?? 'Utilities'),
                 ),
+                _dateTile(ctx, 'Due date', dueDate, (d) => setDialogState(() => dueDate = d)),
               ],
             ),
           ),
@@ -1084,12 +1161,13 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                         if (active != null) {
                           await _service.clockOut();
                           _punchTimer?.cancel();
-                          setState(() => _activeSessionDuration = Duration.zero);
+                          if (mounted) setState(() => _activeSessionDuration = Duration.zero);
                         } else {
                           await _service.clockIn();
+                          if (!mounted) return; // a timer started now would outlive the screen
                           final newActive = _service.activeWorkSession;
                           if (newActive != null) _startPunchTimer(newActive.startTime);
-                          setState(() {});
+                          if (mounted) setState(() {});
                         }
                       },
                     ),
@@ -1100,8 +1178,10 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
           ),
         ),
         const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          runSpacing: 4,
           children: [
             const Text('Work Session History', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             OutlinedButton.icon(
@@ -1149,7 +1229,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                     icon: const Icon(Icons.delete_outline, size: 18, color: Colors.grey),
                     onPressed: () async {
                       await _service.deleteWorkSession(w.id);
-                      setState(() {});
+                      if (mounted) setState(() {});
                     },
                   ),
                 ],
@@ -1162,15 +1242,17 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
   }
 
   // ================= 6. TO-DO & CHECKLISTS =================
+  static const _todoFilterLabels = {
+    TodoFilter.all: 'All',
+    TodoFilter.active: 'Active',
+    TodoFilter.completed: 'Completed',
+  };
+
   Widget _buildTodosTab(bool isDark) {
     final todos = _service.todos;
     final rate = _service.todoCompletionRate;
-    final categories = ['All', 'Development', 'Finance', 'Testing', 'Tasks'];
-
-    final filtered = todos.where((t) {
-      if (_selectedTodoCategory == 'All') return true;
-      return t.category == _selectedTodoCategory;
-    }).toList();
+    final categories = ['All', 'Development', 'Finance', 'Testing', 'Tasks', 'Personal'];
+    final filtered = filterTodos(todos, category: _selectedTodoCategory, status: _todoFilter);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1204,13 +1286,25 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
             OutlinedButton(
               onPressed: () async {
                 await _service.clearCompletedTodos();
-                setState(() {});
+                if (mounted) setState(() {});
               },
               child: const Text('Clear Done'),
             ),
           ],
         ),
         const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<TodoFilter>(
+            showSelectedIcon: false,
+            segments: [
+              for (final f in TodoFilter.values) ButtonSegment(value: f, label: Text(_todoFilterLabels[f]!)),
+            ],
+            selected: {_todoFilter},
+            onSelectionChanged: (s) => setState(() => _todoFilter = s.first),
+          ),
+        ),
+        const SizedBox(height: 10),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
@@ -1229,103 +1323,236 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
           ),
         ),
         const SizedBox(height: 14),
-        ListView.separated(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: filtered.length,
-          separatorBuilder: (_, index) => const SizedBox(height: 8),
-          itemBuilder: (context, i) {
-            final t = filtered[i];
-            return ListTile(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+        if (filtered.isEmpty)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'No tasks here.',
+                style: TextStyle(color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary),
               ),
-              leading: Checkbox(
-                value: t.isCompleted,
-                activeColor: AppColors.catEveryday,
-                onChanged: (_) async {
-                  await _service.toggleTodo(t.id);
-                  setState(() {});
-                },
-              ),
-              title: Text(
-                t.title,
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  decoration: t.isCompleted ? TextDecoration.lineThrough : null,
-                  color: t.isCompleted ? Colors.grey : null,
-                ),
-              ),
-              subtitle: Text('${t.category} • Priority: ${t.priority.label}'),
-              trailing: IconButton(
-                icon: const Icon(Icons.delete_outline, size: 20, color: Colors.grey),
-                onPressed: () async {
-                  await _service.deleteTodo(t.id);
-                  setState(() {});
-                },
-              ),
-            );
-          },
-        ),
+            ),
+          )
+        else
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: filtered.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 8),
+            itemBuilder: (context, i) => _buildTodoCard(filtered[i], isDark),
+          ),
       ],
     );
   }
 
+  Widget _buildTodoCard(TodoItem t, bool isDark) {
+    final doneSubs = t.doneSubtasks.length;
+    Future<void> save(TodoItem updated) async {
+      await _service.updateTodo(updated);
+      if (mounted) setState(() {});
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ListTile(
+            leading: Checkbox(
+              value: t.isCompleted,
+              activeColor: AppColors.catEveryday,
+              onChanged: (_) async {
+                await _service.toggleTodo(t.id);
+                if (mounted) setState(() {});
+              },
+            ),
+            title: Text(
+              t.title,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                decoration: t.isCompleted ? TextDecoration.lineThrough : null,
+                color: t.isCompleted ? Colors.grey : null,
+              ),
+            ),
+            subtitle: Text(
+              '${t.category} • Priority: ${t.priority.label}'
+              '${t.subtasks.isEmpty ? '' : ' • $doneSubs/${t.subtasks.length} subtasks'}',
+            ),
+            trailing: IconButton(
+              icon: const Icon(Icons.delete_outline, size: 20, color: Colors.grey),
+              tooltip: 'Delete task',
+              onPressed: () async {
+                await _service.deleteTodo(t.id);
+                if (mounted) setState(() {});
+              },
+            ),
+          ),
+          for (var s = 0; s < t.subtasks.length; s++)
+            Padding(
+              padding: const EdgeInsets.only(left: 36),
+              child: Row(
+                children: [
+                  Checkbox(
+                    value: t.isSubtaskDone(s),
+                    visualDensity: VisualDensity.compact,
+                    activeColor: AppColors.catEveryday,
+                    onChanged: (_) => save(t.toggleSubtask(s)),
+                  ),
+                  Expanded(
+                    child: Text(
+                      t.subtasks[s],
+                      style: TextStyle(
+                        fontSize: 13,
+                        decoration: t.isSubtaskDone(s) ? TextDecoration.lineThrough : null,
+                        color: t.isSubtaskDone(s) ? Colors.grey : null,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 16, color: Colors.grey),
+                    tooltip: 'Remove subtask',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => save(t.removeSubtask(s)),
+                  ),
+                ],
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(left: 36, bottom: 4),
+            child: TextButton.icon(
+              icon: const Icon(Icons.add_rounded, size: 16),
+              label: const Text('Add subtask'),
+              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+              onPressed: () async {
+                final text = await _askText('Add subtask', 'Subtask');
+                if (text != null) await save(t.addSubtask(text));
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Small single-field prompt; null when cancelled or blank.
+  Future<String?> _askText(String title, String label) async {
+    final ctrl = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: InputDecoration(labelText: label),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, ctrl.text), child: const Text('Add')),
+        ],
+      ),
+    );
+    final clean = result?.trim();
+    return clean == null || clean.isEmpty ? null : clean;
+  }
+
   void _openAddTodoDialog() {
     final titleCtrl = TextEditingController();
+    final subtaskCtrl = TextEditingController();
+    final subtasks = <String>[];
     String category = 'Tasks';
     PriorityLevel priority = PriorityLevel.medium;
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Add Task'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Task Title')),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
-                value: category,
-                decoration: const InputDecoration(labelText: 'Category'),
-                items: ['Tasks', 'Development', 'Finance', 'Testing', 'Personal']
-                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                    .toList(),
-                onChanged: (v) => setDialogState(() => category = v ?? 'Tasks'),
+        builder: (ctx, setDialogState) {
+          void addSubtaskFromField() {
+            final text = subtaskCtrl.text.trim();
+            if (text.isEmpty) return;
+            setDialogState(() => subtasks.add(text));
+            subtaskCtrl.clear();
+          }
+
+          return AlertDialog(
+            title: const Text('Add Task'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Task Title')),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    initialValue: category,
+                    decoration: const InputDecoration(labelText: 'Category'),
+                    items: ['Tasks', 'Development', 'Finance', 'Testing', 'Personal']
+                        .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                        .toList(),
+                    onChanged: (v) => setDialogState(() => category = v ?? 'Tasks'),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<PriorityLevel>(
+                    initialValue: priority,
+                    decoration: const InputDecoration(labelText: 'Priority'),
+                    items: PriorityLevel.values
+                        .map((p) => DropdownMenuItem(value: p, child: Text(p.label)))
+                        .toList(),
+                    onChanged: (v) => setDialogState(() => priority = v ?? PriorityLevel.medium),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: subtaskCtrl,
+                    onSubmitted: (_) => addSubtaskFromField(),
+                    decoration: InputDecoration(
+                      labelText: 'Subtask (optional)',
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.add_circle_outline_rounded),
+                        tooltip: 'Add subtask',
+                        onPressed: addSubtaskFromField,
+                      ),
+                    ),
+                  ),
+                  for (var i = 0; i < subtasks.length; i++)
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.subdirectory_arrow_right_rounded, size: 18),
+                      title: Text(subtasks[i]),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                        onPressed: () => setDialogState(() => subtasks.removeAt(i)),
+                      ),
+                    ),
+                ],
               ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<PriorityLevel>(
-                value: priority,
-                decoration: const InputDecoration(labelText: 'Priority'),
-                items: PriorityLevel.values
-                    .map((p) => DropdownMenuItem(value: p, child: Text(p.label)))
-                    .toList(),
-                onChanged: (v) => setDialogState(() => priority = v ?? PriorityLevel.medium),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              ElevatedButton(
+                onPressed: () async {
+                  final title = titleCtrl.text.trim();
+                  if (title.isNotEmpty) {
+                    final pending = subtaskCtrl.text.trim(); // typed but not yet added with +
+                    await _service.addTodo(TodoItem(
+                      id: 'todo_${DateTime.now().millisecondsSinceEpoch}',
+                      title: title,
+                      category: category,
+                      priority: priority,
+                      subtasks: [...subtasks, if (pending.isNotEmpty) pending],
+                    ));
+                    if (mounted) setState(() {});
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  }
+                },
+                child: const Text('Save Task'),
               ),
             ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () async {
-                final title = titleCtrl.text.trim();
-                if (title.isNotEmpty) {
-                  await _service.addTodo(TodoItem(
-                    id: 'todo_${DateTime.now().millisecondsSinceEpoch}',
-                    title: title,
-                    category: category,
-                    priority: priority,
-                  ));
-                  if (mounted) setState(() {});
-                  if (ctx.mounted) Navigator.pop(ctx);
-                }
-              },
-              child: const Text('Save Task'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

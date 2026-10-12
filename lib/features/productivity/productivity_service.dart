@@ -30,64 +30,74 @@ class ProductivityService {
     // 1. Notes
     final notesRaw = prefs.getString(_keyNotes);
     if (notesRaw != null) {
-      final List decoded = jsonDecode(notesRaw);
-      _notes = decoded.map((e) => NoteItem.fromJson(e)).toList();
+      _notes = _decodeList(notesRaw, NoteItem.fromJson);
     } else {
-      _notes = _defaultNotes();
+      _notes = <NoteItem>[];
       await _saveNotes(prefs);
     }
 
     // 2. Events
     final eventsRaw = prefs.getString(_keyEvents);
     if (eventsRaw != null) {
-      final List decoded = jsonDecode(eventsRaw);
-      _events = decoded.map((e) => CalendarEventItem.fromJson(e)).toList();
+      _events = _decodeList(eventsRaw, CalendarEventItem.fromJson);
     } else {
-      _events = _defaultEvents();
+      _events = <CalendarEventItem>[];
       await _saveEvents(prefs);
     }
 
     // 3. Subscriptions
     final subsRaw = prefs.getString(_keySubs);
     if (subsRaw != null) {
-      final List decoded = jsonDecode(subsRaw);
-      _subscriptions = decoded.map((e) => SubscriptionItem.fromJson(e)).toList();
+      _subscriptions = _decodeList(subsRaw, SubscriptionItem.fromJson);
     } else {
-      _subscriptions = _defaultSubscriptions();
+      _subscriptions = <SubscriptionItem>[];
       await _saveSubs(prefs);
     }
 
     // 4. Bills
     final billsRaw = prefs.getString(_keyBills);
     if (billsRaw != null) {
-      final List decoded = jsonDecode(billsRaw);
-      _bills = decoded.map((e) => BillItem.fromJson(e)).toList();
+      _bills = _decodeList(billsRaw, BillItem.fromJson);
     } else {
-      _bills = _defaultBills();
+      _bills = <BillItem>[];
       await _saveBills(prefs);
     }
 
     // 5. Work Hours
     final workRaw = prefs.getString(_keyWork);
     if (workRaw != null) {
-      final List decoded = jsonDecode(workRaw);
-      _workSessions = decoded.map((e) => WorkSessionItem.fromJson(e)).toList();
+      _workSessions = _decodeList(workRaw, WorkSessionItem.fromJson);
     } else {
-      _workSessions = _defaultWorkSessions();
+      _workSessions = <WorkSessionItem>[];
       await _saveWork(prefs);
     }
 
     // 6. Todos
     final todosRaw = prefs.getString(_keyTodos);
     if (todosRaw != null) {
-      final List decoded = jsonDecode(todosRaw);
-      _todos = decoded.map((e) => TodoItem.fromJson(e)).toList();
+      _todos = _decodeList(todosRaw, TodoItem.fromJson);
     } else {
-      _todos = _defaultTodos();
+      _todos = <TodoItem>[];
       await _saveTodos(prefs);
     }
 
     _isInitialized = true;
+  }
+
+  /// Decodes a stored list, skipping malformed entries instead of throwing
+  /// (a throw here left the whole suite stuck on its loading spinner).
+  static List<T> _decodeList<T>(String raw, T Function(Map<String, dynamic>) fromJson) {
+    final result = <T>[];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return result;
+      for (final e in decoded) {
+        try {
+          result.add(fromJson(e as Map<String, dynamic>));
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return result;
   }
 
   // --- 1. NOTES ---
@@ -153,6 +163,13 @@ class ProductivityService {
     _events.removeWhere((e) => e.id == id);
     final prefs = await SharedPreferences.getInstance();
     await _saveEvents(prefs);
+  }
+
+  /// Events today or later (the Calendar header used to count past ones too).
+  int upcomingEventsCount([DateTime? now]) {
+    final n = now ?? DateTime.now();
+    final today = DateTime(n.year, n.month, n.day);
+    return _events.where((e) => !DateTime(e.date.year, e.date.month, e.date.day).isBefore(today)).length;
   }
 
   List<CalendarEventItem> getEventsForDay(DateTime day) {
@@ -332,6 +349,14 @@ class ProductivityService {
     }
   }
 
+  Future<void> updateTodo(TodoItem updated) async {
+    final idx = _todos.indexWhere((t) => t.id == updated.id);
+    if (idx == -1) return;
+    _todos[idx] = updated;
+    final prefs = await SharedPreferences.getInstance();
+    await _saveTodos(prefs);
+  }
+
   Future<void> deleteTodo(String id) async {
     _todos.removeWhere((t) => t.id == id);
     final prefs = await SharedPreferences.getInstance();
@@ -367,152 +392,5 @@ class ProductivityService {
 
   Future<void> _saveTodos(SharedPreferences prefs) async {
     await prefs.setString(_keyTodos, jsonEncode(_todos.map((t) => t.toJson()).toList()));
-  }
-
-  // --- DEFAULTS ---
-  List<NoteItem> _defaultNotes() => [
-    NoteItem(
-      id: 'note_1',
-      title: 'Project Roadmap & Goals',
-      content: '1. Review offline app architecture.\n2. Add productivity & event reminders.\n3. Verify test coverage & haptic performance.',
-      category: 'Work',
-      colorValue: 0xFF3B82F6,
-      isPinned: true,
-      updatedAt: DateTime.now(),
-    ),
-    NoteItem(
-      id: 'note_2',
-      title: 'Design System & Color Tokens',
-      content: 'Maintain high contrast dark/light theme surfaces. Use vibrant primary orange and category theme colors for badges.',
-      category: 'Ideas',
-      colorValue: 0xFF10B981,
-      isPinned: false,
-      updatedAt: DateTime.now().subtract(const Duration(days: 1)),
-    ),
-  ];
-
-  List<CalendarEventItem> _defaultEvents() {
-    final now = DateTime.now();
-    return [
-      CalendarEventItem(
-        id: 'event_1',
-        title: 'Team Sprint Retrospective',
-        date: now.add(const Duration(days: 1)),
-        time: '11:00 AM',
-        location: 'Virtual Conference',
-        category: 'Work',
-        priority: PriorityLevel.high,
-      ),
-      CalendarEventItem(
-        id: 'event_2',
-        title: 'Quarterly Project Review',
-        date: now.add(const Duration(days: 3)),
-        time: '03:30 PM',
-        location: 'Main Boardroom',
-        category: 'Milestone',
-        priority: PriorityLevel.medium,
-      ),
-    ];
-  }
-
-  List<SubscriptionItem> _defaultSubscriptions() {
-    final now = DateTime.now();
-    return [
-      SubscriptionItem(
-        id: 'sub_1',
-        name: 'GitHub Copilot / Cloud',
-        cost: 10.00,
-        billingCycle: 'Monthly',
-        nextRenewalDate: now.add(const Duration(days: 5)),
-        category: 'Software',
-        alertDaysBefore: 3,
-      ),
-      SubscriptionItem(
-        id: 'sub_2',
-        name: 'Spotify Premium Music',
-        cost: 11.99,
-        billingCycle: 'Monthly',
-        nextRenewalDate: now.add(const Duration(days: 14)),
-        category: 'Streaming',
-        alertDaysBefore: 2,
-      ),
-      SubscriptionItem(
-        id: 'sub_3',
-        name: 'Domain & Cloud Hosting',
-        cost: 96.00,
-        billingCycle: 'Yearly',
-        nextRenewalDate: now.add(const Duration(days: 42)),
-        category: 'Cloud',
-        alertDaysBefore: 7,
-      ),
-    ];
-  }
-
-  List<BillItem> _defaultBills() {
-    final now = DateTime.now();
-    return [
-      BillItem(
-        id: 'bill_1',
-        title: 'Electricity & Power Bill',
-        payee: 'City Energy Corp',
-        amount: 85.50,
-        dueDate: now.add(const Duration(days: 4)),
-        category: 'Utilities',
-        isPaid: false,
-      ),
-      BillItem(
-        id: 'bill_2',
-        title: 'Fiber Internet Service',
-        payee: 'Telecom Broadband',
-        amount: 60.00,
-        dueDate: now.add(const Duration(days: 9)),
-        category: 'Internet',
-        isPaid: false,
-      ),
-    ];
-  }
-
-  List<WorkSessionItem> _defaultWorkSessions() {
-    final now = DateTime.now();
-    return [
-      WorkSessionItem(
-        id: 'work_1',
-        startTime: now.subtract(const Duration(hours: 6)),
-        endTime: now.subtract(const Duration(hours: 1)),
-        breakMinutes: 30,
-        hourlyRate: 40.0,
-        taskDescription: 'Flutter App Suite Implementation',
-      ),
-    ];
-  }
-
-  List<TodoItem> _defaultTodos() {
-    final now = DateTime.now();
-    return [
-      TodoItem(
-        id: 'todo_1',
-        title: 'Finalize Productivity & Personal Suite',
-        isCompleted: true,
-        priority: PriorityLevel.high,
-        dueDate: now,
-        category: 'Development',
-      ),
-      TodoItem(
-        id: 'todo_2',
-        title: 'Check bill due-date countdowns and renewal alerts',
-        isCompleted: false,
-        priority: PriorityLevel.medium,
-        dueDate: now.add(const Duration(days: 2)),
-        category: 'Finance',
-      ),
-      TodoItem(
-        id: 'todo_3',
-        title: 'Run test suite verification with 100% pass rate',
-        isCompleted: false,
-        priority: PriorityLevel.high,
-        dueDate: now.add(const Duration(days: 1)),
-        category: 'Testing',
-      ),
-    ];
   }
 }

@@ -1,8 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/share_utils.dart';
 
 class CalculationHistoryScreen extends StatefulWidget {
   const CalculationHistoryScreen({super.key});
@@ -36,7 +39,7 @@ class _CalculationHistoryScreenState extends State<CalculationHistoryScreen> {
     );
   }
 
-  void _exportHistory(List<CalculationRecord> records) {
+  Future<void> _exportHistory(List<CalculationRecord> records) async {
     PreferencesService().triggerHaptic();
     final buffer = StringBuffer();
     buffer.writeln('=== ToolBox Pro - Calculation History Export ===\n');
@@ -45,14 +48,20 @@ class _CalculationHistoryScreenState extends State<CalculationHistoryScreen> {
       buffer.writeln('Expression: ${r.expression}');
       buffer.writeln('Result: ${r.result}\n');
     }
-    Clipboard.setData(ClipboardData(text: buffer.toString()));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Entire calculation history copied to clipboard!'),
-        duration: Duration(seconds: 3),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await shareFileBytes(Uint8List.fromList(utf8.encode(buffer.toString())), 'calculation_history.txt');
+    } catch (_) {
+      // No share target / plugin failure: keep the data reachable on the clipboard.
+      await Clipboard.setData(ClipboardData(text: buffer.toString()));
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Sharing unavailable - history copied to clipboard instead'),
+          duration: Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   @override
@@ -115,9 +124,12 @@ class _CalculationHistoryScreenState extends State<CalculationHistoryScreen> {
 
           // Distinct tool titles for filtering
           final toolTitles = <String>{'All', ...allRecords.map((r) => r.toolTitle)}.toList();
+          // A filter whose records were cleared (or whose chip row is hidden) must not
+          // keep hiding every new record.
+          final selected = toolTitles.length > 2 && toolTitles.contains(_selectedCategory) ? _selectedCategory : 'All';
 
           final filteredRecords = allRecords.where((r) {
-            final matchesCategory = _selectedCategory == 'All' || r.toolTitle == _selectedCategory;
+            final matchesCategory = selected == 'All' || r.toolTitle == selected;
             final query = _searchFilter.trim().toLowerCase();
             final matchesSearch = query.isEmpty ||
                 r.toolTitle.toLowerCase().contains(query) ||
@@ -171,14 +183,14 @@ class _CalculationHistoryScreenState extends State<CalculationHistoryScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     scrollDirection: Axis.horizontal,
                     itemCount: toolTitles.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    separatorBuilder: (_, _) => const SizedBox(width: 8),
                     itemBuilder: (context, i) {
                       final title = toolTitles[i];
-                      final isSelected = _selectedCategory == title;
+                      final isSelected = selected == title;
                       return ChoiceChip(
                         label: Text(title, style: TextStyle(fontSize: 12, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
                         selected: isSelected,
-                        selectedColor: AppColors.primaryOrange.withOpacity(0.2),
+                        selectedColor: AppColors.primaryOrange.withValues(alpha: 0.2),
                         labelStyle: TextStyle(
                           color: isSelected ? AppColors.primaryOrange : (isDark ? Colors.white70 : Colors.black87),
                         ),
@@ -199,7 +211,7 @@ class _CalculationHistoryScreenState extends State<CalculationHistoryScreen> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.history_rounded, size: 54, color: AppColors.darkTextMuted.withOpacity(0.4)),
+                            Icon(Icons.history_rounded, size: 54, color: AppColors.darkTextMuted.withValues(alpha: 0.4)),
                             const SizedBox(height: 12),
                             Text(
                               allRecords.isEmpty
@@ -224,7 +236,7 @@ class _CalculationHistoryScreenState extends State<CalculationHistoryScreen> {
                     : ListView.separated(
                         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                         itemCount: filteredRecords.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
                         itemBuilder: (context, index) {
                           final record = filteredRecords[index];
                           return Container(
@@ -234,7 +246,7 @@ class _CalculationHistoryScreenState extends State<CalculationHistoryScreen> {
                               border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(isDark ? 0.15 : 0.03),
+                                  color: Colors.black.withValues(alpha: isDark ? 0.15 : 0.03),
                                   blurRadius: 8,
                                   offset: const Offset(0, 2),
                                 ),
@@ -247,14 +259,16 @@ class _CalculationHistoryScreenState extends State<CalculationHistoryScreen> {
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Container(
+                                    Flexible(
+                                      child: Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                       decoration: BoxDecoration(
-                                        color: AppColors.primaryOrange.withOpacity(0.12),
+                                        color: AppColors.primaryOrange.withValues(alpha: 0.12),
                                         borderRadius: BorderRadius.circular(8),
                                       ),
                                       child: Text(
                                         record.toolTitle,
+                                        overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(
                                           fontSize: 11,
                                           fontWeight: FontWeight.bold,
@@ -262,6 +276,8 @@ class _CalculationHistoryScreenState extends State<CalculationHistoryScreen> {
                                         ),
                                       ),
                                     ),
+                                    ),
+                                    const SizedBox(width: 8),
                                     Text(
                                       _dateFormat.format(record.timestamp),
                                       style: TextStyle(

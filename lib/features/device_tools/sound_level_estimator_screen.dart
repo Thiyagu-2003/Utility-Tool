@@ -1,5 +1,3 @@
-import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../../core/models/tool_model.dart';
@@ -19,16 +17,15 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
   bool _isMeasuring = false;
   double _calibrationOffset = 0.0; // +/- 10 dB
 
-  double _currentDb = 38.0;
+  double _currentDb = 20.0;
   double _minDb = 999.0;
   double _maxDb = 0.0;
-  double _avgDb = 42.0;
+  double _avgDb = 0.0;
 
   int _sampleCount = 0;
   double _sumDb = 0.0;
 
   final List<double> _history = List.filled(30, 35.0);
-  Timer? _simTimer;
 
   @override
   void initState() {
@@ -38,8 +35,7 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
 
   @override
   void dispose() {
-    _simTimer?.cancel();
-    _speech.stop();
+    _speech.cancel();
     super.dispose();
   }
 
@@ -50,17 +46,36 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
 
     bool micInitialized = false;
     try {
-      micInitialized = await _speech.initialize(onError: (_) {});
+      micInitialized = await _speech.initialize(
+        onError: (_) {},
+        // The recognizer stops on its own after silence or a final result;
+        // restart it so the meter keeps running while "LIVE MONITORING" shows.
+        onStatus: (status) {
+          if (status == stt.SpeechToText.doneStatus && mounted && _isMeasuring && _isHardwareMic) {
+            _listenToMic();
+          }
+        },
+      );
     } catch (_) {
       micInitialized = false;
     }
 
-    if (mounted) {
-      setState(() => _isHardwareMic = micInitialized);
-    }
+    // The screen may have been closed while initialize() was pending; starting the
+    // mic or a periodic timer now would leak past dispose().
+    if (!mounted) return;
+    setState(() => _isHardwareMic = micInitialized);
 
     if (micInitialized) {
-      _simTimer?.cancel();
+      await _listenToMic();
+    } else {
+      // No microphone: show no readings rather than inventing numbers.
+      setState(() => _isMeasuring = false);
+    }
+  }
+
+  Future<void> _listenToMic() async {
+    if (_speech.isListening) return;
+    try {
       await _speech.listen(
         onSoundLevelChange: (level) {
           if (!mounted || !_isMeasuring) return;
@@ -70,18 +85,7 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
           _recordSample(estimatedSpl);
         },
       );
-    } else {
-      // Fallback ambient estimator mode with realistic room noise variation
-      _simTimer?.cancel();
-      _simTimer = Timer.periodic(const Duration(milliseconds: 150), (timer) {
-        if (!mounted || !_isMeasuring) return;
-        final rnd = math.Random();
-        // baseline around 42 dB with random conversational ambient noise
-        final variation = (rnd.nextDouble() * 12.0) - 6.0;
-        final sample = (45.0 + variation + _calibrationOffset).clamp(25.0, 115.0);
-        _recordSample(sample);
-      });
-    }
+    } catch (_) {}
   }
 
   Future<void> _requestMicPermissionDialog() async {
@@ -136,6 +140,7 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
   }
 
   void _resetStats() {
+    if (_sampleCount == 0) return;
     setState(() {
       _minDb = _currentDb;
       _maxDb = _currentDb;
@@ -149,7 +154,6 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
   void _togglePause() {
     if (_isMeasuring) {
       _speech.stop();
-      _simTimer?.cancel();
       setState(() => _isMeasuring = false);
     } else {
       _startMeasuring();
@@ -164,6 +168,7 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
   }
 
   String _getNoiseCategoryLabel(double db) {
+    if (_sampleCount == 0) return 'No reading yet';
     if (db < 40) return 'Quiet Whisper / Library';
     if (db < 60) return 'Moderate Living Room / Rainfall';
     if (db < 75) return 'Normal Conversation / Office';
@@ -178,7 +183,7 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
 
     return ToolScaffold(
       title: 'Sound-Level (dB) Estimator',
-      category: ToolCategory.moreTools,
+      category: ToolCategory.deviceTests,
       toolId: 'sound_level_estimator',
       isScrollable: false,
       body: ListView(
@@ -199,7 +204,7 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
                   const SizedBox(width: 10),
                   const Expanded(
                     child: Text(
-                      'Microphone permission not granted (simulated mode).',
+                      'Microphone unavailable or permission not granted - no readings are shown.',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                   ),
@@ -263,7 +268,7 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
                   textBaseline: TextBaseline.alphabetic,
                   children: [
                     Text(
-                      _currentDb.toStringAsFixed(1),
+                      _sampleCount == 0 ? '--' : _currentDb.toStringAsFixed(1),
                       style: TextStyle(
                         fontSize: 64,
                         fontWeight: FontWeight.bold,
@@ -309,11 +314,11 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildStatCol('MINIMUM', '${_minDb == 999.0 ? "0.0" : _minDb.toStringAsFixed(1)} dB', AppColors.catTime, isDark),
+                    _buildStatCol('MINIMUM', _sampleCount == 0 ? '--' : '${_minDb.toStringAsFixed(1)} dB', AppColors.catTime, isDark),
                     Container(height: 30, width: 1, color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
-                    _buildStatCol('AVERAGE', '${_avgDb.toStringAsFixed(1)} dB', AppColors.primaryOrange, isDark),
+                    _buildStatCol('AVERAGE', _sampleCount == 0 ? '--' : '${_avgDb.toStringAsFixed(1)} dB', AppColors.primaryOrange, isDark),
                     Container(height: 30, width: 1, color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
-                    _buildStatCol('PEAK / MAX', '${_maxDb.toStringAsFixed(1)} dB', AppColors.error, isDark),
+                    _buildStatCol('PEAK / MAX', _sampleCount == 0 ? '--' : '${_maxDb.toStringAsFixed(1)} dB', AppColors.error, isDark),
                   ],
                 ),
               ],
@@ -382,7 +387,10 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Microphone Calibration Offset', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const Expanded(
+                      child: Text('Microphone Calibration Offset', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    ),
+                    const SizedBox(width: 8),
                     Text('${_calibrationOffset >= 0 ? "+" : ""}${_calibrationOffset.toStringAsFixed(1)} dB', style: const TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),

@@ -1,16 +1,18 @@
 import 'dart:convert';
+import 'dart:ui' as ui;
 import 'package:barcode_widget/barcode_widget.dart' as bc;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:mobile_scanner/mobile_scanner.dart' hide ContactInfo;
 import 'package:pdf/pdf.dart' as pw_format;
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/share_utils.dart';
+import '../../core/utils/vcard_utils.dart';
 import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
@@ -30,6 +32,21 @@ enum QrToolkitTab {
   const QrToolkitTab(this.label, this.icon);
 }
 
+/// Escapes the characters that are special in the Wi-Fi QR format: \ ; , : "
+String escapeWifiField(String value) => value.replaceAllMapped(RegExp(r'[\\;,:"]'), (m) => '\\${m[0]}');
+
+/// Builds a `WIFI:` QR payload. The password is kept verbatim (spaces are
+/// significant) and omitted for open networks.
+String buildWifiQrPayload({
+  required String ssid,
+  required String password,
+  required String security,
+  bool hidden = false,
+}) {
+  final pass = security == 'nopass' ? '' : 'P:${escapeWifiField(password)};';
+  return 'WIFI:T:$security;S:${escapeWifiField(ssid)};$pass${hidden ? 'H:true;' : ''};';
+}
+
 class QrBarcodeToolkitScreen extends StatefulWidget {
   const QrBarcodeToolkitScreen({super.key});
 
@@ -44,13 +61,12 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
   // Scanner state
   String _scannedResult = '';
   String _scannedFormat = '';
-  bool _isTorchOn = false;
 
   // Standard QR Generator state
   final TextEditingController _qrTextController = TextEditingController(text: 'https://github.com');
   Color _qrColor = Colors.black;
-  final Color _qrBgColor = Colors.white;
-  final int _qrErrorLevel = QrErrorCorrectLevel.M;
+  Color _qrBgColor = Colors.white;
+  int _qrErrorLevel = QrErrorCorrectLevel.M;
 
   // Wi-Fi QR state
   final TextEditingController _wifiSsidController = TextEditingController(text: 'Home_WiFi');
@@ -128,9 +144,14 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
 
       if (file != null && file.path != null) {
         final capture = await _scannerController.analyzeImage(file.path!);
+        if (!mounted) return;
         if (capture != null && capture.barcodes.isNotEmpty) {
           final bc = capture.barcodes.first;
           final value = bc.rawValue ?? bc.displayValue ?? '';
+          if (value.isEmpty) {
+            _showToast('The code was found but contains no readable text.');
+            return;
+          }
           final format = bc.format.name;
           setState(() {
             _scannedResult = value;
@@ -146,42 +167,70 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
     }
   }
 
-  Future<void> _exportQrImage(String data, {String filename = 'QRCode.png'}) async {
+  /// Renders [data] as a PNG with a solid background and a quiet-zone margin
+  /// (the painter alone yields a transparent, margin-less image that many
+  /// scanners reject).
+  Future<Uint8List?> _renderQrPng(String data, {required Color fg, required Color bg, required int level}) async {
+    const size = 600.0, margin = 48.0;
+    final painter = QrPainter(
+      data: data,
+      version: QrVersions.auto,
+      gapless: true,
+      eyeStyle: QrEyeStyle(eyeShape: QrEyeShape.square, color: fg),
+      dataModuleStyle: QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: fg),
+      errorCorrectionLevel: level,
+    );
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    const total = size + margin * 2;
+    canvas.drawRect(const Rect.fromLTWH(0, 0, total, total), Paint()..color = bg);
+    canvas.translate(margin, margin);
+    painter.paint(canvas, const Size(size, size));
+    final image = await recorder.endRecording().toImage(total.toInt(), total.toInt());
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    return bytes?.buffer.asUint8List();
+  }
+
+  /// [custom] uses the generator tab's colours and error-correction level;
+  /// other tabs export plain black-on-white at level M.
+  Future<void> _exportQrImage(String data, {String filename = 'QRCode.png', bool custom = false}) async {
     PreferencesService().triggerHaptic();
     try {
-      final painter = QrPainter(
-        data: data,
-        version: QrVersions.auto,
-        gapless: true,
-        eyeStyle: QrEyeStyle(eyeShape: QrEyeShape.square, color: _qrColor),
-        dataModuleStyle: QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: _qrColor),
-        errorCorrectionLevel: _qrErrorLevel,
+      final bytes = await _renderQrPng(
+        data,
+        fg: custom ? _qrColor : Colors.black,
+        bg: custom ? _qrBgColor : Colors.white,
+        level: custom ? _qrErrorLevel : QrErrorCorrectLevel.M,
       );
-
-      final picData = await painter.toImageData(600);
-      if (picData != null) {
-        final bytes = picData.buffer.asUint8List();
-        await Printing.sharePdf(bytes: bytes, filename: filename);
+      if (bytes == null) {
+        _showToast('Could not render the QR code.');
+        return;
       }
+      await shareFileBytes(bytes, filename);
     } catch (e) {
       _showToast('Error saving QR code: $e');
     }
   }
 
-  String _buildWifiPayload() {
-    final ssid = _wifiSsidController.text.trim();
-    final pass = _wifiPasswordController.text.trim();
-    final type = _wifiSecurity;
-    final hidden = _wifiHidden ? 'true' : 'false';
-    return 'WIFI:T:$type;S:$ssid;P:$pass;H:$hidden;;';
-  }
+  String _buildWifiPayload() => buildWifiQrPayload(
+        ssid: _wifiSsidController.text.trim(),
+        password: _wifiPasswordController.text,
+        security: _wifiSecurity,
+        hidden: _wifiHidden,
+      );
 
   String _buildContactPayload() {
     switch (_contactType) {
       case 'URL':
         return _cUrlController.text.trim();
       case 'vCard':
-        return 'BEGIN:VCARD\nVERSION:3.0\nN:${_cNameController.text.trim()}\nFN:${_cNameController.text.trim()}\nORG:${_cOrgController.text.trim()}\nTEL:${_cPhoneController.text.trim()}\nEMAIL:${_cEmailController.text.trim()}\nURL:${_cUrlController.text.trim()}\nEND:VCARD';
+        return VCardUtils.generateVCard(ContactInfo(
+          firstName: _cNameController.text.trim(),
+          organization: _cOrgController.text.trim(),
+          phoneMobile: _cPhoneController.text.trim(),
+          email: _cEmailController.text.trim(),
+          website: _cUrlController.text.trim(),
+        ));
       case 'Email':
         return 'mailto:${_cEmailController.text.trim()}?subject=${Uri.encodeComponent(_cSubjectController.text.trim())}&body=${Uri.encodeComponent(_cMessageController.text.trim())}';
       case 'Phone':
@@ -193,6 +242,11 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
       default:
         return _cUrlController.text.trim();
     }
+  }
+
+  static String _safeName(String raw, String fallback) {
+    final cleaned = raw.trim().replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    return cleaned.isEmpty ? fallback : cleaned;
   }
 
   bc.Barcode _getBarcodeType() {
@@ -281,14 +335,19 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
         ),
       );
 
-      await Printing.sharePdf(
-        bytes: await doc.save(),
-        filename: 'Bulk_QRCodes_Sheet.pdf',
-      );
+      await shareFileBytes(await doc.save(), 'Bulk_QRCodes_Sheet.pdf');
     } catch (e) {
       _showToast('Error generating bulk PDF: $e');
     } finally {
       if (mounted) setState(() => _isExportingBulk = false);
+    }
+  }
+
+  Future<void> _runScannerAction(Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (e) {
+      _showToast('Camera action unavailable: $e');
     }
   }
 
@@ -305,15 +364,32 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
 
     return ToolScaffold(
       title: 'QR & Barcode Suite',
-      category: ToolCategory.developer,
+      category: ToolCategory.qrBarcode,
       toolId: 'qr_barcode_toolkit',
       onReset: () {
         setState(() {
           _scannedResult = '';
           _scannedFormat = '';
           _qrTextController.text = 'https://github.com';
+          _qrColor = Colors.black;
+          _qrBgColor = Colors.white;
+          _qrErrorLevel = QrErrorCorrectLevel.M;
           _wifiSsidController.text = 'Home_WiFi';
           _wifiPasswordController.text = 'secretPassword123';
+          _wifiSecurity = 'WPA';
+          _wifiHidden = false;
+          _contactType = 'URL';
+          _cNameController.text = 'John Doe';
+          _cPhoneController.text = '+1234567890';
+          _cEmailController.text = 'john@example.com';
+          _cOrgController.text = 'Acme Corp';
+          _cUrlController.text = 'https://example.com';
+          _cSubjectController.text = 'Inquiry';
+          _cMessageController.text = 'Hello, I would like to connect.';
+          _cLatController.text = '37.7749';
+          _cLngController.text = '-122.4194';
+          _barcodeDataController.text = '978020137962';
+          _barcodeType = 'EAN-13';
           _bulkInputController.text = 'https://google.com\nhttps://apple.com\nhttps://flutter.dev\nhttps://github.com';
         });
       },
@@ -375,19 +451,21 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
                 right: 12,
                 child: Row(
                   children: [
-                    IconButton.filled(
-                      style: IconButton.styleFrom(backgroundColor: Colors.black54),
-                      icon: Icon(_isTorchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded, color: Colors.white),
-                      onPressed: () {
-                        _scannerController.toggleTorch();
-                        setState(() => _isTorchOn = !_isTorchOn);
-                      },
+                    // Torch state comes from the controller: it resets when the
+                    // camera stops or switches, so a local flag would drift.
+                    ValueListenableBuilder<MobileScannerState>(
+                      valueListenable: _scannerController,
+                      builder: (context, state, _) => IconButton.filled(
+                        style: IconButton.styleFrom(backgroundColor: Colors.black54),
+                        icon: Icon(state.torchState == TorchState.on ? Icons.flash_on_rounded : Icons.flash_off_rounded, color: Colors.white),
+                        onPressed: () => _runScannerAction(_scannerController.toggleTorch),
+                      ),
                     ),
                     const SizedBox(width: 8),
                     IconButton.filled(
                       style: IconButton.styleFrom(backgroundColor: Colors.black54),
                       icon: const Icon(Icons.flip_camera_ios_rounded, color: Colors.white),
-                      onPressed: () => _scannerController.switchCamera(),
+                      onPressed: () => _runScannerAction(_scannerController.switchCamera),
                     ),
                   ],
                 ),
@@ -432,10 +510,13 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  onPressed: () => Printing.sharePdf(
-                    bytes: Uint8List.fromList(utf8.encode(_scannedResult)),
-                    filename: 'Scanned_Code.txt',
-                  ),
+                  onPressed: () async {
+                    try {
+                      await shareFileBytes(Uint8List.fromList(utf8.encode(_scannedResult)), 'Scanned_Code.txt');
+                    } catch (e) {
+                      _showToast('Could not share: $e');
+                    }
+                  },
                 ),
               ),
             ],
@@ -457,7 +538,7 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
               color: _qrBgColor,
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
-                BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10, offset: const Offset(0, 4)),
+                BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 10, offset: const Offset(0, 4)),
               ],
             ),
             child: QrImageView(
@@ -468,6 +549,11 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
               eyeStyle: QrEyeStyle(eyeShape: QrEyeShape.square, color: _qrColor),
               dataModuleStyle: QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: _qrColor),
               errorCorrectionLevel: _qrErrorLevel,
+              errorStateBuilder: (context, _) => const SizedBox(
+                width: 200,
+                height: 200,
+                child: Center(child: Text('Text is too long for this error-correction level.', textAlign: TextAlign.center, style: TextStyle(color: Colors.black87))),
+              ),
             ),
           ),
         ),
@@ -480,16 +566,25 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
           onChanged: (val) => setState(() {}),
         ),
         const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            const Text('QR Color:', style: TextStyle(fontWeight: FontWeight.bold)),
-            _colorCircle(Colors.black, (c) => setState(() => _qrColor = c), _qrColor == Colors.black),
-            _colorCircle(const Color(0xFFFF6D00), (c) => setState(() => _qrColor = c), _qrColor == const Color(0xFFFF6D00)),
-            _colorCircle(const Color(0xFF3B82F6), (c) => setState(() => _qrColor = c), _qrColor == const Color(0xFF3B82F6)),
-            _colorCircle(const Color(0xFF10B981), (c) => setState(() => _qrColor = c), _qrColor == const Color(0xFF10B981)),
-            _colorCircle(const Color(0xFFE11D48), (c) => setState(() => _qrColor = c), _qrColor == const Color(0xFFE11D48)),
-          ],
+        _colorRow('QR Color', const [Colors.black, Color(0xFFFF6D00), Color(0xFF3B82F6), Color(0xFF10B981), Color(0xFFE11D48)], _qrColor, (c) => setState(() => _qrColor = c)),
+        const SizedBox(height: 12),
+        _colorRow('Background', const [Colors.white, Color(0xFFFFF7ED), Color(0xFFE0F2FE), Color(0xFFECFDF5), Color(0xFFFEF9C3)], _qrBgColor, (c) => setState(() => _qrBgColor = c)),
+        const SizedBox(height: 16),
+        const Text('Error Correction', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<int>(
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(value: QrErrorCorrectLevel.L, label: Text('L 7%')),
+              ButtonSegment(value: QrErrorCorrectLevel.M, label: Text('M 15%')),
+              ButtonSegment(value: QrErrorCorrectLevel.Q, label: Text('Q 25%')),
+              ButtonSegment(value: QrErrorCorrectLevel.H, label: Text('H 30%')),
+            ],
+            selected: {_qrErrorLevel},
+            onSelectionChanged: (v) => setState(() => _qrErrorLevel = v.first),
+          ),
         ),
         const SizedBox(height: 24),
         SizedBox(
@@ -503,26 +598,39 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             ),
-            onPressed: () => _exportQrImage(text.isEmpty ? 'https://github.com' : text),
+            onPressed: () => _exportQrImage(text.isEmpty ? 'https://github.com' : text, custom: true),
           ),
         ),
       ],
     );
   }
 
-  Widget _colorCircle(Color color, Function(Color) onSelect, bool isSelected) {
-    return GestureDetector(
-      onTap: () => onSelect(color),
-      child: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(color: isSelected ? Colors.white : Colors.transparent, width: 3),
-          boxShadow: isSelected ? [const BoxShadow(color: Colors.black26, blurRadius: 4)] : null,
-        ),
-      ),
+  Widget _colorRow(String label, List<Color> options, Color selected, ValueChanged<Color> onSelect) {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text('$label:', style: const TextStyle(fontWeight: FontWeight.bold)),
+        for (final color in options)
+          Semantics(
+            button: true,
+            selected: color == selected,
+            label: '$label option',
+            child: GestureDetector(
+              onTap: () => onSelect(color),
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: color == selected ? AppColors.primaryOrange : Colors.grey.shade400, width: color == selected ? 3 : 1),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -568,7 +676,8 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
             labelText: 'Security Type',
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
           ),
-          value: _wifiSecurity,
+          key: ValueKey('wifi-sec-$_wifiSecurity'),
+          initialValue: _wifiSecurity,
           items: const [
             DropdownMenuItem(value: 'WPA', child: Text('WPA / WPA2 / WPA3 (Standard)')),
             DropdownMenuItem(value: 'WEP', child: Text('WEP')),
@@ -582,7 +691,7 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
           contentPadding: EdgeInsets.zero,
           title: const Text('Hidden Network', style: TextStyle(fontWeight: FontWeight.w600)),
           value: _wifiHidden,
-          activeColor: AppColors.primaryOrange,
+          activeThumbColor: AppColors.primaryOrange,
           onChanged: (val) => setState(() => _wifiHidden = val),
         ),
         const SizedBox(height: 20),
@@ -597,7 +706,7 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             ),
-            onPressed: () => _exportQrImage(payload, filename: 'WiFi_${_wifiSsidController.text}.png'),
+            onPressed: () => _exportQrImage(payload, filename: 'WiFi_${_safeName(_wifiSsidController.text, 'Network')}.png'),
           ),
         ),
       ],
@@ -622,7 +731,8 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
             labelText: 'QR Payload Type',
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
           ),
-          value: _contactType,
+          key: ValueKey('contact-type-$_contactType'),
+          initialValue: _contactType,
           items: ['URL', 'vCard', 'Email', 'Phone', 'SMS', 'Location']
               .map((t) => DropdownMenuItem(value: t, child: Text(t)))
               .toList(),
@@ -649,6 +759,11 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
         ],
         if (_contactType == 'Phone' || _contactType == 'SMS')
           ModernTextField(label: 'Phone Number', controller: _cPhoneController, keyboardType: TextInputType.phone, prefixIcon: Icons.phone_rounded, onChanged: (_) => setState(() {})),
+        // The message is part of the Email and SMS payloads, so it must be editable there.
+        if (_contactType == 'Email' || _contactType == 'SMS') ...[
+          const SizedBox(height: 12),
+          ModernTextField(label: 'Message', controller: _cMessageController, prefixIcon: Icons.message_rounded, maxLines: 3, onChanged: (_) => setState(() {})),
+        ],
         if (_contactType == 'Location') ...[
           Row(
             children: [
@@ -701,7 +816,8 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
             labelText: 'Barcode Standard',
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
           ),
-          value: _barcodeType,
+          key: ValueKey('barcode-type-$_barcodeType'),
+          initialValue: _barcodeType,
           items: ['EAN-13', 'Code 128', 'Code 39', 'EAN-8', 'UPC-A', 'ISBN', 'PDF417', 'Aztec']
               .map((b) => DropdownMenuItem(value: b, child: Text(b)))
               .toList(),
@@ -730,22 +846,32 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             ),
             onPressed: () async {
-              // Share as printable PDF/image
-              final doc = pw.Document();
-              doc.addPage(
-                pw.Page(
-                  build: (c) => pw.Center(
-                    child: pw.BarcodeWidget(
-                      barcode: _barcodeType == 'EAN-13' ? pw.Barcode.ean13() : pw.Barcode.code128(),
-                      data: data,
-                      width: 200,
-                      height: 80,
+              // Export the selected symbology, not just EAN-13/Code 128, and
+              // reject invalid data (bad EAN checksum, letters, ...) up front.
+              final barcode = _getBarcodeType();
+              if (data.isEmpty || !barcode.isValid(data)) {
+                _showToast('Invalid data for $_barcodeType barcode.');
+                return;
+              }
+              try {
+                final doc = pw.Document();
+                doc.addPage(
+                  pw.Page(
+                    build: (c) => pw.Center(
+                      child: pw.BarcodeWidget(
+                        barcode: barcode,
+                        data: data,
+                        width: 200,
+                        height: 80,
+                      ),
                     ),
                   ),
-                ),
-              );
-              final bytes = await doc.save();
-              await Printing.sharePdf(bytes: bytes, filename: 'Barcode_$data.pdf');
+                );
+                final bytes = await doc.save();
+                await shareFileBytes(bytes, 'Barcode_${_safeName(data, 'Code')}.pdf');
+              } catch (e) {
+                _showToast('Error exporting barcode: $e');
+              }
             },
           ),
         ),
@@ -834,7 +960,7 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: history.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          separatorBuilder: (_, _) => const SizedBox(height: 8),
           itemBuilder: (context, idx) {
             final item = history[idx];
             return ListTile(

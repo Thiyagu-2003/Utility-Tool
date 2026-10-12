@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
+import 'file_zip_utils.dart';
 
 /// Representation of an entry inside an archive or directory
 class ArchiveEntry {
@@ -23,8 +25,9 @@ class ArchiveEntry {
   })  : size = size ?? bytes.length,
         modifiedTime = modifiedTime ?? DateTime.now();
 
-  String get checksumSha256 => sha256.convert(bytes).toString();
-  String get checksumMd5 => md5.convert(bytes).toString();
+  // Cached: list tiles and folder diffs read these repeatedly, and hashing a big entry each time janks scrolling.
+  late final String checksumSha256 = sha256.convert(bytes).toString();
+  late final String checksumMd5 = md5.convert(bytes).toString();
 
   String get formattedSize {
     if (size < 1024) return '$size B';
@@ -220,9 +223,11 @@ class ArchiveCompareService {
   /// Creates a standard POSIX TAR archive from entries
   static Uint8List createTar(List<ArchiveEntry> entries) {
     final archive = Archive();
+    final taken = <String>{};
     for (final entry in entries) {
       final file = ArchiveFile(
-        entry.name,
+        // Archive.add silently replaces same-name entries, so keep names unique.
+        FileZipUtils.uniqueName(entry.name, taken),
         entry.bytes.length,
         entry.bytes,
       );
@@ -235,17 +240,23 @@ class ArchiveCompareService {
     return Uint8List.fromList(encoded);
   }
 
-  /// Extracts entries from a TAR archive
-  static List<ArchiveEntry> extractTar(Uint8List tarBytes) {
-    final archive = TarDecoder().decodeBytes(tarBytes);
+  /// Extracts entries from a TAR archive. With [verify], every header checksum
+  /// is checked so an unrelated file throws instead of "unpacking" into junk.
+  /// Symbolic links are skipped: they have no content to show or repack.
+  static List<ArchiveEntry> extractTar(Uint8List tarBytes, {bool verify = false}) {
+    final archive = TarDecoder().decodeBytes(tarBytes, verify: verify);
     final results = <ArchiveEntry>[];
     for (final f in archive.files) {
-      final rawBytes = Uint8List.fromList(f.content as List<int>);
+      if (f.isSymbolicLink) continue;
+      // Strip "../", absolute and drive prefixes so entries can't escape (tar-slip).
+      final safeName = FileZipUtils.sanitizeEntryPath(f.name);
+      if (safeName.isEmpty) continue;
+      final rawBytes = f.content;
       final exactBytes = (f.size > 0 && f.size <= rawBytes.length)
           ? rawBytes.sublist(0, f.size)
           : rawBytes;
       results.add(ArchiveEntry(
-        name: f.name,
+        name: safeName,
         size: exactBytes.length,
         bytes: exactBytes,
         isDirectory: !f.isFile,
@@ -266,10 +277,13 @@ class ArchiveCompareService {
     return Uint8List.fromList(encoded);
   }
 
-  /// Decompresses GZIP bytes into raw uncompressed bytes
-  static Uint8List decompressGzip(Uint8List gzipBytes) {
-    final decoded = GZipDecoder().decodeBytes(gzipBytes);
-    return Uint8List.fromList(decoded);
+  /// Largest GZIP output accepted, so a tiny "zip bomb" cannot exhaust memory.
+  static const maxGzipOutputBytes = 256 * 1024 * 1024;
+
+  /// Decompresses GZIP bytes into raw uncompressed bytes. Throws an
+  /// [ArchiveException] if the output would pass [maxOutputSize].
+  static Uint8List decompressGzip(Uint8List gzipBytes, {int maxOutputSize = maxGzipOutputBytes}) {
+    return GZipDecoder().decodeBytes(gzipBytes, maxOutputSize: maxOutputSize);
   }
 
   /// Creates a TAR.GZ (.tgz) compressed archive
@@ -279,16 +293,57 @@ class ArchiveCompareService {
   }
 
   /// Extracts files from a TAR.GZ (.tgz) archive
-  static List<ArchiveEntry> extractTarGz(Uint8List tarGzBytes) {
+  static List<ArchiveEntry> extractTarGz(Uint8List tarGzBytes, {bool verify = false}) {
     final tarBytes = decompressGzip(tarGzBytes);
-    return extractTar(tarBytes);
+    return extractTar(tarBytes, verify: verify);
   }
+
+  /// Unpacks a file of unknown type: gzip magic means TAR.GZ, anything else is
+  /// read as TAR. Header checksums are verified, so a file that is neither
+  /// throws instead of yielding junk entries.
+  static List<ArchiveEntry> extractAuto(Uint8List bytes) {
+    final isGzip = bytes.length >= 2 && bytes[0] == 0x1F && bytes[1] == 0x8B;
+    return isGzip ? extractTarGz(bytes, verify: true) : extractTar(bytes, verify: true);
+  }
+
+  /// Unpacks [bytes] according to the extension of [filename]: .tar.gz / .tgz,
+  /// .tar, a single-file .gz, or auto-detection for anything else.
+  static List<ArchiveEntry> extractByName(String filename, Uint8List bytes) {
+    final lower = filename.toLowerCase();
+    if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) return extractTarGz(bytes);
+    if (lower.endsWith('.tar')) return extractTar(bytes);
+    if (lower.endsWith('.gz')) {
+      final inner = decompressGzip(bytes);
+      return [ArchiveEntry(name: FileZipUtils.safeFileName(filename.replaceAll(RegExp(r'\.gz$', caseSensitive: false), ''), fallback: 'file'), bytes: inner)];
+    }
+    return extractAuto(bytes);
+  }
+
+  // The *InBackground helpers are static so their isolate closures can't capture a
+  // State object. They keep big archives and diffs from freezing the UI.
+  static Future<List<ArchiveEntry>> extractInBackground(String filename, Uint8List bytes) =>
+      Isolate.run(() => extractByName(filename, bytes));
+
+  static Future<Uint8List> buildArchiveInBackground(List<ArchiveEntry> entries, String type) => Isolate.run(() {
+        if (type == 'tar') return createTar(entries);
+        if (type == 'tar.gz') return createTarGz(entries);
+        return compressGzip(entries.first.bytes);
+      });
+
+  static Future<FolderDiffResult> compareFoldersInBackground(List<ArchiveEntry> a, List<ArchiveEntry> b) =>
+      Isolate.run(() => compareFolders(a, b));
+
+  static Future<FileDiffResult> compareFileContentsInBackground(
+          String nameA, Uint8List bytesA, String nameB, Uint8List bytesB) =>
+      Isolate.run(() => compareFileContents(nameA, bytesA, nameB, bytesB));
 
   // --- 3. 7Z ARCHIVE SUPPORT ---
 
   /// Inspects and parses a 7z archive
   /// 7z Signature: 6 bytes 0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C ('7', 'z', 0xBC, 0xAF, 0x27, 0x1C)
-  static SevenZipInfo inspect7zArchive(Uint8List bytes) {
+  /// Only the header is read, so callers may pass just the first bytes of a big file
+  /// plus its real [totalSize].
+  static SevenZipInfo inspect7zArchive(Uint8List bytes, {int? totalSize}) {
     if (bytes.length < 32) {
       return SevenZipInfo(
         isValid7z: false,
@@ -298,7 +353,7 @@ class ArchiveCompareService {
         nextHeaderOffset: 0,
         nextHeaderSize: 0,
         nextHeaderCrc: 0,
-        rawFileSize: bytes.length,
+        rawFileSize: totalSize ?? bytes.length,
         extractedFiles: [],
         status: 'File too small to be a valid 7z archive (minimum 32 bytes required).',
         metadata: {},
@@ -322,7 +377,7 @@ class ArchiveCompareService {
         nextHeaderOffset: 0,
         nextHeaderSize: 0,
         nextHeaderCrc: 0,
-        rawFileSize: bytes.length,
+        rawFileSize: totalSize ?? bytes.length,
         extractedFiles: [],
         status: 'Invalid signature: Header does not match 7z specification (0x377ABCAF271C).',
         metadata: {},
@@ -370,7 +425,7 @@ class ArchiveCompareService {
       'NextHeaderOffset': nextHeaderOffset,
       'NextHeaderSize': nextHeaderSize,
       'NextHeaderCRC': '0x${nextHeaderCrc.toRadixString(16).padLeft(8, '0').toUpperCase()}',
-      'TotalArchiveSize': bytes.length,
+      'TotalArchiveSize': totalSize ?? bytes.length,
       'SignatureHex': '37 7A BC AF 27 1C',
     };
 
@@ -382,7 +437,7 @@ class ArchiveCompareService {
       nextHeaderOffset: nextHeaderOffset,
       nextHeaderSize: nextHeaderSize,
       nextHeaderCrc: nextHeaderCrc,
-      rawFileSize: bytes.length,
+      rawFileSize: totalSize ?? bytes.length,
       extractedFiles: extracted,
       status: status,
       metadata: meta,
@@ -392,7 +447,7 @@ class ArchiveCompareService {
   // --- 3B. RAR ARCHIVE SUPPORT ---
 
   /// Inspects and parses a RAR archive (RAR 4.x or RAR 5.x)
-  static RarArchiveInfo inspectRarArchive(Uint8List bytes) {
+  static RarArchiveInfo inspectRarArchive(Uint8List bytes, {int? totalSize}) {
     if (bytes.length < 8) {
       return RarArchiveInfo(
         isValidRar: false,
@@ -447,15 +502,41 @@ class ArchiveCompareService {
     bool isVolume = false;
     bool isSolid = false;
     bool isLocked = false;
+    bool isEncrypted = false;
     if (isRar4 && bytes.length >= 13) {
+      // Marker(7) + HEAD_CRC(2) + HEAD_TYPE(1, 0x73) + HEAD_FLAGS(2)
       final flags = bytes[10] | (bytes[11] << 8);
       isVolume = (flags & 0x0001) != 0;
       isSolid = (flags & 0x0008) != 0;
       isLocked = (flags & 0x0004) != 0;
-    } else if (isRar5 && bytes.length >= 12) {
-      final flags = bytes[10];
-      isVolume = (flags & 0x0001) != 0;
-      isSolid = (flags & 0x0004) != 0;
+      isEncrypted = (flags & 0x0080) != 0;
+    } else if (isRar5) {
+      // Signature(8) + CRC32(4), then vints: header size, type, header flags,
+      // [extra size], [data size], archive flags. Flags are not at a fixed offset.
+      var pos = 12;
+      int? readVint() {
+        var value = 0;
+        for (var shift = 0; pos < bytes.length && shift < 63; shift += 7) {
+          final b = bytes[pos++];
+          value |= (b & 0x7F) << shift;
+          if (b & 0x80 == 0) return value;
+        }
+        return null;
+      }
+
+      readVint(); // header size
+      final headerType = readVint();
+      final headerFlags = readVint() ?? 0;
+      if (headerFlags & 0x0001 != 0) readVint();
+      if (headerFlags & 0x0002 != 0) readVint();
+      if (headerType == 4) {
+        isEncrypted = true; // archive encryption header precedes the main header
+      } else if (headerType == 1) {
+        final archiveFlags = readVint() ?? 0;
+        isVolume = (archiveFlags & 0x0001) != 0;
+        isSolid = (archiveFlags & 0x0004) != 0;
+        isLocked = (archiveFlags & 0x0010) != 0;
+      }
     }
 
     final meta = <String, dynamic>{
@@ -464,8 +545,9 @@ class ArchiveCompareService {
       'MultiVolume': isVolume ? 'Yes (Split volume)' : 'No (Single archive)',
       'SolidArchive': isSolid ? 'Yes' : 'No',
       'Locked': isLocked ? 'Yes' : 'No',
+      'EncryptedHeaders': isEncrypted ? 'Yes' : 'No',
       'SignatureHex': isRar5 ? '52 61 72 21 1A 07 01 00' : '52 61 72 21 1A 07 00',
-      'TotalArchiveSize': '${(bytes.length / 1024).toStringAsFixed(1)} KB (${bytes.length} bytes)',
+      'TotalArchiveSize': '${((totalSize ?? bytes.length) / 1024).toStringAsFixed(1)} KB (${totalSize ?? bytes.length} bytes)',
     };
 
     return RarArchiveInfo(
@@ -474,7 +556,7 @@ class ArchiveCompareService {
       formatVersion: formatVer,
       isSolid: isSolid,
       isMultiVolume: isVolume,
-      isEncrypted: false,
+      isEncrypted: isEncrypted,
       status: 'Valid $verString archive container verified.',
       metadata: meta,
     );
@@ -585,9 +667,18 @@ class ArchiveCompareService {
     if (isBinA || isBinB) {
       // Binary Comparison
       final isIdentical = hashA == hashB && bytesA.length == bytesB.length;
+      // Share of byte positions that match. Equal-length but different files
+      // previously scored 100% and were shown as an exact match.
+      var sameBytes = 0;
+      final common = min(bytesA.length, bytesB.length);
+      for (var i = 0; i < common; i++) {
+        if (bytesA[i] == bytesB[i]) sameBytes++;
+      }
+      final longest = max(bytesA.length, bytesB.length);
+      final similarity = isIdentical ? 100.0 : min(99.9, sameBytes / max(1, longest) * 100.0);
       return FileDiffResult(
         isBinary: true,
-        similarityPercent: isIdentical ? 100.0 : (1.0 - (bytesA.length - bytesB.length).abs() / max(1, max(bytesA.length, bytesB.length))) * 100.0,
+        similarityPercent: similarity,
         totalLinesA: 0,
         totalLinesB: 0,
         additions: isIdentical ? 0 : 1,
@@ -606,8 +697,8 @@ class ArchiveCompareService {
     final textA = _safeDecodeString(bytesA);
     final textB = _safeDecodeString(bytesB);
 
-    final rawLinesA = textA.split(RegExp(r'\r?\n'));
-    final rawLinesB = textB.split(RegExp(r'\r?\n'));
+    final rawLinesA = _splitLines(textA);
+    final rawLinesB = _splitLines(textB);
 
     final diffLines = <FileDiffLine>[];
     int unchanged = 0;
@@ -809,6 +900,13 @@ class ArchiveCompareService {
       if (bytes[i] == 0) nullBytes++;
     }
     return nullBytes > 0;
+  }
+
+  /// Splits on \n or \r\n, ignoring the final line break so "a\n" and "a" both mean one line.
+  static List<String> _splitLines(String text) {
+    final lines = text.split(RegExp(r'\r?\n'));
+    if (lines.length > 1 && lines.last.isEmpty) lines.removeLast();
+    return lines;
   }
 
   static String _safeDecodeString(Uint8List bytes) {

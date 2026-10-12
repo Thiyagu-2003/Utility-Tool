@@ -1,11 +1,22 @@
 import 'package:flutter/material.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
+import '../../core/utils/validation_utils.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 
 enum Gender { male, female }
+
+/// Ideal body weight (kg) from the four classic height formulas, which all
+/// take the inches of height above 5 ft (extrapolated below 5 ft, never < 0).
+({double devine, double robinson, double miller, double hamwi}) idealWeightFormulas(double heightCm, {required bool male}) {
+  final over = heightCm / 2.54 - 60;
+  double kg(double base, double perInch) => (base + perInch * over).clamp(0.0, double.infinity);
+  return male
+      ? (devine: kg(50, 2.3), robinson: kg(52, 1.9), miller: kg(56.2, 1.41), hamwi: kg(48, 2.7))
+      : (devine: kg(45.5, 2.3), robinson: kg(49, 1.7), miller: kg(53.1, 1.36), hamwi: kg(45.5, 2.2));
+}
 
 class HealthCalculatorScreen extends StatefulWidget {
   const HealthCalculatorScreen({super.key});
@@ -22,22 +33,25 @@ class _HealthCalculatorScreenState extends State<HealthCalculatorScreen> {
   bool _isCm = true;
 
   Map<String, dynamic> _computeHealthMetrics() {
-    double heightCm = double.tryParse(_heightController.text.trim()) ?? 170;
-    final weightKg = double.tryParse(_weightController.text.trim()) ?? 70;
-    final age = double.tryParse(_ageController.text.trim()) ?? 25;
+    // Blank/invalid fields count as 0 (shown as "Invalid") instead of silently using made-up defaults.
+    double heightCm = ValidationUtils.safeParseDouble(_heightController.text);
+    final weightKg = ValidationUtils.safeParseDouble(_weightController.text);
+    final age = ValidationUtils.safeParseDouble(_ageController.text);
 
     if (!_isCm) {
       // height is in feet: e.g. 5.9 -> convert to cm
       heightCm = heightCm * 30.48;
     }
 
-    if (heightCm <= 0 || weightKg <= 0) {
+    if (heightCm <= 0 || heightCm > 300 || weightKg <= 0 || weightKg > 700) {
       return {
         'bmi': 0.0,
-        'category': 'Invalid',
+        'category': 'Enter a valid height and weight',
         'idealMin': 0.0,
         'idealMax': 0.0,
         'bmr': 0.0,
+        'moderateCalories': 0.0, // read with a non-null cast in build()
+        'valid': false,
       };
     }
 
@@ -49,10 +63,10 @@ class _HealthCalculatorScreenState extends State<HealthCalculatorScreen> {
     if (bmi < 18.5) {
       category = 'Underweight';
       color = Colors.blue;
-    } else if (bmi < 24.9) {
+    } else if (bmi < 25) {
       category = 'Normal Weight';
       color = const Color(0xFF10B981);
-    } else if (bmi < 29.9) {
+    } else if (bmi < 30) {
       category = 'Overweight';
       color = const Color(0xFFF59E0B);
     } else {
@@ -73,6 +87,9 @@ class _HealthCalculatorScreenState extends State<HealthCalculatorScreen> {
     }
 
     return {
+      'valid': true,
+      'hasAge': age > 0 && age <= 120,
+      'ideal': idealWeightFormulas(heightCm, male: _gender == Gender.male),
       'bmi': bmi,
       'category': category,
       'color': color,
@@ -98,6 +115,10 @@ class _HealthCalculatorScreenState extends State<HealthCalculatorScreen> {
     final idealMin = metrics['idealMin'] as double;
     final idealMax = metrics['idealMax'] as double;
     final bmr = metrics['bmr'] as double;
+    final valid = metrics['valid'] as bool;
+    final hasAge = valid && metrics['hasAge'] as bool;
+    final ideal = metrics['ideal'] as ({double devine, double robinson, double miller, double hamwi})?;
+    String kgText(double v) => '${v.toStringAsFixed(1)} kg';
 
     return ToolScaffold(
       title: 'Health & BMI Calculator',
@@ -121,17 +142,23 @@ class _HealthCalculatorScreenState extends State<HealthCalculatorScreen> {
             subtitle: 'Status: ${metrics['category']}',
             accentColor: metrics['color'] as Color? ?? const Color(0xFFEF4444),
             breakdowns: [
+              if (ideal != null) ...[
+                BreakdownItem(label: 'Ideal Weight (Devine)', value: kgText(ideal.devine)),
+                BreakdownItem(label: 'Ideal Weight (Robinson)', value: kgText(ideal.robinson)),
+                BreakdownItem(label: 'Ideal Weight (Miller)', value: kgText(ideal.miller)),
+                BreakdownItem(label: 'Ideal Weight (Hamwi)', value: kgText(ideal.hamwi)),
+              ],
               BreakdownItem(
-                label: 'Ideal Weight Range',
+                label: 'Healthy BMI Range (18.5-24.9)',
                 value: '${idealMin.toStringAsFixed(1)} - ${idealMax.toStringAsFixed(1)} kg',
               ),
               BreakdownItem(
                 label: 'Basal Metabolic Rate',
-                value: '${bmr.round()} kcal / day',
+                value: hasAge ? '${bmr.round()} kcal / day' : 'Enter age',
               ),
               BreakdownItem(
-                label: 'Daily Maintenance Needs',
-                value: '${(metrics['moderateCalories'] as double).round()} kcal',
+                label: 'Maintenance (moderate activity)',
+                value: hasAge ? '${(metrics['moderateCalories'] as double).round()} kcal' : 'Enter age',
               ),
             ],
           ),
@@ -176,7 +203,7 @@ class _HealthCalculatorScreenState extends State<HealthCalculatorScreen> {
           ModernTextField(
             label: 'Height',
             controller: _heightController,
-            hintText: _isCm ? '175' : '5.8',
+            hintText: _isCm ? '175' : '5.5 (decimal feet)',
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             prefixIcon: Icons.height_rounded,
             suffix: Row(

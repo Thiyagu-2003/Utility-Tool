@@ -44,7 +44,7 @@ class ValidationUtils {
     final sanitized = input.trim().replaceAll(',', '');
     final parsed = double.tryParse(sanitized);
 
-    if (parsed == null) {
+    if (parsed == null || !parsed.isFinite) {
       return ValidationResult.failure('Please enter a valid numeric value for $fieldName');
     }
 
@@ -146,7 +146,8 @@ class ValidationUtils {
   static double safeParseDouble(String? input, {double defaultValue = 0.0}) {
     if (input == null || input.trim().isEmpty) return defaultValue;
     final sanitized = input.trim().replaceAll(',', '');
-    return double.tryParse(sanitized) ?? defaultValue;
+    final parsed = double.tryParse(sanitized);
+    return parsed != null && parsed.isFinite ? parsed : defaultValue;
   }
 
   /// Safe integer parsing without throwing exceptions.

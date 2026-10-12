@@ -7,11 +7,11 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:pdf/pdf.dart' as pw_format;
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/share_utils.dart';
 import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
@@ -44,6 +44,44 @@ class ExtractedEntities {
     required this.dates,
     required this.amounts,
   });
+}
+
+/// Finds emails, phones, URLs, dates and currency amounts in [text].
+ExtractedEntities extractEntities(String text) {
+  // Phones may be separated by spaces/dashes/dots but never by a line break,
+  // otherwise two numeric table cells on adjacent lines read as one number.
+  final emailRegex = RegExp(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b');
+  final phoneRegex = RegExp(r'(?:\+?\d{1,4}[-. ]?)?(?:\(?\d{2,4}\)?[-. ]?)?\d{3,4}[-. ]?\d{3,4}');
+  final urlRegex = RegExp(r'https?:\/\/[^\s]+');
+  final dateRegex = RegExp(r'\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b');
+  final amountRegex = RegExp(r'[\$€£₹]\s?\d+(?:,\d{3})*(?:\.\d{2})?');
+
+  List<String> unique(Iterable<String> items) => items.toSet().toList();
+  return ExtractedEntities(
+    emails: unique(emailRegex.allMatches(text).map((m) => m.group(0)!)),
+    phones: unique(phoneRegex
+        .allMatches(text)
+        .map((m) => m.group(0)!.trim())
+        .where((p) => p.replaceAll(RegExp(r'\D'), '').length >= 7)),
+    // Trailing sentence punctuation is not part of the link.
+    urls: unique(urlRegex.allMatches(text).map((m) => m.group(0)!.replaceAll(RegExp(r'[.,;:!?)\]]+$'), ''))),
+    dates: unique(dateRegex.allMatches(text).map((m) => m.group(0)!)),
+    amounts: unique(amountRegex.allMatches(text).map((m) => m.group(0)!)),
+  );
+}
+
+const _noTableMessage = 'No tabular structure detected. Format table lines with | or tabs.';
+
+/// Turns lines separated by `|`, tabs or two-plus spaces into CSV rows.
+String textToCsv(String text) {
+  final csvRows = <String>[];
+  for (final line in text.split('\n')) {
+    final cells = line.split(RegExp(r'[|\t]|\s{2,}')).map((c) => c.trim()).where((c) => c.isNotEmpty).toList();
+    if (cells.length > 1) {
+      csvRows.add(cells.map((c) => c.contains(',') || c.contains('"') ? '"${c.replaceAll('"', '""')}"' : c).join(','));
+    }
+  }
+  return csvRows.isEmpty ? _noTableMessage : csvRows.join('\n');
 }
 
 class OcrToolkitScreen extends StatefulWidget {
@@ -96,23 +134,38 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
     super.initState();
     _initTts();
     _initStt();
-    _extractEntitiesFromText();
-    _parseTableToCsv();
+    _entities = extractEntities(_textEditorController.text);
+    _tableCsvResult = textToCsv(_textEditorController.text);
   }
 
   Future<void> _initTts() async {
-    await _flutterTts.setLanguage(_ttsLanguage);
-    await _flutterTts.setSpeechRate(_ttsRate);
-    await _flutterTts.setPitch(_ttsPitch);
-    _flutterTts.setCompletionHandler(() {
+    void speakingDone() {
       if (mounted) setState(() => _isSpeaking = false);
-    });
+    }
+
+    _flutterTts.setCompletionHandler(speakingDone);
+    _flutterTts.setCancelHandler(speakingDone);
+    _flutterTts.setErrorHandler((_) => speakingDone());
+    try {
+      await _flutterTts.setLanguage(_ttsLanguage);
+      await _flutterTts.setSpeechRate(_ttsRate);
+      await _flutterTts.setPitch(_ttsPitch);
+    } catch (_) {}
   }
 
   Future<void> _initStt() async {
     try {
-      _speechEnabled = await _speechToText.initialize();
-      setState(() {});
+      final enabled = await _speechToText.initialize(
+        onStatus: (status) {
+          if ((status == stt.SpeechToText.doneStatus || status == stt.SpeechToText.notListeningStatus) && mounted) {
+            setState(() => _isListening = false);
+          }
+        },
+        onError: (_) {
+          if (mounted) setState(() => _isListening = false);
+        },
+      );
+      if (mounted) setState(() => _speechEnabled = enabled);
     } catch (_) {}
   }
 
@@ -120,6 +173,7 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
   void dispose() {
     _textRecognizer.close();
     _flutterTts.stop();
+    _speechToText.cancel();
     _textEditorController.dispose();
     _pdfTitleController.dispose();
     super.dispose();
@@ -136,6 +190,7 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
 
       if (file != null) {
         final bytes = await file.readAsBytes();
+        if (!mounted) return;
         setState(() {
           _previewImageBytes = bytes;
           _isProcessing = true;
@@ -147,11 +202,12 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
           final RecognizedText recognizedText = await _textRecognizer.processImage(inputImage);
           resultText = recognizedText.text;
         }
+        if (!mounted) return;
 
         if (resultText.trim().isEmpty) {
-          resultText = 'Sample Recognized Text:\nInvoice No: INV-2026-894\n'
-              'Email: billing@acme.com\nTel: +1-800-555-0199\n'
-              'Date: 10/04/2026\nTotal Amount: \$1,240.50';
+          setState(() => _isProcessing = false);
+          _showToast('No text was recognized in this image.');
+          return;
         }
 
         setState(() {
@@ -163,87 +219,63 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
         _parseTableToCsv();
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isProcessing = false);
       _showToast('OCR recognition failed: $e');
     }
   }
 
   void _extractEntitiesFromText() {
-    final text = _textEditorController.text;
-
-    final emailRegex = RegExp(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b');
-    final phoneRegex = RegExp(r'(?:\+?\d{1,4}[-.\s]?)?(?:\(?\d{2,4}\)?[-.\s]?)?\d{3,4}[-.\s]?\d{3,4}');
-    final urlRegex = RegExp(r'https?:\/\/[^\s]+');
-    final dateRegex = RegExp(r'\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b');
-    final amountRegex = RegExp(r'[\$€£₹]\s?\d+(?:,\d{3})*(?:\.\d{2})?');
-
-    final emails = emailRegex.allMatches(text).map((m) => m.group(0)!).toSet().toList();
-    final phones = phoneRegex.allMatches(text).map((m) => m.group(0)!).where((p) => p.replaceAll(RegExp(r'\D'), '').length >= 7).toSet().toList();
-    final urls = urlRegex.allMatches(text).map((m) => m.group(0)!).toSet().toList();
-    final dates = dateRegex.allMatches(text).map((m) => m.group(0)!).toSet().toList();
-    final amounts = amountRegex.allMatches(text).map((m) => m.group(0)!).toSet().toList();
-
-    setState(() {
-      _entities = ExtractedEntities(
-        emails: emails,
-        phones: phones,
-        urls: urls,
-        dates: dates,
-        amounts: amounts,
-      );
-    });
+    final entities = extractEntities(_textEditorController.text);
+    setState(() => _entities = entities);
   }
 
   void _parseTableToCsv() {
-    final lines = _textEditorController.text.split('\n');
-    final List<String> csvRows = [];
-
-    for (final line in lines) {
-      if (line.contains('|') || line.contains('\t') || line.contains('  ')) {
-        final cells = line.split(RegExp(r'[|\t]|\s{2,}')).map((c) => c.trim()).where((c) => c.isNotEmpty).toList();
-        if (cells.length > 1) {
-          final csvLine = cells.map((c) => c.contains(',') ? '"$c"' : c).join(',');
-          csvRows.add(csvLine);
-        }
-      }
-    }
-
-    setState(() {
-      _tableCsvResult = csvRows.isNotEmpty ? csvRows.join('\n') : 'No tabular structure detected. Format table lines with | or tabs.';
-    });
+    final csv = textToCsv(_textEditorController.text);
+    setState(() => _tableCsvResult = csv);
   }
 
   Future<void> _toggleSpeech() async {
-    if (_isSpeaking) {
-      await _flutterTts.stop();
-      setState(() => _isSpeaking = false);
-    } else {
-      final text = _textEditorController.text.trim();
-      if (text.isNotEmpty) {
-        setState(() => _isSpeaking = true);
-        await _flutterTts.speak(text);
+    try {
+      if (_isSpeaking) {
+        await _flutterTts.stop();
+        if (mounted) setState(() => _isSpeaking = false);
+      } else {
+        final text = _textEditorController.text.trim();
+        if (text.isNotEmpty) {
+          setState(() => _isSpeaking = true);
+          await _flutterTts.speak(text);
+        }
       }
+    } catch (e) {
+      if (mounted) setState(() => _isSpeaking = false);
+      _showToast('Text to speech failed: $e');
     }
   }
 
   void _toggleDictation() async {
     if (_isListening) {
       await _speechToText.stop();
-      setState(() => _isListening = false);
+      if (mounted) setState(() => _isListening = false);
     } else {
       if (_speechEnabled) {
         setState(() => _isListening = true);
-        _speechToText.listen(
-          onResult: (result) {
-            setState(() {
-              if (result.recognizedWords.isNotEmpty) {
-                _textEditorController.text = '${_textEditorController.text} ${result.recognizedWords}'.trim();
-                _extractEntitiesFromText();
-                _parseTableToCsv();
-              }
-            });
-          },
-        );
+        // Results are cumulative for the session, so append to the text that
+        // existed when dictation started instead of to the last partial result.
+        final baseText = _textEditorController.text;
+        try {
+          await _speechToText.listen(
+            onResult: (result) {
+              if (!mounted || result.recognizedWords.isEmpty) return;
+              _textEditorController.text = '$baseText ${result.recognizedWords}'.trim();
+              _extractEntitiesFromText();
+              _parseTableToCsv();
+            },
+          );
+        } catch (e) {
+          if (mounted) setState(() => _isListening = false);
+          _showToast('Voice dictation failed: $e');
+        }
       } else {
         _showToast('Speech recognition not available on this device');
       }
@@ -286,10 +318,8 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
         ),
       );
 
-      await Printing.sharePdf(
-        bytes: await doc.save(),
-        filename: '${title.replaceAll(' ', '_')}.pdf',
-      );
+      final safeTitle = title.replaceAll(RegExp(r'[^A-Za-z0-9_-]+'), '_').replaceAll(RegExp(r'^_+|_+$'), '');
+      await shareFileBytes(await doc.save(), '${safeTitle.isEmpty ? 'OCR_Document' : safeTitle}.pdf');
     } catch (e) {
       _showToast('Error generating PDF: $e');
     }
@@ -310,14 +340,20 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
 
     return ToolScaffold(
       title: 'OCR & Voice Studio',
-      category: ToolCategory.filesText,
+      category: ToolCategory.textTools,
       toolId: 'ocr_toolkit',
       onReset: () {
+        _flutterTts.stop();
+        _speechToText.cancel();
         setState(() {
           _previewImageBytes = null;
+          _isProcessing = false;
+          _isSpeaking = false;
+          _isListening = false;
           _textEditorController.clear();
-          _tableCsvResult = '';
-          _entities = null;
+          _pdfTitleController.text = 'OCR_Extracted_Document';
+          _tableCsvResult = textToCsv('');
+          _entities = extractEntities('');
         });
       },
       body: Column(
@@ -444,6 +480,10 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
                 icon: const Icon(Icons.copy_rounded),
                 label: const Text('Copy CSV'),
                 onPressed: () {
+                  if (_tableCsvResult == _noTableMessage) {
+                    _showToast('No table detected to copy.');
+                    return;
+                  }
                   Clipboard.setData(ClipboardData(text: _tableCsvResult));
                   _showToast('CSV copied!');
                 },
@@ -455,9 +495,16 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
                 icon: const Icon(Icons.share_rounded),
                 label: const Text('Share .CSV File'),
                 style: ElevatedButton.styleFrom(backgroundColor: AppColors.catText, foregroundColor: Colors.white),
-                onPressed: () {
-                  final bytes = Uint8List.fromList(utf8.encode(_tableCsvResult));
-                  Printing.sharePdf(bytes: bytes, filename: 'Table.csv');
+                onPressed: () async {
+                  if (_tableCsvResult == _noTableMessage) {
+                    _showToast('No table detected to export.');
+                    return;
+                  }
+                  try {
+                    await shareFileBytes(Uint8List.fromList(utf8.encode(_tableCsvResult)), 'Table.csv');
+                  } catch (e) {
+                    _showToast('Could not share CSV: $e');
+                  }
                 },
               ),
             ),
@@ -584,7 +631,10 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
           controller: _textEditorController,
           maxLines: 6,
           keyboardType: TextInputType.multiline,
-          onChanged: (_) => _extractEntitiesFromText(),
+          onChanged: (_) {
+            _extractEntitiesFromText();
+            _parseTableToCsv();
+          },
         ),
       ],
     );

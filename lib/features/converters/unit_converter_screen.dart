@@ -22,6 +22,20 @@ enum UnitType {
   const UnitType(this.label, this.icon);
 }
 
+final _plainFormat = NumberFormat('#,##0.######');
+
+/// Plain grouped number for everyday values; scientific notation when the
+/// plain form would show "0" for a non-zero value or run past 15 digits.
+String formatUnitValue(double v) {
+  if (v.isNaN) return 'NaN';
+  if (v.isInfinite) return v.isNegative ? '-∞' : '∞';
+  final a = v.abs();
+  if (a != 0 && (a < 1e-6 || a >= 1e15)) {
+    return v.toStringAsExponential(6).replaceFirst(RegExp(r'\.?0+e'), 'e').replaceFirst('e+', 'e');
+  }
+  return _plainFormat.format(v);
+}
+
 class UnitDefinition {
   final String name;
   final String symbol;
@@ -61,7 +75,7 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
       UnitDefinition('Milligram', 'mg', 0.000001),
       UnitDefinition('Metric Ton', 't', 1000.0),
       UnitDefinition('Pound', 'lb', 0.45359237),
-      UnitDefinition('Ounce', 'oz', 0.02834952),
+      UnitDefinition('Ounce', 'oz', 0.028349523125),
     ],
     UnitType.temperature: [
       UnitDefinition('Celsius', '°C', 1.0),
@@ -71,24 +85,24 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
     UnitType.area: [
       UnitDefinition('Square Meter', 'm²', 1.0),
       UnitDefinition('Square Kilometer', 'km²', 1000000.0),
-      UnitDefinition('Square Foot', 'ft²', 0.092903),
-      UnitDefinition('Square Yard', 'yd²', 0.836127),
-      UnitDefinition('Acre', 'ac', 4046.856),
+      UnitDefinition('Square Foot', 'ft²', 0.09290304),
+      UnitDefinition('Square Yard', 'yd²', 0.83612736),
+      UnitDefinition('Acre', 'ac', 4046.8564224),
       UnitDefinition('Hectare', 'ha', 10000.0),
     ],
     UnitType.volume: [
       UnitDefinition('Liter', 'L', 1.0),
       UnitDefinition('Milliliter', 'mL', 0.001),
       UnitDefinition('Cubic Meter', 'm³', 1000.0),
-      UnitDefinition('US Gallon', 'gal', 3.78541),
-      UnitDefinition('US Pint', 'pt', 0.473176),
-      UnitDefinition('Fluid Ounce', 'fl oz', 0.0295735),
+      UnitDefinition('US Gallon', 'gal', 3.785411784),
+      UnitDefinition('US Pint', 'pt', 0.473176473),
+      UnitDefinition('Fluid Ounce', 'fl oz', 0.0295735295625),
     ],
     UnitType.speed: [
       UnitDefinition('Meters / second', 'm/s', 1.0),
-      UnitDefinition('Kilometers / hour', 'km/h', 0.277778),
+      UnitDefinition('Kilometers / hour', 'km/h', 1 / 3.6),
       UnitDefinition('Miles / hour', 'mph', 0.44704),
-      UnitDefinition('Knot', 'kn', 0.514444),
+      UnitDefinition('Knot', 'kn', 1852 / 3600),
     ],
     UnitType.data: [
       UnitDefinition('Byte', 'B', 1.0),
@@ -96,6 +110,7 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
       UnitDefinition('Megabyte', 'MB', 1048576.0),
       UnitDefinition('Gigabyte', 'GB', 1073741824.0),
       UnitDefinition('Terabyte', 'TB', 1099511627776.0),
+      UnitDefinition('Petabyte', 'PB', 1125899906842624.0),
     ],
   };
 
@@ -153,11 +168,12 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final currentList = _units[_currentType]!;
 
-    final inputVal = double.tryParse(_inputController.text.trim()) ?? 0;
+    // Non-finite input ("1e999") is treated like empty input instead of showing Infinity/NaN.
+    final parsed = double.tryParse(_inputController.text.trim());
+    final inputVal = parsed != null && parsed.isFinite ? parsed : 0.0;
     final resultVal = _convertValue(inputVal, _fromUnit, _toUnit);
 
-    final formatter = NumberFormat('#,##0.######');
-    final formattedResult = '${formatter.format(resultVal)} ${_toUnit.symbol}';
+    final formattedResult = '${formatUnitValue(resultVal)} ${_toUnit.symbol}';
 
     return ToolScaffold(
       title: 'Unit Converter',
@@ -193,7 +209,7 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
           ResultCard(
             title: '${_fromUnit.name} to ${_toUnit.name}',
             primaryResult: formattedResult,
-            subtitle: '$inputVal ${_fromUnit.symbol} = $formattedResult',
+            subtitle: '${formatUnitValue(inputVal)} ${_fromUnit.symbol} = $formattedResult',
             accentColor: AppColors.catConverter,
           ),
           const SizedBox(height: 20),
@@ -227,7 +243,7 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
                       items: currentList.map((u) {
                         return DropdownMenuItem(
                           value: u,
-                          child: Text('${u.name} (${u.symbol})', style: const TextStyle(fontSize: 14)),
+                          child: Text('${u.name} (${u.symbol})', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14)),
                         );
                       }).toList(),
                       onChanged: (newU) {
@@ -245,7 +261,7 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
                 icon: Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: AppColors.catConverter.withOpacity(0.12),
+                    color: AppColors.catConverter.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.swap_horiz_rounded, color: AppColors.catConverter),
@@ -267,7 +283,7 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
                       items: currentList.map((u) {
                         return DropdownMenuItem(
                           value: u,
-                          child: Text('${u.name} (${u.symbol})', style: const TextStyle(fontSize: 14)),
+                          child: Text('${u.name} (${u.symbol})', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14)),
                         );
                       }).toList(),
                       onChanged: (newU) {
@@ -301,39 +317,48 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
             ),
-            child: ListView.separated(
+            child: Material(
+              type: MaterialType.transparency,
+              child: ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: currentList.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
+              separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final unit = currentList[index];
                 final converted = _convertValue(inputVal, _fromUnit, unit);
                 final isCurrentTarget = unit.name == _toUnit.name;
 
-                return ListTile(
-                  dense: true,
-                  title: Text(
-                    unit.name,
-                    style: TextStyle(
-                      fontWeight: isCurrentTarget ? FontWeight.bold : FontWeight.w500,
-                      color: isCurrentTarget ? AppColors.catConverter : null,
-                    ),
-                  ),
-                  trailing: Text(
-                    '${formatter.format(converted)} ${unit.symbol}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                      color: isCurrentTarget ? AppColors.catConverter : null,
-                    ),
-                  ),
+                final accent = isCurrentTarget ? AppColors.catConverter : null;
+                return InkWell(
                   onTap: () {
                     PreferencesService().triggerSelectionHaptic();
                     setState(() => _toUnit = unit);
                   },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            unit.name,
+                            style: TextStyle(fontWeight: isCurrentTarget ? FontWeight.bold : FontWeight.w500, color: accent),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            '${formatUnitValue(converted)} ${unit.symbol}',
+                            textAlign: TextAlign.end,
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: accent),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 );
               },
+            ),
             ),
           ),
         ],

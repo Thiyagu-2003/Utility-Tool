@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/validation_utils.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
@@ -24,10 +25,9 @@ class _GstCalculatorScreenState extends State<GstCalculatorScreen> {
   final List<double> _presetRates = [5.0, 12.0, 18.0, 28.0];
 
   Map<String, double> _calculateGst() {
-    final amount = double.tryParse(_amountController.text.trim()) ?? 0;
-    final rate = _isCustomRate
-        ? (double.tryParse(_customRateController.text.trim()) ?? 0)
-        : _selectedRate;
+    final amount = ValidationUtils.safeParseDouble(_amountController.text);
+    // Capped at 100% so inclusive pricing can't divide by zero at a -100% rate.
+    final rate = (_isCustomRate ? ValidationUtils.safeParseDouble(_customRateController.text) : _selectedRate).clamp(0.0, 100.0);
 
     double netAmount = 0;
     double gstAmount = 0;
@@ -77,6 +77,7 @@ class _GstCalculatorScreenState extends State<GstCalculatorScreen> {
       onReset: () {
         setState(() {
           _amountController.text = '1000';
+          _customRateController.text = '18';
           _selectedRate = 18.0;
           _isCustomRate = false;
           _isGstExclusive = true;
@@ -178,53 +179,45 @@ class _GstCalculatorScreenState extends State<GstCalculatorScreen> {
             style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
           ),
           const SizedBox(height: 8),
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
               ..._presetRates.map((rate) {
                 final isSelected = !_isCustomRate && _selectedRate == rate;
-                return Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 3.0),
-                    child: ChoiceChip(
-                      label: Center(child: Text('${rate.toInt()}%')),
-                      selected: isSelected,
-                      selectedColor: AppColors.catFinance,
-                      labelStyle: TextStyle(
-                        color: isSelected ? Colors.white : null,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      onSelected: (val) {
-                        if (val) {
-                          PreferencesService().triggerHaptic();
-                          setState(() {
-                            _selectedRate = rate;
-                            _isCustomRate = false;
-                          });
-                        }
-                      },
-                    ),
+                return ChoiceChip(
+                  label: Text('${rate.toInt()}%'),
+                  selected: isSelected,
+                  selectedColor: AppColors.catFinance,
+                  labelStyle: TextStyle(
+                    color: isSelected ? Colors.white : null,
+                    fontWeight: FontWeight.bold,
                   ),
+                  onSelected: (val) {
+                    if (val) {
+                      PreferencesService().triggerHaptic();
+                      setState(() {
+                        _selectedRate = rate;
+                        _isCustomRate = false;
+                      });
+                    }
+                  },
                 );
               }),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 3.0),
-                  child: ChoiceChip(
-                    label: const Center(child: Text('Custom')),
-                    selected: _isCustomRate,
-                    selectedColor: AppColors.catFinance,
-                    labelStyle: TextStyle(
-                      color: _isCustomRate ? Colors.white : null,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    onSelected: (val) {
-                      if (val) {
-                        PreferencesService().triggerHaptic();
-                        setState(() => _isCustomRate = true);
-                      }
-                    },
-                  ),
+              ChoiceChip(
+                label: const Text('Custom'),
+                selected: _isCustomRate,
+                selectedColor: AppColors.catFinance,
+                labelStyle: TextStyle(
+                  color: _isCustomRate ? Colors.white : null,
+                  fontWeight: FontWeight.bold,
                 ),
+                onSelected: (val) {
+                  if (val) {
+                    PreferencesService().triggerHaptic();
+                    setState(() => _isCustomRate = true);
+                  }
+                },
               ),
             ],
           ),

@@ -47,11 +47,21 @@ class UtilityApp extends StatelessWidget {
             GlobalCupertinoLocalizations.delegate,
           ],
           builder: (context, child) {
-            return MediaQuery(
-              data: MediaQuery.of(context).copyWith(
-                textScaler: TextScaler.linear(prefs.fontScale),
+            // Status bar icons must follow the active theme; the fixed dark icons
+            // from main() were invisible on dark screens without an AppBar (home hub).
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+            return AnnotatedRegion<SystemUiOverlayStyle>(
+              value: SystemUiOverlayStyle(
+                statusBarColor: Colors.transparent,
+                statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+                statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
               ),
-              child: child!,
+              child: MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  textScaler: TextScaler.linear(prefs.fontScale),
+                ),
+                child: child!,
+              ),
             );
           },
           home: prefs.hasSeenOnboarding

@@ -1,11 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:printing/printing.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/share_utils.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 
@@ -39,8 +39,8 @@ void main() {
 ### Table Example
 | Tool | Category | Status |
 | :--- | :--- | :--- |
-| Markdown Editor | Files & Text | Ready |
-| Text Diff | Files & Text | Ready |
+| Markdown Editor | Text & Writing | Ready |
+| Text Diff | Text & Writing | Ready |
 
 > "Simplicity is prerequisite for reliability." — Edsger W. Dijkstra
 ''',
@@ -82,13 +82,34 @@ void main() {
     setState(() {});
   }
 
+  /// Block syntax (headings, quotes, lists) belongs at the start of the line,
+  /// so prefix every line touched by the cursor or selection.
+  void _insertLinePrefix(String prefix) {
+    PreferencesService().triggerHaptic();
+    final text = _markdownController.text;
+    final selection = _markdownController.selection;
+    final start = selection.isValid ? selection.start : text.length;
+    final end = selection.isValid ? selection.end : text.length;
+    final lineStart = start == 0 ? 0 : text.lastIndexOf('\n', start - 1) + 1;
+    final prefixed = text.substring(lineStart, end).split('\n').map((l) => '$prefix$l').join('\n');
+    _markdownController.text = text.replaceRange(lineStart, end, prefixed);
+    _markdownController.selection = TextSelection.collapsed(offset: lineStart + prefixed.length);
+    setState(() {});
+  }
+
   Future<void> _exportMarkdown() async {
     PreferencesService().triggerHaptic();
-    final bytes = Uint8List.fromList(utf8.encode(_markdownController.text));
-    await Printing.sharePdf(
-      bytes: bytes,
-      filename: 'Document_${DateTime.now().millisecondsSinceEpoch}.md',
-    );
+    try {
+      if (_markdownController.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Nothing to export yet.')));
+        return;
+      }
+      final bytes = Uint8List.fromList(utf8.encode(_markdownController.text));
+      await shareFileBytes(bytes, 'Document_${DateTime.now().millisecondsSinceEpoch}.md');
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+    }
   }
 
   @override
@@ -101,7 +122,7 @@ void main() {
 
     return ToolScaffold(
       title: 'Markdown Editor & Preview',
-      category: ToolCategory.filesText,
+      category: ToolCategory.textTools,
       toolId: 'markdown_editor',
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -156,17 +177,18 @@ void main() {
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      _toolButton('H1', () => _insertSyntax('# ')),
-                      _toolButton('H2', () => _insertSyntax('## ')),
-                      _toolButton('H3', () => _insertSyntax('### ')),
+                      _toolButton('H1', () => _insertLinePrefix('# ')),
+                      _toolButton('H2', () => _insertLinePrefix('## ')),
+                      _toolButton('H3', () => _insertLinePrefix('### ')),
                       _toolButton('B', () => _insertSyntax('**', '**'), isBold: true),
                       _toolButton('I', () => _insertSyntax('*', '*'), isItalic: true),
+                      _toolButton('S', () => _insertSyntax('~~', '~~')),
                       _toolButton('Code', () => _insertSyntax('`', '`')),
                       _toolButton('Block', () => _insertSyntax('```\n', '\n```')),
-                      _toolButton('Quote', () => _insertSyntax('> ')),
-                      _toolButton('• List', () => _insertSyntax('- ')),
-                      _toolButton('1. List', () => _insertSyntax('1. ')),
-                      _toolButton('[x] Task', () => _insertSyntax('- [ ] ')),
+                      _toolButton('Quote', () => _insertLinePrefix('> ')),
+                      _toolButton('• List', () => _insertLinePrefix('- ')),
+                      _toolButton('1. List', () => _insertLinePrefix('1. ')),
+                      _toolButton('[x] Task', () => _insertLinePrefix('- [ ] ')),
                       _toolButton('Table', () => _insertSyntax('| Header 1 | Header 2 |\n| :--- | :--- |\n| Data 1 | Data 2 |\n')),
                       _toolButton('Link', () => _insertSyntax('[title](', ')')),
                       _toolButton('---', () => _insertSyntax('\n---\n')),

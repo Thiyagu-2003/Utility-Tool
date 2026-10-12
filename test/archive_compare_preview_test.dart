@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:utility_tool/core/models/tool_model.dart';
 import 'package:utility_tool/core/registry/tool_registry.dart';
@@ -226,13 +228,96 @@ void main() {
       );
 
       expect(tool.title, 'Archive, Diff & Preview Studio');
-      expect(tool.category, ToolCategory.filesText);
+      expect(tool.category, ToolCategory.compression);
       expect(tool.keywords.contains('tar'), isTrue);
       expect(tool.keywords.contains('gzip'), isTrue);
       expect(tool.keywords.contains('7z'), isTrue);
       expect(tool.keywords.contains('diff'), isTrue);
       expect(tool.keywords.contains('folder compare'), isTrue);
       expect(tool.keywords.contains('file preview'), isTrue);
+    });
+  });
+
+  group('Archive 4.5 behaviour fixes', () {
+    Uint8List b(String s) => Uint8List.fromList(utf8.encode(s));
+
+    test('decompressGzip refuses output beyond the limit (gzip bomb)', () {
+      final bomb = ArchiveCompareService.compressGzip(Uint8List(5 * 1024 * 1024)); // 5 MB of zeros, a few KB packed
+      expect(bomb.length, lessThan(100 * 1024));
+      expect(() => ArchiveCompareService.decompressGzip(bomb, maxOutputSize: 1024 * 1024), throwsA(isA<ArchiveException>()));
+      expect(ArchiveCompareService.decompressGzip(bomb).length, 5 * 1024 * 1024);
+    });
+
+    test('extractAuto unpacks tar and tar.gz but rejects files that are neither', () {
+      final entries = [ArchiveEntry(name: 'a.txt', bytes: b('alpha'))];
+      expect(ArchiveCompareService.extractAuto(ArchiveCompareService.createTar(entries)).single.name, 'a.txt');
+      expect(ArchiveCompareService.extractAuto(ArchiveCompareService.createTarGz(entries)).single.name, 'a.txt');
+
+      final junk = Uint8List.fromList(List.generate(4096, (i) => (i * 37 + 11) % 251 + 1));
+      expect(() => ArchiveCompareService.extractAuto(junk), throwsA(isA<ArchiveException>()));
+      expect(() => ArchiveCompareService.extractAuto(b('plain text, not an archive')), throwsA(anything));
+    });
+
+    test('extractTar skips symbolic links instead of listing them as empty files', () {
+      final archive = Archive()
+        ..addFile(ArchiveFile.bytes('real.txt', b('data')))
+        ..addFile(ArchiveFile.symlink('link.txt', 'real.txt'));
+      final tar = Uint8List.fromList(TarEncoder().encode(archive));
+      expect(ArchiveCompareService.extractTar(tar).map((e) => e.name), ['real.txt']);
+    });
+
+    test('extractByName picks the decoder from the file name', () {
+      final entries = [ArchiveEntry(name: 'dir/x.txt', bytes: b('x'))];
+      expect(ArchiveCompareService.extractByName('p.tar', ArchiveCompareService.createTar(entries)).single.name, 'dir/x.txt');
+      expect(ArchiveCompareService.extractByName('p.TGZ', ArchiveCompareService.createTarGz(entries)).single.name, 'dir/x.txt');
+      final gz = ArchiveCompareService.compressGzip(b('hello'));
+      final single = ArchiveCompareService.extractByName('notes.txt.gz', gz).single;
+      expect(single.name, 'notes.txt');
+      expect(utf8.decode(single.bytes), 'hello');
+    });
+
+    test('entry checksums are computed once', () {
+      final e = ArchiveEntry(name: 'x', bytes: b('payload'));
+      expect(identical(e.checksumSha256, e.checksumSha256), isTrue);
+      expect(e.checksumSha256, sha256.convert(utf8.encode('payload')).toString());
+    });
+
+    test('a trailing line break does not count as a changed line', () {
+      final same = ArchiveCompareService.compareFileContents('a', b('one\ntwo\n'), 'b', b('one\ntwo'));
+      expect(same.similarityPercent, 100);
+      expect(same.additions + same.deletions + same.modifications, 0);
+      final crlf = ArchiveCompareService.compareFileContents('a', b('one\r\ntwo\r\n'), 'b', b('one\ntwo\n'));
+      expect(crlf.similarityPercent, 100);
+    });
+
+    test('7z and RAR inspectors report the real size when only the header was read', () {
+      final sevenZip = Uint8List(64)..setAll(0, [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C, 0, 4]);
+      final info = ArchiveCompareService.inspect7zArchive(sevenZip, totalSize: 5000000);
+      expect(info.rawFileSize, 5000000);
+      expect(info.metadata['TotalArchiveSize'], 5000000);
+      final rar = Uint8List(32)..setAll(0, [0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00]);
+      expect(ArchiveCompareService.inspectRarArchive(rar, totalSize: 2048).metadata['TotalArchiveSize'], contains('2048 bytes'));
+    });
+
+    test('background helpers produce the same results as the direct calls', () async {
+      final entries = [ArchiveEntry(name: 'n.txt', bytes: b('one\ntwo'))];
+      final tarGz = await ArchiveCompareService.buildArchiveInBackground(entries, 'tar.gz');
+      final back = await ArchiveCompareService.extractInBackground('x.tar.gz', tarGz);
+      expect(back.single.name, 'n.txt');
+      expect(utf8.decode(back.single.bytes), 'one\ntwo');
+
+      final gz = await ArchiveCompareService.buildArchiveInBackground(entries, 'gz');
+      expect(gz[0], 0x1F);
+
+      final folders = await ArchiveCompareService.compareFoldersInBackground(
+        entries,
+        [ArchiveEntry(name: 'n.txt', bytes: b('one\nTWO'))],
+      );
+      expect(folders.modifiedCount, 1);
+
+      final diff = await ArchiveCompareService.compareFileContentsInBackground('a', b('x\ny'), 'b', b('x\nz'));
+      expect(diff.modifications, 1);
+      expect(diff.unchanged, 1);
     });
   });
 }

@@ -57,12 +57,12 @@ class ToolBoxProIcon extends StatelessWidget {
                 ),
                 borderRadius: BorderRadius.circular(size * 0.24),
                 border: Border.all(
-                  color: Colors.white.withOpacity(0.12),
+                  color: Colors.white.withValues(alpha: 0.12),
                   width: 1.5,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.45),
+                    color: Colors.black.withValues(alpha: 0.45),
                     blurRadius: size * 0.18,
                     offset: Offset(0, size * 0.08),
                   ),
@@ -141,7 +141,7 @@ class ToolBoxProIcon extends StatelessWidget {
         borderRadius: BorderRadius.circular(radius),
         boxShadow: [
           BoxShadow(
-            color: color.withOpacity(0.4),
+            color: color.withValues(alpha: 0.4),
             blurRadius: size * 0.3,
             offset: Offset(0, size * 0.1),
           ),

@@ -150,3 +150,18 @@ class SlateDocument {
     );
   }
 }
+
+/// Parses `#RRGGBB`, `RRGGBB` or `#AARRGGBB` (case-insensitive) into an opaque-by-default
+/// colour, or null when the text is not a valid hex colour.
+Color? parseHexColor(String input) {
+  var hex = input.trim();
+  if (hex.startsWith('#')) hex = hex.substring(1);
+  if (hex.length != 6 && hex.length != 8) return null;
+  if (!RegExp(r'^[0-9a-fA-F]+$').hasMatch(hex)) return null;
+  final value = int.parse(hex, radix: 16);
+  return Color(hex.length == 6 ? 0xFF000000 | value : value);
+}
+
+/// `#RRGGBB` for [color] (alpha dropped).
+String colorToHex(Color color) =>
+    '#${(color.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/models/tool_model.dart';
+import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 
@@ -54,7 +55,7 @@ class _ScreenColorTestScreenState extends State<ScreenColorTestScreen> {
 
     return ToolScaffold(
       title: 'Screen Color & Pixel Test',
-      category: ToolCategory.moreTools,
+      category: ToolCategory.deviceTests,
       toolId: 'screen_color_test',
       isScrollable: false,
       body: ListView(
@@ -138,13 +139,16 @@ class _ScreenColorTestScreenState extends State<ScreenColorTestScreen> {
             final idx = entry.key;
             final item = entry.value;
 
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(
-                color: isDark ? AppColors.darkSurface : Colors.white,
+            // Material (not a decorated Container) so the tile's ink splash stays visible.
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Material(
+              color: isDark ? AppColors.darkSurface : Colors.white,
+              shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                side: BorderSide(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
               ),
+              clipBehavior: Clip.antiAlias,
               child: ListTile(
                 onTap: () => _launchFullscreenTest(context, idx),
                 leading: Container(
@@ -162,6 +166,7 @@ class _ScreenColorTestScreenState extends State<ScreenColorTestScreen> {
                 title: Text(item.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                 subtitle: Text(item.purpose, style: TextStyle(fontSize: 12, color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted)),
                 trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+              ),
               ),
             );
           }),
@@ -211,14 +216,14 @@ class _FullscreenColorInspectionViewState extends State<FullscreenColorInspectio
     setState(() {
       _currentIndex = (_currentIndex + 1) % widget.patterns.length;
     });
-    HapticFeedback.selectionClick();
+    PreferencesService().triggerSelectionHaptic();
   }
 
   void _prevPattern() {
     setState(() {
       _currentIndex = (_currentIndex - 1 + widget.patterns.length) % widget.patterns.length;
     });
-    HapticFeedback.selectionClick();
+    PreferencesService().triggerSelectionHaptic();
   }
 
   @override
@@ -313,9 +318,12 @@ class _FullscreenColorInspectionViewState extends State<FullscreenColorInspectio
                             icon: const Icon(Icons.skip_previous_rounded, color: Colors.white),
                             onPressed: _prevPattern,
                           ),
-                          const Text(
-                            'Swipe / Double-Tap to advance • Tap to hide HUD',
-                            style: TextStyle(color: Colors.white70, fontSize: 11),
+                          const Expanded(
+                            child: Text(
+                              'Swipe / Double-Tap to advance • Tap to hide HUD',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.white70, fontSize: 11),
+                            ),
                           ),
                           IconButton(
                             icon: const Icon(Icons.skip_next_rounded, color: Colors.white),

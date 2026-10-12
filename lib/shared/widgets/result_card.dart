@@ -42,7 +42,7 @@ class ResultCard extends StatelessWidget {
           children: [
             const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
             const SizedBox(width: 10),
-            Text('Copied "$primaryResult" to clipboard!'),
+            Expanded(child: Text('Copied "$primaryResult" to clipboard!')),
           ],
         ),
         backgroundColor: AppColors.catFinance,
@@ -65,12 +65,12 @@ class ResultCard extends StatelessWidget {
         color: isDark ? AppColors.darkCard : AppColors.lightSurface,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: color.withOpacity(0.35),
+          color: color.withValues(alpha: 0.35),
           width: 1.5,
         ),
         boxShadow: [
           BoxShadow(
-            color: color.withOpacity(isDark ? 0.12 : 0.08),
+            color: color.withValues(alpha: isDark ? 0.12 : 0.08),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -82,13 +82,15 @@ class ResultCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                title.toUpperCase(),
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.0,
-                  color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+              Flexible(
+                child: Text(
+                  title.toUpperCase(),
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.0,
+                    color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                  ),
                 ),
               ),
               InkWell(

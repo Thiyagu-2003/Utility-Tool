@@ -8,10 +8,10 @@ enum ToolCategory {
     'Explore all features in one place',
   ),
   calculate(
-    'Calculate',
-    Icons.calculate_outlined,
+    'Percentage Calculation',
+    Icons.percent_rounded,
     Color(0xFF2563EB),
-    'Calculator, percentage, average',
+    'Percent of, ratio & percentage change',
   ),
   convert(
     'Convert',
@@ -49,17 +49,53 @@ enum ToolCategory {
     Color(0xFFCA8A04),
     'Electricity bill, trip cost & utilities',
   ),
-  filesText(
-    'Files & Text',
-    Icons.description_outlined,
-    Color(0xFFEA580C),
-    'PDF toolkit, document scanner, text tools',
+  pdfDocuments(
+    'PDF & Documents',
+    Icons.picture_as_pdf_outlined,
+    Color(0xFFDC2626),
+    'PDF toolkit, office files & document scanner',
+  ),
+  imagePhoto(
+    'Image & Photo',
+    Icons.photo_library_outlined,
+    Color(0xFFDB2777),
+    'Resize, compress, edit & collage images',
+  ),
+  compression(
+    'Compression & Archives',
+    Icons.folder_zip_outlined,
+    Color(0xFF65A30D),
+    'ZIP, TAR, GZIP, 7z, compare & preview',
+  ),
+  textTools(
+    'Text & Writing',
+    Icons.text_fields_rounded,
+    Color(0xFF0369A1),
+    'Text analyzer, diff, markdown & OCR',
+  ),
+  media(
+    'Audio & Video',
+    Icons.perm_media_outlined,
+    Color(0xFF9333EA),
+    'Audio & video conversion and editing',
+  ),
+  qrBarcode(
+    'QR & Barcode',
+    Icons.qr_code_2_rounded,
+    Color(0xFF334155),
+    'Scan, generate & share contacts via QR',
   ),
   developer(
     'Developer',
     Icons.code_rounded,
     Color(0xFF4F46E5),
-    'JSON formatter, Base64, URL tools',
+    'JSON, XML, YAML, Base64, URL tools',
+  ),
+  deviceTests(
+    'Device & Hardware',
+    Icons.phone_android_rounded,
+    Color(0xFF57534E),
+    'Sensors, screen, battery, mic & speaker tests',
   ),
   security(
     'Security',
@@ -77,7 +113,7 @@ enum ToolCategory {
     'More Tools',
     Icons.tune_rounded,
     Color(0xFF475569),
-    'Sensors, hardware diagnostics',
+    'Slate, randomizer & everyday extras',
   );
 
   final String label;
@@ -92,8 +128,8 @@ enum ToolCategory {
   static const ToolCategory converters = convert;
   static const ToolCategory dateAge = dateTime;
   static const ToolCategory timeDuration = dateTime;
-  static const ToolCategory text = filesText;
-  static const ToolCategory documents = filesText;
+  static const ToolCategory text = textTools;
+  static const ToolCategory documents = pdfDocuments;
   static const ToolCategory everyday = moreTools;
 }
 

@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../core/utils/share_utils.dart';
 import 'slate_models.dart';
 
 class SlateService {
@@ -41,10 +41,15 @@ class SlateService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final jsonList = prefs.getStringList(_keyMySlates) ?? [];
-      return jsonList
-          .map((item) => SlateDocument.fromJson(jsonDecode(item) as Map<String, dynamic>))
-          .toList()
-        ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      // Skip a corrupt entry rather than returning [] — saveToMySlates rewrites
+      // the whole list from this result, which would wipe every other slate.
+      final slates = <SlateDocument>[];
+      for (final item in jsonList) {
+        try {
+          slates.add(SlateDocument.fromJson(jsonDecode(item) as Map<String, dynamic>));
+        } catch (_) {}
+      }
+      return slates..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     } catch (_) {
       return [];
     }
@@ -81,6 +86,20 @@ class SlateService {
     } catch (_) {}
   }
 
+  /// Rename a slate in My Slates without touching its strokes or the active-slate slot.
+  Future<void> renameSlate(String id, String title) async {
+    final clean = title.trim();
+    if (clean.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = await getMySlates();
+      final index = list.indexWhere((s) => s.id == id);
+      if (index < 0) return;
+      list[index].title = clean;
+      await prefs.setStringList(_keyMySlates, list.map((s) => jsonEncode(s.toJson())).toList());
+    } catch (_) {}
+  }
+
   /// Duplicate a slate
   Future<SlateDocument> duplicateSlate(SlateDocument slate) async {
     final cloned = slate.clone();
@@ -105,23 +124,23 @@ class SlateService {
     canvas.scale(pixelRatio, pixelRatio);
 
     // 1. Draw Paper Background
-    _drawPaperBackground(canvas, size, paperType);
+    drawPaperBackground(canvas, size, paperType);
 
     // 2. Draw Strokes inside saveLayer so BlendMode.clear only clears stroke layer
     canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
     for (final stroke in strokes) {
-      _renderStroke(canvas, stroke);
+      drawStroke(canvas, stroke);
     }
     canvas.restore();
 
     final picture = recorder.endRecording();
-    final img = await picture.toImage(width.toInt(), height.toInt());
+    final img = await picture.toImage(width.round().clamp(1, 8192), height.round().clamp(1, 8192));
     final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
     return byteData!.buffer.asUint8List();
   }
 
   /// Draw paper background
-  static void _drawPaperBackground(Canvas canvas, Size size, SlatePaperType paper) {
+  static void drawPaperBackground(Canvas canvas, Size size, SlatePaperType paper) {
     Color bgColor;
     switch (paper) {
       case SlatePaperType.dark:
@@ -171,7 +190,7 @@ class SlateService {
   }
 
   /// Draw an individual stroke
-  static void _renderStroke(Canvas canvas, SlateStroke stroke) {
+  static void drawStroke(Canvas canvas, SlateStroke stroke) {
     if (stroke.points.isEmpty) return;
 
     final paint = Paint()
@@ -256,10 +275,11 @@ class SlateService {
     canvas.drawPath(path, paint);
   }
 
-  /// Share or save image using native share sheet / printer
-  Future<void> sharePng(Uint8List bytes, String title) async {
-    final sanitized = title.replaceAll(RegExp(r'[^\w\s\.-]'), '_').trim();
-    final filename = '${sanitized.isEmpty ? "Slate" : sanitized}.png';
-    await Printing.sharePdf(bytes: bytes, filename: filename);
+  static String pngFileName(String title) {
+    final sanitized = title.replaceAll(RegExp(r'[^\w\s.-]'), '_').trim();
+    return '${sanitized.isEmpty ? "Slate" : sanitized}.png';
   }
+
+  /// Share the PNG through the native share sheet (as image/png, not a PDF).
+  Future<void> sharePng(Uint8List bytes, String title) => shareFileBytes(bytes, pngFileName(title));
 }

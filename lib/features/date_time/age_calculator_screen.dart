@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../core/models/tool_model.dart';
@@ -6,6 +8,25 @@ import '../../core/theme/app_colors.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
+
+/// Calendar age between two dates (time of day ignored; [asOf] must not be
+/// before [birth]). A month-end birth date anniversaries on the last day of
+/// shorter months, so 31 Jan -> 1 Mar 2023 is 1 month 1 day, never negative.
+({int years, int months, int days}) calculateAgeParts(DateTime birth, DateTime asOf) {
+  final b = DateTime.utc(birth.year, birth.month, birth.day);
+  final a = DateTime.utc(asOf.year, asOf.month, asOf.day);
+  DateTime anniversary(int months) {
+    final m = b.month - 1 + months;
+    final y = b.year + m ~/ 12;
+    final mo = m % 12 + 1;
+    return DateTime.utc(y, mo, math.min(b.day, DateTime.utc(y, mo + 1, 0).day));
+  }
+
+  var totalMonths = (a.year - b.year) * 12 + a.month - b.month;
+  if (anniversary(totalMonths).isAfter(a)) totalMonths--;
+  final days = a.difference(anniversary(totalMonths)).inDays;
+  return (years: totalMonths ~/ 12, months: totalMonths % 12, days: days);
+}
 
 class AgeCalculatorScreen extends StatefulWidget {
   const AgeCalculatorScreen({super.key});
@@ -40,7 +61,10 @@ class _AgeCalculatorScreenState extends State<AgeCalculatorScreen> {
   }
 
   Map<String, dynamic> _computeAge() {
-    if (_asOfDate.isBefore(_birthDate)) {
+    // Date-only UTC values: no time-of-day or DST skew in day counts.
+    final birth = DateTime.utc(_birthDate.year, _birthDate.month, _birthDate.day);
+    final asOf = DateTime.utc(_asOfDate.year, _asOfDate.month, _asOfDate.day);
+    if (asOf.isBefore(birth)) {
       return {
         'error': 'Target date cannot be before birth date',
         'years': 0,
@@ -49,32 +73,20 @@ class _AgeCalculatorScreenState extends State<AgeCalculatorScreen> {
       };
     }
 
-    int years = _asOfDate.year - _birthDate.year;
-    int months = _asOfDate.month - _birthDate.month;
-    int days = _asOfDate.day - _birthDate.day;
+    final (:years, :months, :days) = calculateAgeParts(birth, asOf);
 
-    if (days < 0) {
-      final prevMonth = DateTime(_asOfDate.year, _asOfDate.month, 0);
-      days += prevMonth.day;
-      months -= 1;
-    }
-
-    if (months < 0) {
-      years -= 1;
-      months += 12;
-    }
-
-    final totalDifference = _asOfDate.difference(_birthDate);
+    final totalDifference = asOf.difference(birth);
     final totalDays = totalDifference.inDays;
     final totalHours = totalDays * 24;
     final totalWeeks = (totalDays / 7).floor();
 
     // Next birthday calculation
-    DateTime nextBirthday = DateTime(_asOfDate.year, _birthDate.month, _birthDate.day);
-    if (nextBirthday.isBefore(_asOfDate) || nextBirthday.isAtSameMomentAs(_asOfDate)) {
-      nextBirthday = DateTime(_asOfDate.year + 1, _birthDate.month, _birthDate.day);
+    DateTime nextBirthday = DateTime.utc(asOf.year, birth.month, birth.day);
+    if (nextBirthday.isBefore(asOf) || nextBirthday.isAtSameMomentAs(asOf)) {
+      nextBirthday = DateTime.utc(asOf.year + 1, birth.month, birth.day);
     }
-    final daysToNextBirthday = nextBirthday.difference(_asOfDate).inDays;
+    final daysToNextBirthday = nextBirthday.difference(asOf).inDays;
+    final untilBirthday = calculateAgeParts(asOf, nextBirthday);
     final nextBirthdayDayOfWeek = DateFormat('EEEE').format(nextBirthday);
     final birthDayOfWeek = DateFormat('EEEE').format(_birthDate);
 
@@ -85,7 +97,9 @@ class _AgeCalculatorScreenState extends State<AgeCalculatorScreen> {
       'totalDays': totalDays,
       'totalHours': totalHours,
       'totalWeeks': totalWeeks,
+      'totalMonths': years * 12 + months,
       'daysToNextBirthday': daysToNextBirthday,
+      'untilBirthday': '${untilBirthday.months} mo ${untilBirthday.days} d',
       'nextBirthdayDayOfWeek': nextBirthdayDayOfWeek,
       'birthDayOfWeek': birthDayOfWeek,
     };
@@ -104,7 +118,11 @@ class _AgeCalculatorScreenState extends State<AgeCalculatorScreen> {
         : [
             BreakdownItem(
               label: 'Next Birthday',
-              value: '${ageData['daysToNextBirthday']} days (${ageData['nextBirthdayDayOfWeek']})',
+              value: '${ageData['untilBirthday']} (${ageData['daysToNextBirthday']} days, ${ageData['nextBirthdayDayOfWeek']})',
+            ),
+            BreakdownItem(
+              label: 'Total Months',
+              value: NumberFormat('#,###').format(ageData['totalMonths']),
             ),
             BreakdownItem(
               label: 'Total Days',

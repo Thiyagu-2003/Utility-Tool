@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/localization/app_localizations.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../calculator/calculator_screen.dart';
@@ -34,6 +35,7 @@ class _MainNavigationScaffoldState extends State<MainNavigationScaffold> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final loc = AppLocalizations.of(context);
 
     return Scaffold(
       body: IndexedStack(
@@ -51,7 +53,7 @@ class _MainNavigationScaffoldState extends State<MainNavigationScaffold> {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(isDark ? 0.25 : 0.05),
+              color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.05),
               blurRadius: 10,
               offset: const Offset(0, -2),
             ),
@@ -66,25 +68,25 @@ class _MainNavigationScaffoldState extends State<MainNavigationScaffold> {
                 _buildNavItem(
                   index: 0,
                   icon: Icons.grid_view_rounded,
-                  label: 'Tools',
+                  label: loc.tr('tools'),
                   isDark: isDark,
                 ),
                 _buildNavItem(
                   index: 1,
                   icon: Icons.calculate_outlined,
-                  label: 'Calculator',
+                  label: loc.tr('calculator'),
                   isDark: isDark,
                 ),
                 _buildNavItem(
                   index: 2,
                   icon: Icons.account_balance_wallet_outlined,
-                  label: 'Finance',
+                  label: loc.tr('finance'),
                   isDark: isDark,
                 ),
                 _buildNavItem(
                   index: 3,
                   icon: Icons.settings_outlined,
-                  label: 'Settings',
+                  label: loc.tr('settings'),
                   isDark: isDark,
                 ),
               ],
@@ -132,6 +134,8 @@ class _MainNavigationScaffoldState extends State<MainNavigationScaffold> {
               const SizedBox(height: 2),
               Text(
                 label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontFamily: 'Outfit',
                   fontSize: 11,

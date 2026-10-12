@@ -24,6 +24,7 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
   BatteryState _batteryState = BatteryState.unknown;
   bool _isInSaveMode = false;
   StreamSubscription<BatteryState>? _batterySub;
+  Timer? _levelTimer;
 
   // Display State
   double _refreshRate = 60.0;
@@ -38,34 +39,69 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
     _activeTab = widget.initialTabIndex;
     _initBattery();
     _initDisplayAndFps();
+    if (_activeTab == 1) _ticker.start();
+  }
+
+  // The FPS ticker forces a frame every vsync, so it only runs on the Display tab.
+  void _selectTab(int tab) {
+    setState(() => _activeTab = tab);
+    if (tab == 1) {
+      _frameCount = 0;
+      _lastFpsTime = DateTime.now();
+      if (!_ticker.isActive) _ticker.start();
+    } else {
+      _ticker.stop();
+    }
   }
 
   @override
   void dispose() {
     _batterySub?.cancel();
+    _levelTimer?.cancel();
     _ticker.dispose();
     super.dispose();
   }
 
-  Future<void> _initBattery() async {
+  Future<void> _refreshBattery() async {
+    // Each platform call is independent: one unsupported call (e.g. power-saver
+    // state) must not leave the other readings, or the live subscription, missing.
+    int? lvl;
+    BatteryState? state;
+    bool? isSave;
     try {
-      final lvl = await _battery.batteryLevel;
-      final state = await _battery.batteryState;
-      final isSave = await _battery.isInBatterySaveMode;
-
-      if (mounted) {
-        setState(() {
-          _batteryLevel = lvl;
-          _batteryState = state;
-          _isInSaveMode = isSave;
-        });
-      }
-
-      _batterySub = _battery.onBatteryStateChanged.listen((state) {
-        if (!mounted) return;
-        setState(() => _batteryState = state);
-      });
+      lvl = await _battery.batteryLevel;
     } catch (_) {}
+    try {
+      state = await _battery.batteryState;
+    } catch (_) {}
+    try {
+      isSave = await _battery.isInBatterySaveMode;
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      if (lvl != null) _batteryLevel = lvl;
+      if (state != null) _batteryState = state;
+      if (isSave != null) _isInSaveMode = isSave;
+    });
+  }
+
+  Future<void> _initBattery() async {
+    await _refreshBattery();
+    // Don't subscribe if the screen closed while the platform calls were pending.
+    if (!mounted) return;
+    try {
+      _batterySub = _battery.onBatteryStateChanged.listen(
+        (state) {
+          if (!mounted) return;
+          setState(() => _batteryState = state);
+          // Charge level moves with the state (plug in/out, full), so refresh it too.
+          _refreshBattery();
+        },
+        onError: (_) {},
+      );
+    } catch (_) {}
+    // The state stream is silent while the level drifts, so poll it slowly.
+    _levelTimer = Timer.periodic(const Duration(seconds: 30), (_) => _refreshBattery());
   }
 
   void _initDisplayAndFps() {
@@ -82,7 +118,7 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
         _frameCount = 0;
         _lastFpsTime = now;
       }
-    })..start();
+    });
   }
 
   Color _getBatteryColor(int level, BatteryState state) {
@@ -103,7 +139,7 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
       case BatteryState.connectedNotCharging:
         return 'Connected (Not Charging)';
       case BatteryState.unknown:
-        return 'Battery Power Normal';
+        return 'Status unknown';
     }
   }
 
@@ -121,8 +157,8 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
 
     return ToolScaffold(
       title: 'Battery & Display Diagnostics',
-      category: ToolCategory.moreTools,
-      toolId: 'battery_display_info',
+      category: ToolCategory.deviceTests,
+      toolId: widget.initialTabIndex == 1 ? 'display_refresh_rate' : 'battery_health',
       isScrollable: false,
       body: Column(
         children: [
@@ -133,7 +169,7 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
               segments: const [
                 ButtonSegment(
                   value: 0,
-                  label: Text('Battery Health'),
+                  label: Text('Battery Status'),
                   icon: Icon(Icons.battery_charging_full_rounded, size: 16),
                 ),
                 ButtonSegment(
@@ -143,7 +179,7 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
                 ),
               ],
               selected: {_activeTab},
-              onSelectionChanged: (val) => setState(() => _activeTab = val.first),
+              onSelectionChanged: (val) => _selectTab(val.first),
             ),
           ),
 
@@ -160,9 +196,6 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
   Widget _buildBatteryTab(bool isDark) {
     final batColor = _getBatteryColor(_batteryLevel, _batteryState);
     final stateLabel = _getBatteryStateLabel(_batteryState);
-
-    // Health heuristic (Modern Android/iOS Li-Ion standard)
-    final healthLabel = _batteryLevel >= 80 ? 'Good / Optimal' : 'Normal Operating Condition';
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -184,8 +217,11 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
           ),
           child: Column(
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 6,
                 children: [
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -268,7 +304,7 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
 
         // Battery Hardware Specs
         Text(
-          'BATTERY HEALTH & SPECIFICATIONS',
+          'BATTERY STATUS',
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.bold,
@@ -278,11 +314,10 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
         ),
         const SizedBox(height: 10),
 
-        _buildSpecTile('Battery Health Status', healthLabel, Icons.favorite_rounded, AppColors.success, isDark),
-        _buildSpecTile('Battery Technology', 'Lithium-Ion / Li-Po Rechargeable', Icons.memory_rounded, AppColors.catDev, isDark),
-        _buildSpecTile('Nominal Voltage', '~3.85 V - 4.35 V DC', Icons.electric_bolt_rounded, AppColors.catTime, isDark),
-        _buildSpecTile('Operating Temperature', 'Nominal (Cool 30°C - 36°C)', Icons.thermostat_rounded, AppColors.catConverter, isDark),
+        _buildSpecTile('Charge Level', '$_batteryLevel%', Icons.battery_std_rounded, batColor, isDark),
+        _buildSpecTile('Power Source', stateLabel, Icons.power_rounded, AppColors.catTime, isDark),
         _buildSpecTile('Power Saver State', _isInSaveMode ? 'Enabled' : 'Disabled (Standard Performance)', Icons.eco_rounded, AppColors.warning, isDark),
+        _buildSpecTile('Health, Voltage & Temperature', 'Not exposed to apps by the Android/iOS public APIs', Icons.info_outline_rounded, AppColors.catDev, isDark),
 
         const SizedBox(height: 20),
 
@@ -346,8 +381,11 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
           ),
           child: Column(
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 6,
                 children: [
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

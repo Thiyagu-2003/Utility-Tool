@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:utility_tool/core/services/search_calculator_service.dart';
 import 'package:utility_tool/core/utils/validation_utils.dart';
+import 'package:utility_tool/features/education/academic_toolkit_screen.dart';
+import 'package:utility_tool/features/calculator/calculator_screen.dart';
 
 void main() {
   group('SearchCalculatorService Universal Shortcuts Tests', () {
@@ -130,6 +132,47 @@ void main() {
       expect(ValidationUtils.safeParseDouble('invalid', defaultValue: 10.0), 10.0);
       expect(ValidationUtils.safeParseInt('99'), 99);
       expect(ValidationUtils.safeParseInt('not an int', defaultValue: 5), 5);
+    });
+  });
+
+  group('Academic toolkit helpers', () {
+    test('attendance plan uses exact percent maths', () {
+      // 42/60 = 70% exactly meets 70%: nothing can be skipped.
+      expect(attendancePlan(42, 60, 70), (canSkip: 0, mustAttend: null));
+      // 48/60 = 80%: can still skip floor(4800/75) - 60 = 4 classes at 75%.
+      expect(attendancePlan(48, 60, 75).canSkip, 4);
+      // 42/60 needs (75*60-4200)/25 = 12 straight classes to reach 75%.
+      expect(attendancePlan(42, 60, 75).mustAttend, 12);
+      // 100% required after a miss can never be reached.
+      expect(attendancePlan(59, 60, 100), (canSkip: null, mustAttend: null));
+    });
+
+    test('primes in a range', () {
+      expect(primesInRange(1, 30), [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]);
+      expect(primesInRange(30, 20), [23, 29]);
+      expect(primesInRange(-5, 3), [2, 3]);
+      expect(isPrimeInt(1000000007), isTrue);
+      expect(isPrimeInt(1), isFalse);
+    });
+
+    test('matrix helpers', () {
+      expect(matMul([1, 2, 3, 4], [5, 6, 7, 8], 2), [19, 22, 43, 50]);
+      expect(matAdd([1, 2], [3, 4]), [4, 6]);
+      expect(matSub([1, 2], [3, 4]), [-2, -2]);
+      expect(matToString([1, 2.5, 0.125, -0.0], 2), '[1, 2.5]\n[0.125, 0]');
+      final id = matMul([1, 0, 0, 0, 1, 0, 0, 0, 1], [2, 3, 4, 5, 6, 7, 8, 9, 10], 3);
+      expect(id, [2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    });
+
+    test('fmtNum trims zeros and never prints -0', () {
+      expect(fmtNum(2.0), '2');
+      expect(fmtNum(-0.00001), '0');
+      expect(fmtNum(1.23456789), '1.2346');
+    });
+
+    test('degree mode is honoured by the shared evaluator', () {
+      expect(evaluateCalculatorExpression('sin(30)', degrees: true), closeTo(0.5, 1e-12));
+      expect(evaluateCalculatorExpression('sin(30)').abs(), isNot(closeTo(0.5, 1e-3)));
     });
   });
 }

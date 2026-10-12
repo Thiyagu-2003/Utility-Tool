@@ -82,10 +82,14 @@ class _CurrencyConverterScreenState extends State<CurrencyConverterScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final amount = double.tryParse(_amountController.text.trim()) ?? 0;
+    final parsedAmount = double.tryParse(_amountController.text.trim());
+    // Non-finite input ("1e999") is treated as empty rather than shown as Infinity.
+    final amount = parsedAmount != null && parsedAmount.isFinite ? parsedAmount : 0.0;
     final converted = _convert(amount, _fromCurrency, _toCurrency);
 
     final formatter = NumberFormat('#,##0.00');
+    // Per-unit rates need more decimals: 1 JPY is 0.0065 USD, not 0.01.
+    final rateFormatter = NumberFormat('#,##0.00####');
     final formattedResult = '${_toCurrency.symbol} ${formatter.format(converted)}';
     final oneUnitRate = _convert(1, _fromCurrency, _toCurrency);
 
@@ -106,16 +110,16 @@ class _CurrencyConverterScreenState extends State<CurrencyConverterScreen> {
           ResultCard(
             title: '${_fromCurrency.code} to ${_toCurrency.code}',
             primaryResult: formattedResult,
-            subtitle: '1 ${_fromCurrency.code} = ${formatter.format(oneUnitRate)} ${_toCurrency.code} (Offline rate)',
+            subtitle: '1 ${_fromCurrency.code} = ${rateFormatter.format(oneUnitRate)} ${_toCurrency.code} (Offline rate)',
             accentColor: AppColors.catFinance,
             breakdowns: [
               BreakdownItem(
                 label: 'Base Rate (1 ${_fromCurrency.code})',
-                value: '${_toCurrency.symbol} ${formatter.format(oneUnitRate)}',
+                value: '${_toCurrency.symbol} ${rateFormatter.format(oneUnitRate)}',
               ),
               BreakdownItem(
                 label: 'Inverse (1 ${_toCurrency.code})',
-                value: '${_fromCurrency.symbol} ${formatter.format(_convert(1, _toCurrency, _fromCurrency))}',
+                value: '${_fromCurrency.symbol} ${rateFormatter.format(_convert(1, _toCurrency, _fromCurrency))}',
               ),
             ],
           ),
@@ -166,7 +170,7 @@ class _CurrencyConverterScreenState extends State<CurrencyConverterScreen> {
                 icon: Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: AppColors.catFinance.withOpacity(0.12),
+                    color: AppColors.catFinance.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.swap_horiz_rounded, color: AppColors.catFinance),
@@ -222,41 +226,56 @@ class _CurrencyConverterScreenState extends State<CurrencyConverterScreen> {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
             ),
-            child: ListView.separated(
+            child: Material(
+              type: MaterialType.transparency,
+              child: ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: _currencies.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
+              separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final curr = _currencies[index];
                 final convertedVal = _convert(amount, _fromCurrency, curr);
                 final isCurrent = curr.code == _toCurrency.code;
 
-                return ListTile(
-                  dense: true,
-                  leading: Text(curr.flag, style: const TextStyle(fontSize: 22)),
-                  title: Text(
-                    curr.name,
-                    style: TextStyle(
-                      fontWeight: isCurrent ? FontWeight.bold : FontWeight.w500,
-                      color: isCurrent ? AppColors.catFinance : null,
-                    ),
-                  ),
-                  subtitle: Text(curr.code),
-                  trailing: Text(
-                    '${curr.symbol} ${formatter.format(convertedVal)}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                      color: isCurrent ? AppColors.catFinance : null,
-                    ),
-                  ),
+                final accent = isCurrent ? AppColors.catFinance : null;
+                return InkWell(
                   onTap: () {
                     PreferencesService().triggerSelectionHaptic();
                     setState(() => _toCurrency = curr);
                   },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      children: [
+                        Text(curr.flag, style: const TextStyle(fontSize: 22)),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                curr.name,
+                                style: TextStyle(fontWeight: isCurrent ? FontWeight.bold : FontWeight.w500, color: accent),
+                              ),
+                              Text(curr.code, style: const TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            '${curr.symbol} ${formatter.format(convertedVal)}',
+                            textAlign: TextAlign.end,
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: accent),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 );
               },
+            ),
             ),
           ),
         ],

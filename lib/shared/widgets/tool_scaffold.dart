@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/localization/app_localizations.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
@@ -53,9 +54,13 @@ class ToolScaffold extends StatelessWidget {
           ),
         ),
         title: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
+            // Single line: a wrapped title pushes the badge past the 56dp toolbar.
             Text(
               title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
             ),
             const SizedBox(height: 2),
@@ -66,7 +71,7 @@ class ToolScaffold extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
-                category.label.toUpperCase(),
+                categoryLabel(context, category).toUpperCase(),
                 style: TextStyle(
                   color: category.color,
                   fontSize: 10,
@@ -105,7 +110,7 @@ class ToolScaffold extends StatelessWidget {
                 onReset!();
               },
             ),
-          if (actions != null) ...actions!,
+          ...?actions,
           const SizedBox(width: 8),
         ],
       ),

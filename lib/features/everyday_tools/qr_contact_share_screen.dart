@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/share_utils.dart';
 import '../../core/utils/vcard_utils.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 
@@ -76,7 +78,30 @@ class _QrContactShareScreenState extends State<QrContactShareScreen> {
     return _useMeCardFormat ? VCardUtils.generateMeCard(contact) : VCardUtils.generateVCard(contact);
   }
 
+  Future<void> _saveContactFile() async {
+    final contact = _buildContact();
+    if (contact.displayName.trim().isEmpty && _mobileController.text.trim().isEmpty && _emailController.text.trim().isEmpty) {
+      _toast('Enter a name, phone or email first.');
+      return;
+    }
+    final safeName = contact.displayName.trim().replaceAll(RegExp(r'[^A-Za-z0-9_-]+'), '_');
+    try {
+      // A .vcf file is always vCard, even when the on-screen QR uses MeCard.
+      final bytes = Uint8List.fromList(utf8.encode(VCardUtils.generateVCard(contact)));
+      await shareFileBytes(bytes, '${safeName.isEmpty ? 'Contact' : safeName}.vcf');
+    } catch (e) {
+      _toast('Could not save contact: $e');
+    }
+  }
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   void _showFullscreenQr(BuildContext context, String payload) {
+    // Dialog = screen - 40 (inset) - 48 (padding) - 32 (QR frame) - 2 (border).
+    final qrSize = (MediaQuery.sizeOf(context).width - 122).clamp(160.0, 260.0);
     showDialog(
       context: context,
       builder: (ctx) {
@@ -121,7 +146,7 @@ class _QrContactShareScreenState extends State<QrContactShareScreen> {
                   child: QrImageView(
                     data: payload,
                     version: QrVersions.auto,
-                    size: 260,
+                    size: qrSize,
                     backgroundColor: Colors.white,
                     eyeStyle: const QrEyeStyle(
                       eyeShape: QrEyeShape.square,
@@ -155,7 +180,7 @@ class _QrContactShareScreenState extends State<QrContactShareScreen> {
 
     return ToolScaffold(
       title: 'QR Contact Sharing',
-      category: ToolCategory.filesText,
+      category: ToolCategory.qrBarcode,
       toolId: 'qr_contact_share',
       isScrollable: false,
       body: SingleChildScrollView(
@@ -183,25 +208,29 @@ class _QrContactShareScreenState extends State<QrContactShareScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            contact.displayName,
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              contact.displayName,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                              ),
                             ),
-                          ),
-                          Text(
-                            _useMeCardFormat ? 'Format: MeCard' : 'Format: vCard 3.0 Standard',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+                            Text(
+                              _useMeCardFormat ? 'Format: MeCard' : 'Format: vCard 3.0 Standard',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                       IconButton.filledTonal(
                         icon: const Icon(Icons.fullscreen_rounded),
@@ -238,20 +267,24 @@ class _QrContactShareScreenState extends State<QrContactShareScreen> {
                   const SizedBox(height: 16),
 
                   // Actions row
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 10,
+                    runSpacing: 8,
                     children: [
                       OutlinedButton.icon(
                         icon: const Icon(Icons.copy_rounded, size: 16),
-                        label: const Text('Copy vCard Text'),
+                        label: Text(_useMeCardFormat ? 'Copy MeCard Text' : 'Copy vCard Text'),
                         onPressed: () {
                           Clipboard.setData(ClipboardData(text: payload));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('vCard data copied to clipboard!')),
-                          );
+                          _toast('Contact data copied to clipboard!');
                         },
                       ),
-                      const SizedBox(width: 10),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.person_add_alt_1_rounded, size: 16),
+                        label: const Text('Save Contact'),
+                        onPressed: _saveContactFile,
+                      ),
                       FilledButton.icon(
                         style: FilledButton.styleFrom(backgroundColor: AppColors.primaryOrange),
                         icon: const Icon(Icons.qr_code_scanner_rounded, size: 16),
@@ -272,13 +305,15 @@ class _QrContactShareScreenState extends State<QrContactShareScreen> {
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
               ),
-              child: SwitchListTile(
+              child: Material(
+                type: MaterialType.transparency,
+                child: SwitchListTile(
                 title: const Text('Compact MeCard Format', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                 subtitle: const Text('Use MeCard for compatibility with basic barcode scanners', style: TextStyle(fontSize: 12)),
                 value: _useMeCardFormat,
-                activeColor: AppColors.primaryOrange,
+                activeThumbColor: AppColors.primaryOrange,
                 onChanged: (val) => setState(() => _useMeCardFormat = val),
-              ),
+              )),
             ),
             const SizedBox(height: 20),
 

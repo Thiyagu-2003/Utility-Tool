@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/validation_utils.dart';
 import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
@@ -80,12 +81,8 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
 
   // 8. WATER TRACKER
   final _waterWeightCtrl = TextEditingController(text: '70');
-  int _waterLoggedTodayMl = 1250;
-  final List<String> _waterLogs = [
-    '250 ml (08:30 AM)',
-    '500 ml (11:15 AM)',
-    '500 ml (02:40 PM)',
-  ];
+  int _waterLoggedTodayMl = 0;
+  final List<String> _waterLogs = [];
 
   @override
   void dispose() {
@@ -113,27 +110,34 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
 
   // --- CALCULATION LOGIC ---
 
+  /// Parsed number, or null when blank/invalid/non-finite (no made-up defaults).
+  double? _n(TextEditingController c) {
+    final v = double.tryParse(c.text.trim().replaceAll(',', ''));
+    return v != null && v.isFinite ? v : null;
+  }
+
   // 1. Body Fat
   Map<String, dynamic> _calcBodyFat() {
-    final h = double.tryParse(_bfHeightCtrl.text) ?? 175;
-    final neck = double.tryParse(_bfNeckCtrl.text) ?? 38;
-    final waist = double.tryParse(_bfWaistCtrl.text) ?? 82;
-    final hip = double.tryParse(_bfHipCtrl.text) ?? 96;
+    final h = _n(_bfHeightCtrl);
+    final neck = _n(_bfNeckCtrl);
+    final waist = _n(_bfWaistCtrl);
+    final hip = _isMale ? 0.0 : _n(_bfHipCtrl);
 
-    if (h <= 0 || neck <= 0 || waist <= 0) {
-      return {'bf': 0.0, 'category': 'Invalid', 'color': Colors.grey};
+    if (h == null || neck == null || waist == null || hip == null || h <= 0 || neck <= 0 || waist <= 0 || (!_isMale && hip <= 0)) {
+      return {'bf': 0.0, 'category': 'Enter every measurement', 'color': Colors.grey};
     }
 
     double bf;
     if (_isMale) {
       final diff = waist - neck;
-      if (diff <= 0) return {'bf': 5.0, 'category': 'Athletic', 'color': AppColors.catHealth};
+      if (diff <= 0) return {'bf': 0.0, 'category': 'Waist must be larger than neck', 'color': Colors.grey};
       bf = 495 / (1.0324 - 0.19077 * (log(diff) / ln10) + 0.15456 * (log(h) / ln10)) - 450;
     } else {
       final sum = waist + hip - neck;
-      if (sum <= 0) return {'bf': 12.0, 'category': 'Athletic', 'color': AppColors.catHealth};
+      if (sum <= 0) return {'bf': 0.0, 'category': 'Waist + hip must be larger than neck', 'color': Colors.grey};
       bf = 495 / (1.29579 - 0.35004 * (log(sum) / ln10) + 0.22100 * (log(h) / ln10)) - 450;
     }
+    if (!bf.isFinite) return {'bf': 0.0, 'category': 'Measurements out of range', 'color': Colors.grey};
 
     bf = bf.clamp(3.0, 60.0);
     String category;
@@ -180,10 +184,10 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
 
   // 2. WHtR
   Map<String, dynamic> _calcWhtr() {
-    final waist = double.tryParse(_whtrWaistCtrl.text) ?? 80;
-    final height = double.tryParse(_whtrHeightCtrl.text) ?? 175;
-    if (height <= 0 || waist <= 0) {
-      return {'ratio': 0.0, 'status': 'Invalid', 'color': Colors.grey};
+    final waist = _n(_whtrWaistCtrl);
+    final height = _n(_whtrHeightCtrl);
+    if (height == null || waist == null || height <= 0 || waist <= 0) {
+      return {'ratio': 0.0, 'status': 'Enter waist and height', 'color': Colors.grey};
     }
 
     final ratio = waist / height;
@@ -209,19 +213,21 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
 
   // 3. Running Pace
   Map<String, dynamic> _calcRunningPace() {
-    final dist = double.tryParse(_paceDistCtrl.text) ?? 10;
-    final h = int.tryParse(_paceHoursCtrl.text) ?? 0;
-    final m = int.tryParse(_paceMinsCtrl.text) ?? 50;
-    final s = int.tryParse(_paceSecsCtrl.text) ?? 0;
+    final dist = _n(_paceDistCtrl) ?? 0;
+    // Blank hours/minutes/seconds simply count as 0.
+    final h = int.tryParse(_paceHoursCtrl.text.trim()) ?? 0;
+    final m = int.tryParse(_paceMinsCtrl.text.trim()) ?? 0;
+    final s = int.tryParse(_paceSecsCtrl.text.trim()) ?? 0;
 
     final totalSecs = (h * 3600) + (m * 60) + s;
     if (dist <= 0 || totalSecs <= 0) {
-      return {'pace': '0:00 /km', 'speed': '0.0 km/h', '5k': '--', '10k': '--', 'half': '--'};
+      return {'pace': '0:00 min/${_paceIsKm ? 'km' : 'mi'}', 'speed': '0.0 ${_paceIsKm ? 'km/h' : 'mph'}', '5k': '--', '10k': '--', 'half': '--', 'full': '--'};
     }
 
     final paceSecPerUnit = totalSecs / dist;
-    final paceMin = paceSecPerUnit ~/ 60;
-    final paceSec = (paceSecPerUnit % 60).round();
+    final paceRounded = paceSecPerUnit.round(); // round once so we never show "4:60"
+    final paceMin = paceRounded ~/ 60;
+    final paceSec = paceRounded % 60;
     final paceUnit = _paceIsKm ? 'km' : 'mi';
     final paceStr = '$paceMin:${paceSec.toString().padLeft(2, '0')} min/$paceUnit';
 
@@ -252,9 +258,9 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
 
   // 4. Step to Distance
   Map<String, dynamic> _calcSteps() {
-    final steps = int.tryParse(_stepCountCtrl.text) ?? 8000;
-    final height = double.tryParse(_stepHeightCtrl.text) ?? 175;
-    final weight = double.tryParse(_stepWeightCtrl.text) ?? 70;
+    final steps = int.tryParse(_stepCountCtrl.text.trim()) ?? 0;
+    final height = _n(_stepHeightCtrl) ?? 0;
+    final weight = _n(_stepWeightCtrl) ?? 0;
 
     // Stride length formula: height in cm * 0.415 for male, 0.413 for female
     final strideCm = height * 0.414;
@@ -274,12 +280,15 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
 
   // 5. Heart Rate Zones
   Map<String, dynamic> _calcHeartRateZones() {
-    final age = int.tryParse(_hrAgeCtrl.text) ?? 28;
-    final restHr = int.tryParse(_hrRestCtrl.text) ?? 65;
+    final age = int.tryParse(_hrAgeCtrl.text.trim());
+    final restHr = int.tryParse(_hrRestCtrl.text.trim());
+    const none = {'maxHr': '--', 'zone1': '--', 'zone2': '--', 'zone3': '--', 'zone4': '--', 'zone5': '--'};
+    if (age == null || restHr == null || age < 1 || age > 120 || restHr < 25) return none;
 
     // Tanaka Formula: Max HR = 208 - (0.7 * age)
     final maxHr = (208 - (0.7 * age)).round();
     final hrReserve = maxHr - restHr;
+    if (hrReserve <= 0) return none; // resting rate at or above max: zones are meaningless
 
     // Karvonen formula: Target = Rest + % * HRR
     int getZoneBpm(double pct) => (restHr + (pct * hrReserve)).round();
@@ -352,9 +361,12 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
 
   // 7. Macros & Protein
   Map<String, dynamic> _calcMacros() {
-    final weight = double.tryParse(_macroWeightCtrl.text) ?? 72;
-    final height = double.tryParse(_macroHeightCtrl.text) ?? 175;
-    final age = double.tryParse(_macroAgeCtrl.text) ?? 26;
+    final weight = _n(_macroWeightCtrl) ?? 0;
+    final height = _n(_macroHeightCtrl) ?? 0;
+    final age = _n(_macroAgeCtrl) ?? 0;
+    if (weight <= 0 || height <= 0 || age <= 0) {
+      return {'tdee': 0, 'target': 0, 'protein': 0, 'fat': 0, 'carbs': 0};
+    }
 
     // Mifflin-St Jeor BMR
     double bmr = (10 * weight) + (6.25 * height) - (5 * age) + (_isMale ? 5 : -161);
@@ -375,6 +387,8 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
     if (_macroGoal.contains('+250')) targetKcal += 250;
     if (_macroGoal.contains('+500')) targetKcal += 500;
 
+    targetKcal = max(0.0, targetKcal);
+
     // Protein: 2.0g per kg of body weight
     final proteinGrams = (weight * 2.0).round();
     final proteinKcal = proteinGrams * 4;
@@ -384,7 +398,7 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
     final fatGrams = (fatKcal / 9).round();
 
     // Carbs: remainder calories
-    final carbKcal = max(0, targetKcal - proteinKcal - fatKcal);
+    final carbKcal = max(0.0, targetKcal - proteinKcal - fatKcal);
     final carbGrams = (carbKcal / 4).round();
 
     return {
@@ -398,7 +412,7 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
 
   // 8. Water Tracker
   int _targetWaterMl() {
-    final weight = double.tryParse(_waterWeightCtrl.text) ?? 70;
+    final weight = ValidationUtils.safeParseDouble(_waterWeightCtrl.text);
     // Standard guideline: 35ml per kg body weight
     return (weight * 35).round();
   }
@@ -506,18 +520,18 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: ModernTextField(label: 'Height (cm)', controller: _bfHeightCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Height (cm)', controller: _bfHeightCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 10),
-            Expanded(child: ModernTextField(label: 'Neck (cm)', controller: _bfNeckCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Neck (cm)', controller: _bfNeckCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
           ],
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: ModernTextField(label: 'Waist at navel (cm)', controller: _bfWaistCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Waist at navel (cm)', controller: _bfWaistCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             if (!_isMale) ...[
               const SizedBox(width: 10),
-              Expanded(child: ModernTextField(label: 'Hip at widest (cm)', controller: _bfHipCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+              Expanded(child: ModernTextField(label: 'Hip at widest (cm)', controller: _bfHipCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             ],
           ],
         ),
@@ -545,14 +559,14 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
         ModernTextField(
           label: 'Waist Circumference (cm)',
           controller: _whtrWaistCtrl,
-          keyboardType: TextInputType.number,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 12),
         ModernTextField(
           label: 'Height (cm)',
           controller: _whtrHeightCtrl,
-          keyboardType: TextInputType.number,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 16),
@@ -596,7 +610,7 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
               child: ModernTextField(
                 label: 'Distance',
                 controller: _paceDistCtrl,
-                keyboardType: TextInputType.number,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 onChanged: (_) => setState(() {}),
               ),
             ),
@@ -631,8 +645,14 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
             _splitBadge('5K', res['5k'] as String, isDark),
             const SizedBox(width: 8),
             _splitBadge('10K', res['10k'] as String, isDark),
-            const SizedBox(width: 8),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
             _splitBadge('Half Marathon', res['half'] as String, isDark),
+            const SizedBox(width: 8),
+            _splitBadge('Full Marathon', res['full'] as String, isDark),
           ],
         ),
       ],
@@ -682,9 +702,9 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: ModernTextField(label: 'Your Height (cm)', controller: _stepHeightCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Your Height (cm)', controller: _stepHeightCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 10),
-            Expanded(child: ModernTextField(label: 'Your Weight (kg)', controller: _stepWeightCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Your Weight (kg)', controller: _stepWeightCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
           ],
         ),
         const SizedBox(height: 12),
@@ -796,8 +816,10 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
             ],
           ),
         ),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 12,
+          runSpacing: 8,
           children: [
             ElevatedButton.icon(
               icon: Icon(_isTimerRunning ? Icons.pause_rounded : Icons.play_arrow_rounded),
@@ -809,7 +831,6 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
               ),
               onPressed: _isTimerRunning ? _pauseTimer : _startTimer,
             ),
-            const SizedBox(width: 12),
             OutlinedButton.icon(
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('Reset'),
@@ -822,6 +843,7 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
           children: [
             Expanded(
               child: DropdownButtonFormField<int>(
+                isExpanded: true,
                 initialValue: _timerWorkSec,
                 decoration: InputDecoration(labelText: 'Work Interval', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                 items: [15, 20, 30, 40, 45, 60].map((s) => DropdownMenuItem(value: s, child: Text('${s}s'))).toList(),
@@ -831,6 +853,7 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
             const SizedBox(width: 8),
             Expanded(
               child: DropdownButtonFormField<int>(
+                isExpanded: true,
                 initialValue: _timerRestSec,
                 decoration: InputDecoration(labelText: 'Rest Interval', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                 items: [10, 15, 20, 30, 45].map((s) => DropdownMenuItem(value: s, child: Text('${s}s'))).toList(),
@@ -840,10 +863,14 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
             const SizedBox(width: 8),
             Expanded(
               child: DropdownButtonFormField<int>(
+                isExpanded: true,
                 initialValue: _timerSets,
                 decoration: InputDecoration(labelText: 'Sets / Rounds', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                 items: [3, 4, 5, 8, 10, 12].map((s) => DropdownMenuItem(value: s, child: Text('$s sets'))).toList(),
-                onChanged: _isTimerRunning ? null : (v) => setState(() => _timerSets = v ?? 5),
+                onChanged: _isTimerRunning ? null : (v) => setState(() {
+                  _timerSets = v ?? 5;
+                  if (_timerCurrentSet > _timerSets) _timerCurrentSet = _timerSets;
+                }),
               ),
             ),
           ],
@@ -876,17 +903,36 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
           ],
         ),
         const SizedBox(height: 16),
+        Wrap(
+          spacing: 8,
+          children: [
+            ChoiceChip(
+              avatar: const Icon(Icons.male_rounded, size: 18),
+              label: const Text('Male'),
+              selected: _isMale,
+              onSelected: (_) => setState(() => _isMale = true),
+            ),
+            ChoiceChip(
+              avatar: const Icon(Icons.female_rounded, size: 18),
+              label: const Text('Female'),
+              selected: !_isMale,
+              onSelected: (_) => setState(() => _isMale = false),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: ModernTextField(label: 'Weight (kg)', controller: _macroWeightCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Weight (kg)', controller: _macroWeightCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 8),
-            Expanded(child: ModernTextField(label: 'Height (cm)', controller: _macroHeightCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Height (cm)', controller: _macroHeightCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 8),
-            Expanded(child: ModernTextField(label: 'Age', controller: _macroAgeCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+            Expanded(child: ModernTextField(label: 'Age', controller: _macroAgeCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}))),
           ],
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
+          isExpanded: true,
           initialValue: _macroActivity,
           decoration: InputDecoration(labelText: 'Activity Level', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
           items: [
@@ -900,6 +946,7 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
+          isExpanded: true,
           initialValue: _macroGoal,
           decoration: InputDecoration(labelText: 'Fitness Goal', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
           items: [
@@ -951,12 +998,29 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
           accentColor: Colors.blue,
         ),
         const SizedBox(height: 16),
-        LinearProgressIndicator(
-          value: pct,
-          minHeight: 10,
-          borderRadius: BorderRadius.circular(8),
-          color: Colors.blue,
-          backgroundColor: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+        Center(
+          child: SizedBox(
+            width: 140,
+            height: 140,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                CircularProgressIndicator(
+                  value: pct,
+                  strokeWidth: 12,
+                  strokeCap: StrokeCap.round,
+                  color: Colors.blue,
+                  backgroundColor: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                ),
+                Center(
+                  child: Text(
+                    '${(pct * 100).toStringAsFixed(0)}%',
+                    style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
         const SizedBox(height: 16),
         Row(
@@ -976,7 +1040,7 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
               child: ModernTextField(
                 label: 'Weight (kg) to adjust target',
                 controller: _waterWeightCtrl,
-                keyboardType: TextInputType.number,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 onChanged: (_) => setState(() {}),
               ),
             ),
@@ -998,7 +1062,7 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: _waterLogs.length,
-            separatorBuilder: (_, index) => const SizedBox(height: 6),
+            separatorBuilder: (_, _) => const SizedBox(height: 6),
             itemBuilder: (context, idx) {
               return Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

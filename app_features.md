@@ -1,15 +1,37 @@
 # App Features & Release Status
 
-> **Release Version**: `1.0.88` (Build `#88`)  
+> **Release Version**: `1.0.89` (Build `#89`)  
 > **Status**: Production Ready & Fully Tested (Pure Offline Client)  
-> **Total Built-in Tools**: 49 Registered Offline Tools  
+> **Total Built-in Tools**: 50 Registered Offline Tools  
 > **Architecture**: Pure Offline Flutter Client with Dynamic Scaling & Multi-Language Support (English, தமிழ், हिंदी, Español)
 
 Here is the comprehensive list of features currently implemented in the app, categorized by domain and screen toolkit:
 
+### Tool Categories (18, in default home order — `ToolCategory` enum)
+| Category | Registered tools |
+|---|---|
+| Percentage Calculation | Percentage Calculator (Scientific Calculator is its own bottom tab) |
+| Convert | Unit Converter |
+| Date & Time | Age, Date Difference, Duration Converter, Productivity & Organization Suite |
+| Finance | GST, Loan EMI, Discount, Currency, Interest, Tip & Split Bill |
+| Health | Health & Fitness Suite, Health & Fitness Calculator |
+| Education | Academic & Education Suite, GPA & CGPA Calculator |
+| Home & Travel | Home, Construction & Travel Suite, Electricity Bill |
+| PDF & Documents | Advanced PDF Toolkit, Photo to PDF, Office & Advanced PDF Suite, Document Scanner |
+| Image & Photo | Image Toolkit, Photo Studio & Editor, Image Collage Maker |
+| Compression & Archives | File & ZIP Suite, Archive, Diff & Preview Studio |
+| Text & Writing | Text & Words Analyzer, Text Diff & Cleaner, Markdown Editor & Preview, OCR & Voice Studio |
+| Audio & Video | Audio & Video Studio |
+| QR & Barcode | QR & Barcode Suite, QR Contact & vCard Share |
+| Developer | Developer Suite, XML & YAML Formatter |
+| Device & Hardware | Device & Hardware Studio, Compass & Spirit Level, Sensor Tester, Battery Status, Mic & Speaker Tester, Touchscreen Digitizer Test, Screen Color & Pixel Test, Vibration & Haptics Tester, Screen Refresh Rate & Specs, Sound-Level (dB) Estimator |
+| Security | Password & Security Generator |
+| Kitchen | Kitchen & Recipe Tools |
+| More Tools | Slate, Randomizer & Dice Roll |
+
 ---
 
-## 1. Calculate
+## 1. Percentage Calculation
 - [x] **Scientific Calculator** (`CalculatorScreen`):
   - Full scientific keypad with trigonometric functions (`sin`, `cos`, `tan`), logarithms (`ln`, `log`), square root (`√`), powers (`^`), reciprocals (`1/x`), factorials (`x!`), and constants ($\pi$, $e$)
   - Angle mode toggle: **Degree (DEG)** and **Radian (RAD)**
@@ -39,6 +61,7 @@ Here is the comprehensive list of features currently implemented in the app, cat
 - [x] **Permutation & Combination** (in `AcademicToolkitScreen`):
   - $nPr$ (Permutations) and $nCr$ (Combinations) with factorial formula breakdowns
 
+
 ---
 
 ## 2. Convert
@@ -51,7 +74,8 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - **Speed**: Meter/second (m/s), Kilometer/hour (km/h), Miles/hour (mph), Knot (kn)
   - **Data Storage**: Byte (B), Kilobyte (KB), Megabyte (MB), Gigabyte (GB), Terabyte (TB), Petabyte (PB)
 - [x] **Land Area Converter** (in `HomeTravelToolkitScreen`):
-  - Cross-conversion for regional and international land measurement units: Acres, Cents, Hectares, Square Feet, Square Meters, Guntha, Ground, Bigha
+  - Cross-conversion for regional and international land measurement units: Acres, Cents, Hectares, Square Feet, Square Meters, Guntha, Ground, Bigha (generic 27,000 sq ft, plus labelled regional values: UP east/Bihar/Rajasthan pucca 27,225, West Bengal/Assam 14,400, Rajasthan kaccha 17,424, Himachal 8,712)
+
 
 ---
 
@@ -70,6 +94,7 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - Decomposed human-readable breakdown (days, hours, minutes, seconds)
   - Total duration equivalent conversions across all time units
 
+
 ---
 
 ## 4. Finance
@@ -82,7 +107,7 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - Tenure toggle: Months or Years
   - Complete amortization breakdown with principal vs interest ratio
 - [x] **Discount Calculator** (`DiscountCalculatorScreen`):
-  - Original price, discount %, and sales tax rate
+  - Original price, discount %, and optional sales tax rate (applied to the discounted price)
   - Multi-tier stackable promo discount code simulation
   - Final price to pay and total savings breakdown
 - [x] **Currency Converter** (`CurrencyConverterScreen`):
@@ -100,6 +125,7 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - **By Monthly Units (kWh)**: Units consumed, rate per unit, fixed charges, and electricity duty / tax %
   - **By Appliance Usage**: Pre-configured appliance wattage presets (AC, Refrigerator, Geyser, Fan, TV, Washing Machine, Microwave, PC, LED Bulb) with hours per day and quantity calculation
 
+
 ---
 
 ## 5. Health & Fitness
@@ -115,8 +141,9 @@ Here is the comprehensive list of features currently implemented in the app, cat
 - [x] **Health & BMI Calculator** (`HealthCalculatorScreen`):
   - Body Mass Index (BMI) calculation with category classifications (Underweight, Normal, Overweight, Obese)
   - Basal Metabolic Rate (BMR) using Mifflin-St Jeor equation
-  - Ideal Body Weight range using Devine formula
+  - Ideal Body Weight by the Devine (headline), Robinson, Miller and Hamwi formulas, plus the healthy BMI (18.5-24.9) range
   - Daily maintenance calorie requirements
+
 
 ---
 
@@ -135,6 +162,7 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - Dynamic course ledger with credit weights and grade selection (O, A+, A, B+, B, C, F)
   - Cumulative GPA calculation and total credit accumulation
 
+
 ---
 
 ## 7. Home, Construction & Travel
@@ -144,7 +172,7 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - **Paint Quantity Calculator**: Room length, width, height, deductions for doors/windows, number of coats & paint required in Liters/Gallons
   - **Tile and Flooring Calculator**: Room dimensions, tile dimensions, wastage % buffer, total tiles needed & box counts
   - **Concrete and Cement Estimator**: Slab/footing length, width, thickness, mix designs (1:2:4, 1:1.5:3, 1:3:6), 50kg cement bags, sand & gravel volume
-  - **Land Area Converter**: Instant cross-conversion for Acres, Cents, Hectares, Square Feet, Square Meters, Guntha, Ground, Bigha
+  - **Land Area Converter**: Instant cross-conversion for Acres, Cents, Hectares, Square Feet, Square Meters, Guntha, Ground and Bigha (bigha varies by state, so regional values are listed separately)
   - **Water Tank Capacity**: Rectangular and cylindrical water tank volume in Liters, US Gallons, and Cubic Meters
   - **Appliance Electricity Consumption**: Appliance wattage (Watts), daily hours used, electricity rate -> daily, monthly, and annual costs
   - **Travel Budget Splitter**: Group expense ledger with payer tracking and automated minimal debt settlements
@@ -152,18 +180,10 @@ Here is the comprehensive list of features currently implemented in the app, cat
 - [x] **Electricity Bill Estimator** (`ElectricityBillScreen`):
   - Monthly energy bill estimates by consumption units or household appliance inventory
 
+
 ---
 
-## 8. Files, Text & Media Tools
-- [x] **Photo Studio & Editor** (`PhotoEditorScreen`, `PhotoEditorService`):
-  - **Remove Image Background**: Pure offline chroma and border flood-fill eraser with adjustable tolerance threshold (5-80%) and sample background color presets
-  - **Change Image Background Color**: Replace transparent cutouts with solid studio colors or designer linear gradients (Sunset Glow, Ocean Blue, Neon Dusk, Mint Fresh, Dark Metal, Golden Sun)
-  - **Brightness, Contrast, Saturation & Sharpness Editor**: Fine-tuned image adjustments: Brightness (-100% to +100%), Contrast, Saturation, Sharpness (via unsharp convolution kernel), Exposure/Gamma, and Vignette lens
-  - **Photo Filters & Effects**: 12 cinematic grading presets (Original, Vintage 70s, Sepia, B&W Monochrome, Film Noir, Warm Sun, Cool Ice, Cyberpunk Neon, Emerald Forest, HDR Pop, Pixelate, Invert Negative)
-  - **Blur Faces or Selected Area**: Interactive privacy & censorship tool with Gaussian Blur or Mosaic Pixelate boxes, adjustable blur intensity, and multi-box placement
-  - **Draw and Annotate Image**: Freehand drawing canvas with Pen, Highlighter, Arrow with arrowhead, Rectangle, Circle, Line, color palette, adjustable stroke width, Undo, Redo, Clear, and high-res export
-  - **Add Text and Custom Logos**: Draggable typography with font size slider, color picker, and background badge; overlay PNG watermark logos with scale factor, opacity, and 9-grid position anchors
-
+## 8. PDF & Documents
 - [x] **Office & Advanced PDF Suite** (`OfficePdfToolkitScreen`, `OfficeDocumentService`):
   - **Word to PDF**: Convert `.docx` Word documents into styled, paginated PDF documents with headings, paragraphs, and page numbers
   - **Excel to PDF**: Convert `.xlsx`, `.csv`, or tabular spreadsheets into landscape PDF tables with zebra striping and custom headers
@@ -179,7 +199,10 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - **PDF Comparison Tool**: Side-by-side comparison of Document A and Document B with page count diff, line-by-line revision tracking (+ added, - removed), and similarity % score
 
 - [x] **Advanced PDF Toolkit** (`PdfToolkitScreen`):
-  - **Images to PDF**: Convert multi-image selections into clean PDFs with page format (A4, Letter, Legal), portrait/landscape, custom page numbers, and naming
+  - **Photo to PDF** (also its own `photo_to_pdf` hub entry, opening this tab): Convert photos into a PDF
+    - **Auto-Crop Photos** (on by default, Android): photos go through Google's ML Kit document scanner with gallery import, which detects the document edges and crops and straightens each photo. **Pick from Gallery (no crop)** adds photos as they are.
+    - **Auto-fit page to image** (on by default): each page takes its photo's shape, so there's no letterboxing. Blank white or black borders are trimmed automatically. Turn it off to use A4, Letter or Legal in portrait or landscape.
+    - Long-press and drag to reorder thumbnails, remove single photos, optional page numbers, and a custom file name. Photo processing runs off the UI thread.
   - **Text to PDF**: Multi-page flowing text document generator with custom title, author, and diagonal confidentiality watermark
   - **Merge PDFs**: Combine multiple PDF files into one with total combined page count tracking
   - **Split PDF**: Extract page subsets by range or comma-separated page numbers (e.g., `1-3, 5, 8-10`)
@@ -190,9 +213,31 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - **Sign & Stamp**: Place digital signature drawings or official approval/confidential stamps onto document pages
   - **Fill Forms**: Inspect and modify interactive fillable form fields in PDF documents
   - **PDF to Text**: Extract raw text content directly from PDF pages with clipboard copy
+
+- [x] **Document Scanner** (`DocumentScannerScreen`, `ScanPdfService`):
+  - **Scan with Auto-Crop** (Android with Google Play services): launches Google's ML Kit document scanner, which provides automatic edge detection, perspective correction, manual crop handles, rotation, its own cleanup filters and gallery import. It takes up to 50 pages per session, and the scanned pages are added to the document.
+  - **Fallback**: on devices without the scanner (or other platforms), **Import Photos** adds pages from the gallery. If the scanner fails it says so and switches to photo import. Cancelling the scanner is silent.
+  - **Page management**: numbered thumbnail grid with long-press drag to reorder. Tap a thumbnail to edit it and tap the preview to view it full screen with pinch-zoom. Each page can be rotated, retaken (replaced) or deleted.
+  - **Filters** (per page, plus **Apply to all pages**): Original, Magic Color (shadow removal + contrast/saturation boost), No Shadow (lighting flattened to white paper), Grayscale, and B&W (adaptive threshold that stays clean in shadows). Filters re-render from the original capture in a background isolate.
+  - **Export options**: file name (default `Scan_yyyyMMdd_HHmm`), page size (Fit to image / A4 / Letter, auto-oriented), margins (None / Small), image quality (High / Medium / Small with estimated file size), optional **searchable text (OCR)** using on-device ML Kit text recognition as an invisible, positioned text layer, and optional **password protection** (AES-256). The PDF is shared through the system share sheet.
+  - **ID Card Scanner Mode**: front and back captured with the auto-crop scanner (one page each, photo import as fallback) and laid out on a single A4 page
+  - **Digital Signature Pad**: touch/stylus canvas that holds the gesture so the page doesn't scroll while signing, three pen colours, undo/clear, and PNG export
+
+---
+
+## 9. Image & Photo
+- [x] **Photo Studio & Editor** (`PhotoEditorScreen`, `PhotoEditorService`):
+  - **Remove Image Background**: Pure offline chroma and border flood-fill eraser with adjustable tolerance threshold (5-80%) and sample background color presets
+  - **Change Image Background Color**: Replace transparent cutouts with solid studio colors or designer linear gradients (Sunset Glow, Ocean Blue, Neon Dusk, Mint Fresh, Dark Metal, Golden Sun)
+  - **Brightness, Contrast, Saturation & Sharpness Editor**: Fine-tuned image adjustments: Brightness (-100% to +100%), Contrast, Saturation, Sharpness (via unsharp convolution kernel), Exposure/Gamma, and Vignette lens
+  - **Photo Filters & Effects**: 12 cinematic grading presets (Original, Vintage 70s, Sepia, B&W Monochrome, Film Noir, Warm Sun, Cool Ice, Cyberpunk Neon, Emerald Forest, HDR Pop, Pixelate, Invert Negative)
+  - **Blur Faces or Selected Area**: Interactive privacy & censorship tool with Gaussian Blur or Mosaic Pixelate boxes, adjustable blur intensity, and multi-box placement
+  - **Draw and Annotate Image**: Freehand drawing canvas with Pen, Highlighter, Arrow with arrowhead, Rectangle, Circle, Line, color palette, adjustable stroke width, Undo, Redo, Clear, and export drawn onto the full-resolution photo (up to 4096 px on the long side)
+  - **Add Text and Custom Logos**: Overlay text at the bottom-left (size slider scales with the photo, optional background badge) and a logo image with scale factor, opacity, and a 3x3 position grid
+
 - [x] **Image Toolkit** (`ImageToolkitScreen`):
-  - **Image Compression**: Quality slider, target dimensions, real-time file size comparison
-  - **Format Conversion**: Convert images between JPG, PNG, WebP, BMP, and GIF formats
+  - **Image Compression**: JPEG quality slider (re-encodes once you release it) with original-vs-compressed size comparison; use Resize & Crop for dimensions
+  - **Format Conversion**: Convert images between JPG, PNG, BMP, and GIF formats (WebP files can be opened as input but cannot be written)
   - **Resize & Crop**: Custom pixel dimensions or aspect ratio presets (1:1, 16:9, 4:3, 9:16) with aspect lock
   - **Rotate & Flip**: 90°, 180°, 270° rotation, horizontal mirror flip, vertical mirror flip
   - **Combine & Stitch**: Stitch multiple images horizontally, vertically, or in a 2×2 grid layout
@@ -200,33 +245,16 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - **EXIF Metadata Stripper**: Strip privacy-sensitive GPS coordinates, camera models, lens info, and timestamps
   - **Photo Watermark**: Add custom text watermarks with position (Center, Bottom Right, Top Left) and opacity controls
   - **Passport Photo Maker**: Generate single passport photos and printable multi-copy 4×6 photo sheets (2, 4, 6, 8 copies)
+
 - [x] **Image Collage Maker** (`CollageMakerScreen`):
   - Select 2 to 9 photos from gallery
   - Dynamic grid layouts (2×1, 1×2, 2×2, 3×1, 3×2, 3×3)
   - Custom border spacing, margins, and canvas background colors
   - High-res image rendering and export
-- [x] **Audio & Video Studio** (`MediaToolsScreen`):
-  - **Audio Trimmer**: Waveform timeline, start/end range sliders, playback toggle, and trimmed duration calculation
-  - **Video Compressor & Trimmer**: Resolution presets (480p, 720p, 1080p), bitrate slider, duration trimmer, and compression ratio estimation
-- [x] **OCR & Voice Studio** (`OcrToolkitScreen`):
-  - **Photo OCR**: On-device machine learning text extraction from camera or gallery images using Google ML Kit
-  - **Table to CSV**: Recognize tabular structures in image documents and export directly to structured CSV
-  - **Smart Contact & Entity Extractor**: Automatically extract emails, phone numbers, URLs, dates, and currency amounts with copy actions
-  - **Text-to-Speech (TTS)**: Natural voice speech synthesis with speech rate, pitch controls, and playback toggle
-  - **Voice to Text (STT)**: Real-time microphone dictation speech recognition
-  - **OCR to PDF**: Generate structured, printable PDF documents directly from recognized OCR text
-- [x] **Document Scanner** (`DocumentScannerScreen`):
-  - **Multi-Page Scanner**: Camera/gallery page capture with live Color, Grayscale, and B&W high-contrast document filters, page rotation
-  - **ID Card Scanner Mode**: Front & back card capture aligned on a single 2-sided identity card layout document
-  - **Digital Signature Pad**: Touch/stylus drawing canvas, stroke clearing, and PNG signature export
-  - **Export to PDF**: Compile scanned pages into a multi-page PDF document
-- [x] **Text Diff & Cleaner** (`TextDiffCleanerScreen`):
-  - **Text Diff & Comparison**: Side-by-side and line-by-line comparison with color-coded additions (+), deletions (-), unchanged lines, and unified diff copy
-  - **Duplicate Line Remover**: Deduplication with case sensitivity toggle, whitespace trimming, blank line removal, and sorting (original order, alphabetical, line length)
-- [x] **Markdown Editor & Preview** (`MarkdownEditorScreen`):
-  - Live dual-tab editor and rendered markdown preview
-  - Formatting toolbar: Headings (H1-H3), Bold, Italic, Strikethrough, Inline Code, Code Block, Blockquote, Bullet List, Numbered List, Task Checklist, Tables, Links
-  - Document character/word metrics and `.md` file export
+
+---
+
+## 10. Compression & Archives
 - [x] **File & ZIP Suite** (`FileZipToolkitScreen`):
   - **Create ZIP**: Archive multiple files and folders into custom `.zip` files with compression statistics
   - **Extract ZIP**: Inspect ZIP archives, view contents, and extract/share individual files
@@ -236,6 +264,7 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - **Duplicate File Finder**: Identify duplicate files via byte-level cryptographic checksum matches
   - **File Metadata Inspector**: Inspect file headers, magic bytes, file extensions, MIME types, and sizes
   - **CSV ⇄ JSON Converter**: Two-way converter between tabular CSV and JSON arrays with custom indent formatting
+
 - [x] **Archive, Diff & Preview Studio** (`ArchivePreviewToolkitScreen` & `ArchiveCompareService`):
   - **TAR Archive Creation & Extraction**:
     - Package multiple files into standard POSIX `.tar` archives with permission preservation
@@ -265,39 +294,125 @@ Here is the comprehensive list of features currently implemented in the app, cat
       - **Markdown**: Formatted rich preview via `flutter_markdown`
       - **PDF Documents**: Document preview via Flutter Printing layout engine
       - **Binary / Hex Dump**: 16-byte formatted hexadecimal dump with byte offsets and ASCII representation column
+
+---
+
+## 11. Text & Writing
 - [x] **Text & Words Analyzer** (`TextAnalyzerScreen`):
   - Real-time metrics: words, total characters, characters without spaces, sentences, paragraphs
   - Estimated reading time computation (~200 wpm)
   - One-touch case transformations: UPPERCASE, lowercase, Title Case, kebab-case (slug), clean extra spaces
 
+- [x] **Text Diff & Cleaner** (`TextDiffCleanerScreen`):
+  - **Text Diff & Comparison**: Side-by-side and line-by-line comparison with color-coded additions (+), deletions (-), unchanged lines, and unified diff copy
+  - **Duplicate Line Remover**: Deduplication with case sensitivity toggle, whitespace trimming, blank line removal, and sorting (original order, alphabetical, line length)
+
+- [x] **Markdown Editor & Preview** (`MarkdownEditorScreen`):
+  - Live dual-tab editor and rendered markdown preview
+  - Formatting toolbar: Headings (H1-H3), Bold, Italic, Strikethrough, Inline Code, Code Block, Blockquote, Bullet List, Numbered List, Task Checklist, Tables, Links
+  - Document character/word metrics and `.md` file export
+
+- [x] **OCR & Voice Studio** (`OcrToolkitScreen`):
+  - **Photo OCR**: On-device machine learning text extraction from camera or gallery images using Google ML Kit
+  - **Table to CSV**: Recognize tabular structures in image documents and export directly to structured CSV
+  - **Smart Contact & Entity Extractor**: Automatically extract emails, phone numbers, URLs, dates, and currency amounts with copy actions
+  - **Text-to-Speech (TTS)**: Natural voice speech synthesis with speech rate, pitch controls, and playback toggle
+  - **Voice to Text (STT)**: Real-time microphone dictation speech recognition
+  - **OCR to PDF**: Generate structured, printable PDF documents directly from recognized OCR text
+
 ---
 
-## 9. Developer & QR Suite
+## 12. Audio & Video
+- [x] **Audio & Video Studio** (`MediaToolsScreen`):
+  - **WAV Audio Trimmer**: Real trimming of uncompressed (PCM) `.wav` files in pure Dart: reads the true duration, sample rate and channels from the file header, draws a waveform from the actual samples, and writes a new, valid `.wav` for the chosen start/end. MP3, AAC, M4A and other compressed formats are not supported (cutting them needs an audio codec), and there is no playback
+  - **Video Size Planner** (planner only, never re-encodes): reads the real file size of the picked video; you enter its length (mm:ss) because the app cannot read it; choose a resolution preset and bitrate and a part to keep, and it estimates the resulting size (video bitrate plus 128 kbps audio) and the video's current average bitrate, and exports that plan as a `.txt` for use in a video editor or converter
+
+---
+
+## 13. QR & Barcode
 - [x] **QR & Barcode Suite** (`QrBarcodeToolkitScreen`):
   - **Live Camera & Image Scanner**: Real-time scanner with camera flip, torch toggle, and gallery image scanner
-  - **QR Code Generator**: Custom colors, background colors, error correction levels (L, M, Q, H), and copy/share actions
+  - **QR Code Generator**: Custom foreground and background colors, error correction levels (L, M, Q, H), and PNG share (solid background with quiet-zone margin)
   - **Wi-Fi QR Generator**: Network credentials sharing (WPA/WPA2, WEP, Open, SSID, hidden network flag)
   - **Contact & Web QR**: vCard format, URL, Email, Phone, SMS, Geolocation coordinates
   - **Barcode Generator**: 1D and 2D barcodes (Code 128, Code 39, EAN-13, EAN-8, UPC-A, ISBN, Aztec, PDF417)
   - **Bulk QR Generator**: Batch generate QR codes from lists and export to printable multi-page PDF sheets
   - **Persistent Scan History**: Local storage log of scanned QR/barcodes with timestamps and one-tap re-use
+
+- [x] **QR-Based Contact Sharing** (`QrContactShareScreen`, `VCardUtils`):
+  - RFC 2426 compliant vCard 3.0 and NTT DoCoMo MeCard generator
+  - Fields for Name, Organization, Job Title, Mobile Phone, Work Phone, Email, Address, Website URL, and Notes
+  - Real-time high-resolution QR code rendering with logo overlay and crisp data modules
+  - Fullscreen enlarged QR mode for effortless camera scanning by other smartphones
+  - One-tap "Copy vCard Text", "Save Contact" (shares a .vcf file) and "Clear Fields"
+
+---
+
+## 14. Developer
+- [x] **Developer Suite** (`DevToolsScreen`):
+  - **JSON Formatter & Minifier**: Prettify indented JSON or minify to compact string with syntax validation
+  - **Base64 & URL Tool**: Text to Base64 encode/decode and URL percent-encoding/decoding
+  - **UUID v4 Generator**: Cryptographically secure UUID generation
+  - **Color Code Converter**: HEX ⇄ RGB converter (type a hex code or R/G/B values, either updates the other) with color swatch preview
+
 - [x] **XML & YAML Formatter** (`XmlYamlFormatterScreen`):
   - XML beautifier with custom indentation and minification
-  - YAML / JSON beautifier, validation, and parser error detection
+  - JSON beautifier with full validation; YAML gets a structural check for common syntax (tab indentation, bad indentation, duplicate keys, missing `:`, unterminated quotes, unclosed brackets) plus whitespace cleanup. It is not a full YAML parser.
+
+---
+
+## 15. Device & Hardware
 - [x] **Device & Hardware Studio** (`DeviceHardwareToolkitScreen`):
   - **Device Info Viewer**: Device model, brand, manufacturer, OS version, SDK build, screen resolution, DPR, hardware specs & PDF/Text spec report export
   - **Digital Magnetic Compass**: Rotating 360° compass rose with heading degrees and cardinal orientation (N, NE, E, SE, S, SW, W, NW)
   - **Spirit Bubble Level & Inclinometer**: 2D circular bubble surface level, pitch and roll angles with zero-calibration
   - **Sensor Diagnostic Tester**: Real-time 3-axis streams for Accelerometer ($m/s^2$ and total $g$), Gyroscope ($rad/s$), Magnetometer ($\mu T$), and shake detector
-- [x] **Developer Suite** (`DevToolsScreen`):
-  - **JSON Formatter & Minifier**: Prettify indented JSON or minify to compact string with syntax validation
-  - **Base64 & URL Tool**: Text to Base64 encode/decode and URL percent-encoding/decoding
-  - **UUID v4 Generator**: Cryptographically secure UUID generation
-  - **Color Code Converter**: HEX ⇄ RGB converter with color swatch preview and quick material color palette
+
+- [x] **Battery Status** (`BatteryDisplayInfoScreen`):
+  - Real-time battery percentage with dynamic visual gauge and color thresholds
+  - Power charging status: Charging, Discharging, Fully Charged, and Connected state via `battery_plus`
+  - Low Power Mode / Battery Saver detection (`isInBatterySaveMode`)
+  - Live charge level (refreshed every 30 s), power source and power-saver state. Battery health, voltage and temperature are not exposed to apps by Android, so the screen says so instead of showing invented values
+  - Battery longevity care guide & dark mode power savings recommendations
+
+- [x] **Microphone and Speaker Tester** (`MicSpeakerTesterScreen`):
+  - **Speaker Hardware Testing**:
+    - Voice playback, count 1 to 10, and Low / Normal / High pitch voice to check audibility (text-to-speech cannot pan, so this does not test stereo balance or exact frequencies)
+    - Full volume output clarity test for bottom loudspeaker and earpiece
+  - **Microphone Hardware Testing**:
+    - Real-time sound level input meter indicator during recording
+    - Speech recognition capture and loopback audio transcription to verify mic input clarity
+    - Hardware responsiveness and audio input permission diagnostics
+
+- [x] **Touchscreen Test** (`TouchscreenTestScreen`):
+  - **Digitizer Grid Coverage Test**: Full-screen 160-cell (10×16) digitizer matrix where every touched cell lights up green with haptic buzz to pinpoint touchscreen dead zones
+  - **Multi-Touch Pointer Tracker**: Tracks simultaneous multi-finger touches (1 to 10 fingers) with live pointer coordinate HUD $(X, Y)$ and color-coded touch trails
+
+- [x] **Screen Color Test** (`ScreenColorTestScreen`):
+  - Immersive fullscreen inspection hiding all system UI bars
+  - 10 standard diagnostic test patterns: Pure Red, Pure Green, Pure Blue, Pure White, Pure Black (OLED burn-in & backlight bleed), Neutral 50% Gray, Cyan, Magenta, Yellow, and 256-level Grayscale Gradient
+  - Tap, double-tap, and swipe controls with dead pixel identification guidelines
+
+- [x] **Vibration Tester** (`VibrationTesterScreen`):
+  - Standard tactile haptic engine testing: Light Impact, Medium Impact, Heavy Impact, Selection Click, and Standard Motor Vibrate
+  - Continuous rhythmic patterns: Heartbeat (Lub-Dub), SOS Emergency Morse Code (`... --- ...`), Rapid Pulse (10 Hz), and Gaming Rumble
+  - Animated visual ripple wave synchronized with vibration motor pulses
+
+- [x] **Screen Refresh-Rate Information, Where Available** (`BatteryDisplayInfoScreen`):
+  - Native display hardware refresh rate detection (`PlatformDispatcher.views.first.display.refreshRate`: 60 Hz, 90 Hz, 120 Hz, 144 Hz)
+  - Real-time live render FPS monitor tracking active frame smoothness
+  - Display resolution diagnostics: Physical resolution (pixels), Logical resolution (points), Device Pixel Ratio (DPR), and screen density class
+
+- [x] **Sound-Level Estimator** (`SoundLevelEstimatorScreen`):
+  - Real-time Decibel (dB SPL) sound level meter with dynamic circular gauge
+  - Live sound wave graph logging the last 30 readings
+  - Minimum, Average, and Peak / Maximum dB statistics tracking with one-tap reset
+  - Microphone sensitivity calibration slider (±15 dB offset)
+  - Environmental noise reference benchmarks (Whisper, Living Room, Office, Traffic, Danger zone)
 
 ---
 
-## 10. Security
+## 16. Security
 - [x] **Password & Security Generator** (`PasswordGeneratorScreen`):
   - Secure pseudo-random high-entropy password generator
   - Adjustable length slider (4 to 64 characters)
@@ -305,31 +420,34 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - Real-time strength audit (Weak, Moderate, Strong, Very Strong with entropy estimation)
   - One-tap copy to clipboard
 
+
 ---
 
-## 11. Kitchen & Cooking
+## 17. Kitchen & Cooking
 - [x] **Kitchen & Recipe Tools** (`KitchenConverterScreen`):
   - **Recipe Portion & Yield Scaler**: Dynamically scales ingredient quantities from base servings to target servings, with add/remove custom ingredients
   - **Kitchen Unit Converter**: Instant bidirectional conversion for cooking measurements: teaspoons (tsp), tablespoons (tbsp), fluid ounces (fl oz), cups, pints, quarts, milliliters (ml), liters (l)
 
+
 ---
 
-## 12. Everyday & Decision Tools
+## 18. More Tools — Everyday & Decision Tools
 - [x] **Randomizer & Decision Tools** (`RandomUtilitiesScreen`):
   - **Random Number Generator**: Custom min/max integer bounds with instant re-roll
   - **Dice Roller**: Roll 1 to 6 six-sided dice simultaneously, showing individual dice outcomes and total sum
   - **Coin Toss**: Fair 50/50 virtual coin toss with animated outcome and lifetime Heads/Tails counters
 
+
 ---
 
-## 13. System Architecture, Preferences & Navigation
+## 19. System Architecture, Preferences & Navigation
 - [x] **Customizable & Movable Toolbox Categories** (`CategoryHubScreen` & `PreferencesService`):
   - **Drag-and-Drop Reordering**: Long-press and drag any category card (e.g., drag Kitchen to the top) to customize the category hierarchy
   - **Touch Drag Handles**: Immediate drag handles (`Icons.drag_indicator_rounded`) for quick fluid reordering
   - **Quick "Move to Top"**: One-tap `⬆` action button to instantly promote any category (like Kitchen) to the #1 top spot
   - **Toolbox Edit Button**: Dedicated "Edit" toggle button in the category header with active editing banner and Done button
   - **Long-Press Direct Activation**: Long-pressing any category card in the standard grid provides haptic feedback, enters Edit Mode, and offers an instant "Move to Top" snackbar action
-  - **Reset to Default**: One-tap "Reset" action to restore the canonical 12-category order
+  - **Reset to Default**: One-tap "Reset" action to restore the canonical 18-category order
   - **Local Persistence**: Saves custom order to `SharedPreferences` (`custom_category_order`) and reloads on startup
 - [x] **Navigation Scaffold** (`MainNavigationScaffold`):
   - Bottom navigation bar with 4 primary destinations:
@@ -346,9 +464,10 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - Calculation history tracking with one-tap clear history action
   - Persistent storage via `SharedPreferences`
 
+
 ---
 
-## 14. Productivity & Personal Organization
+## 20. Productivity & Personal Organization
 - [x] **Productivity & Organization Suite** (`ProductivityToolkitScreen` & `ProductivityService`):
   - **Notes with Categories and Search**:
     - Categorized note organization: General, Personal, Work, Ideas, and Urgent
@@ -384,62 +503,10 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - **100% Offline Persistence**:
     - Complete local offline data persistence via `SharedPreferences` with zero cloud or network dependencies
 
----
-
-## 17. Device & Everyday Utilities
-- [x] **Battery Health Information, Where Supported** (`BatteryDisplayInfoScreen`):
-  - Real-time battery percentage with dynamic visual gauge and color thresholds
-  - Power charging status: Charging, Discharging, Fully Charged, and Connected state via `battery_plus`
-  - Low Power Mode / Battery Saver detection (`isInBatterySaveMode`)
-  - Battery health evaluation (Optimal / Normal operating condition), nominal voltage (~3.85V-4.35V DC), technology (Li-Ion / Li-Po), and thermal operating ranges
-  - Battery longevity care guide & dark mode power savings recommendations
-
-- [x] **Microphone and Speaker Tester** (`MicSpeakerTesterScreen`):
-  - **Speaker Hardware Testing**:
-    - Discrete left and right audio channel tests to verify stereo separation and speaker balance
-    - Frequency sweep tests: Bass (250 Hz Low), Mid Vocals (1 kHz), and Treble (4 kHz High)
-    - Full volume output clarity test for bottom loudspeaker and earpiece
-  - **Microphone Hardware Testing**:
-    - Real-time sound level input meter indicator during recording
-    - Speech recognition capture and loopback audio transcription to verify mic input clarity
-    - Hardware responsiveness and audio input permission diagnostics
-
-- [x] **Touchscreen Test** (`TouchscreenTestScreen`):
-  - **Digitizer Grid Coverage Test**: Full-screen 160-cell (10×16) digitizer matrix where every touched cell lights up green with haptic buzz to pinpoint touchscreen dead zones
-  - **Multi-Touch Pointer Tracker**: Tracks simultaneous multi-finger touches (1 to 10 fingers) with live pointer coordinate HUD $(X, Y)$ and color-coded touch trails
-
-- [x] **Screen Color Test** (`ScreenColorTestScreen`):
-  - Immersive fullscreen inspection hiding all system UI bars
-  - 10 standard diagnostic test patterns: Pure Red, Pure Green, Pure Blue, Pure White, Pure Black (OLED burn-in & backlight bleed), Neutral 50% Gray, Cyan, Magenta, Yellow, and 256-level Grayscale Gradient
-  - Tap, double-tap, and swipe controls with dead pixel identification guidelines
-
-- [x] **Vibration Tester** (`VibrationTesterScreen`):
-  - Standard tactile haptic engine testing: Light Impact, Medium Impact, Heavy Impact, Selection Click, and Standard Motor Vibrate
-  - Continuous rhythmic patterns: Heartbeat (Lub-Dub), SOS Emergency Morse Code (`... --- ...`), Rapid Pulse (10 Hz), and Gaming Rumble
-  - Animated visual ripple wave synchronized with vibration motor pulses
-
-- [x] **Screen Refresh-Rate Information, Where Available** (`BatteryDisplayInfoScreen`):
-  - Native display hardware refresh rate detection (`PlatformDispatcher.views.first.display.refreshRate`: 60 Hz, 90 Hz, 120 Hz, 144 Hz)
-  - Real-time live render FPS monitor tracking active frame smoothness
-  - Display resolution diagnostics: Physical resolution (pixels), Logical resolution (points), Device Pixel Ratio (DPR), and screen density class
-
-- [x] **Sound-Level Estimator** (`SoundLevelEstimatorScreen`):
-  - Real-time Decibel (dB SPL) sound level meter with dynamic circular gauge
-  - Live sound wave graph logging the last 30 readings
-  - Minimum, Average, and Peak / Maximum dB statistics tracking with one-tap reset
-  - Microphone sensitivity calibration slider (±15 dB offset)
-  - Environmental noise reference benchmarks (Whisper, Living Room, Office, Traffic, Danger zone)
-
-- [x] **QR-Based Contact Sharing** (`QrContactShareScreen`, `VCardUtils`):
-  - RFC 2426 compliant vCard 3.0 and NTT DoCoMo MeCard generator
-  - Fields for Name, Organization, Job Title, Mobile Phone, Work Phone, Email, Address, Website URL, and Notes
-  - Real-time high-resolution QR code rendering with logo overlay and crisp data modules
-  - Fullscreen enlarged QR mode for effortless camera scanning by other smartphones
-  - One-tap "Copy vCard Text", "Save Contact", and "Clear Fields"
 
 ---
 
-## 19. Creative Studio & Canvas (Slate)
+## 21. Creative Studio & Canvas (Slate)
 - [x] **Slate — Full-Screen Drawing & Writing Canvas** (`SlateScreen`, `SlateService`, `SlateModels`):
   - **Home Screen Entry**:
     - **1st Card in Categories Grid**: Prominently pinned as the first category card (`_buildSlateCard`) featuring a 60×60 tile (radius 17) with a solid `#111827` background, a subtle 25% → 0% white top-left gradient overlay, a white 40dp pencil icon (stroke 2.1), 17sp bold title, 13sp secondary description (*"Draw, write & sketch on a full-screen canvas"*), and an orange (`#EA580C`) bold "New" badge.
@@ -487,9 +554,10 @@ Here is the comprehensive list of features currently implemented in the app, cat
     - **Local Auto-Save**: Auto-saves active document to `SharedPreferences` every 2 seconds and on app lifecycle pause.
     - **My Slates Management**: Document library modal with thumbnail preview, title, date, Open, Duplicate, Rename, Delete (with confirmation), and Share PNG actions.
 
+
 ---
 
-## 20. App-Wide Improvements & UI Modernization
+## 22. App-Wide Improvements & UI Modernization
 - [x] **ToolBox Pro Iconography & Branding**:
   - Official high-resolution ToolBox Pro squircle logo tile (`app_logo.png`) integrated into the Home Header brand row.
   - Generated crisp Android launcher icon mipmaps (`mdpi`, `hdpi`, `xhdpi`, `xxhdpi`, `xxxhdpi`) from `app_icon.png` (1024×1024) replacing default Flutter assets.
@@ -591,17 +659,27 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - Complete import restoration flow with UI confirmation in Settings
   - Dedicated unit tests in `test/backup_restore_test.dart` verifying backup export, schema validation, and preference recovery
 
+
 ---
 
-## 21. Release Artifacts & Build Configuration
-- **Version**: `1.0.88`
-- **Build Number**: `88`
+## 23. Release Artifacts & Build Configuration
+- **Version**: `1.0.89`
+- **Build Number**: `89`
 - **Output Target**: Android Release APKs (`--split-per-abi`)
   - `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` (Target: ARM64 devices, Android 10+)
   - `build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk` (Target: 32-bit legacy ARM devices)
   - `build/app/outputs/flutter-apk/app-x86_64-release.apk` (Target: Emulators & x86 tablets)
 - **Zero Internet Permissions**: 100% offline security verified in `AndroidManifest.xml`
 - **Code Health**: Clean static analysis with `flutter analyze` across all modules
+- **Audit & Bug Fixes (Release 89 - Full Audit, Smart Scanner, Package Upgrades)**:
+  - **Categories**: "Files & Text" split into PDF & Documents, Image & Photo, Compression & Archives, Text & Writing, Audio & Video, QR & Barcode, and Device & Hardware (18 categories); "Calculate" renamed Percentage Calculation. Category names and descriptions follow the app language (en, ta, hi, es).
+  - **Document Scanner & Photo to PDF**: ML Kit auto-crop scanner (edge detection, perspective fix, filters, gallery import), page grid with reorder/rotate/retake, export options (size, margins, quality, OCR text layer, password). Photo to PDF auto-crops by default.
+  - **Share**: every Share button now sends the correct file type via `share_plus` (`shareFileBytes`); before, all files were labelled application/pdf. Settings > Export Backup shares a `.json` file (clipboard fallback).
+  - **Packages**: replaced discontinued `flutter_markdown` with `flutter_markdown_plus`; upgraded archive, image, pdf, printing, syncfusion_flutter_pdf, xml, speech_to_text, google_mlkit_text_recognition, shared_preferences. `google_fonts` stays on 8.x (9.x needs `material_ui`). Android Gradle Plugin 8.12.1, Kotlin 2.3.20.
+  - **Honesty fixes**: Audio & Video Studio trims real WAV files and plans video size (no fake duration/size); Battery Status shows only real data; Productivity no longer seeds demo notes, bills, subscriptions or to-dos; Sound-Level shows `--` without a microphone.
+  - **Productivity**: date pickers for bills and renewals, To-do All/Active/Completed tabs, subtasks, notes and agenda as PDF. **Slate**: working Rename, delete confirmation, hex colour input.
+  - **Audit**: hundreds of bug fixes across all tools (PDF page size/rotation, ZIP duplicate names and path traversal, calculator DEG/factorial/implicit multiplication, passport sheet layout, OCR fake text, and more); 316 automated tests pass.
+  - **Known limits**: auto-crop scanner needs Android with Google Play services; Tamil/Hindi text does not render in generated PDFs (needs a bundled font); Compress PDF does not downsample images.
 - **Release 88 Updates (Slate Canvas Studio & UI Modernization)**:
   - Added **Slate — Full-Screen Drawing & Writing Canvas** (`SlateScreen`, `SlateService`, `SlateModels`) as Tool #49.
   - Implemented 1st card Category Hub entry, 34dp dark pencil favorite chip, full-screen canvas with non-destructive overlays, 7 drawing tools, quadratic smoothing, paper selector, 14 swatches + custom picker, slide-hide panel, floating pill, focus mode, immersive mode, auto-save, and "My Slates" library.
@@ -616,6 +694,3 @@ Here is the comprehensive list of features currently implemented in the app, cat
 - **Audit & Bug Fixes (Release 85 - Photo Studio & Advanced Office PDF Suites)**:
   - Added **Photo Studio & Editor** (`PhotoEditorScreen` & `PhotoEditorService`) with all 7 requested features.
   - Added **Office & Advanced PDF Suite** (`OfficePdfToolkitScreen` & `OfficeDocumentService`) with all 12 requested features.
-
-
-

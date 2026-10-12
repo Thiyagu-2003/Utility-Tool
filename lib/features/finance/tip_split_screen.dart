@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/validation_utils.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
@@ -16,13 +17,14 @@ class TipSplitScreen extends StatefulWidget {
 
 class _TipSplitScreenState extends State<TipSplitScreen> {
   final TextEditingController _billController = TextEditingController(text: '1200');
+  final TextEditingController _customTipController = TextEditingController();
   double _tipPercent = 10;
   int _splitCount = 3;
 
-  final List<double> _tipPresets = [0, 5, 10, 15, 20];
+  final List<double> _tipPresets = [0, 5, 10, 15, 18, 20];
 
   Map<String, double> _calculateSplit() {
-    final bill = double.tryParse(_billController.text.trim()) ?? 0;
+    final bill = ValidationUtils.safeParseDouble(_billController.text);
     final tipAmount = bill * (_tipPercent / 100);
     final totalBill = bill + tipAmount;
     final count = _splitCount < 1 ? 1 : _splitCount;
@@ -44,6 +46,7 @@ class _TipSplitScreenState extends State<TipSplitScreen> {
   @override
   void dispose() {
     _billController.dispose();
+    _customTipController.dispose();
     super.dispose();
   }
 
@@ -60,6 +63,7 @@ class _TipSplitScreenState extends State<TipSplitScreen> {
       onReset: () {
         setState(() {
           _billController.text = '1200';
+          _customTipController.clear();
           _tipPercent = 10;
           _splitCount = 3;
         });
@@ -78,7 +82,7 @@ class _TipSplitScreenState extends State<TipSplitScreen> {
                 value: currencyFmt.format(data['totalBill']),
               ),
               BreakdownItem(
-                label: 'Total Tip (${_tipPercent.toInt()}%)',
+                label: 'Total Tip (${_tipPercent == _tipPercent.roundToDouble() ? _tipPercent.toInt() : _tipPercent}%)',
                 value: currencyFmt.format(data['tipAmount']),
               ),
               BreakdownItem(
@@ -105,30 +109,41 @@ class _TipSplitScreenState extends State<TipSplitScreen> {
             style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
           ),
           const SizedBox(height: 8),
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: _tipPresets.map((tip) {
-              final isSelected = _tipPercent == tip;
-              return Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 2.0),
-                  child: ChoiceChip(
-                    label: Center(child: Text('${tip.toInt()}%')),
-                    selected: isSelected,
-                    selectedColor: AppColors.catFinance,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : null,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    onSelected: (val) {
-                      if (val) {
-                        PreferencesService().triggerHaptic();
-                        setState(() => _tipPercent = tip);
-                      }
-                    },
-                  ),
+              final isSelected = _tipPercent == tip && _customTipController.text.isEmpty;
+              return ChoiceChip(
+                label: Text('${tip.toInt()}%'),
+                selected: isSelected,
+                selectedColor: AppColors.catFinance,
+                labelStyle: TextStyle(
+                  color: isSelected ? Colors.white : null,
+                  fontWeight: FontWeight.bold,
                 ),
+                onSelected: (val) {
+                  if (val) {
+                    PreferencesService().triggerHaptic();
+                    setState(() {
+                      _customTipController.clear();
+                      _tipPercent = tip;
+                    });
+                  }
+                },
               );
             }).toList(),
+          ),
+          const SizedBox(height: 12),
+          ModernTextField(
+            label: 'Custom Tip (%)',
+            controller: _customTipController,
+            hintText: 'e.g. 12.5',
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            suffixText: '%',
+            onChanged: (v) => setState(() {
+              if (v.trim().isNotEmpty) _tipPercent = ValidationUtils.safeParseDouble(v).clamp(0.0, 100.0);
+            }),
           ),
           const SizedBox(height: 24),
 
@@ -153,15 +168,19 @@ class _TipSplitScreenState extends State<TipSplitScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    const Icon(Icons.people_outline_rounded, size: 22),
-                    const SizedBox(width: 12),
-                    Text(
-                      '$_splitCount ${_splitCount == 1 ? 'Person' : 'People'}',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                  ],
+                Flexible(
+                  child: Row(
+                    children: [
+                      const Icon(Icons.people_outline_rounded, size: 22),
+                      const SizedBox(width: 12),
+                      Flexible(
+                        child: Text(
+                          '$_splitCount ${_splitCount == 1 ? 'Person' : 'People'}',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 Row(
                   children: [

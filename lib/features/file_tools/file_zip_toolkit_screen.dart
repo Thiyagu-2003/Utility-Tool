@@ -1,19 +1,19 @@
 import 'dart:convert';
 import 'package:archive/archive.dart';
-import 'package:crypto/crypto.dart';
 import 'package:csv/csv.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:printing/printing.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/share_utils.dart';
 import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 import 'archive_preview_toolkit_screen.dart';
+import 'file_zip_utils.dart';
 
 enum FileZipTab {
   createZip('Create ZIP', Icons.folder_zip_rounded),
@@ -37,13 +37,34 @@ class PickedFileItem {
   final Uint8List bytes;
   final String? path;
 
+  /// The picked file, so big files can be streamed instead of loaded whole.
+  final PlatformFile? source;
+
   PickedFileItem({
     required this.name,
     required this.extension,
     required this.sizeBytes,
     required this.bytes,
     this.path,
+    this.source,
   });
+
+  /// Digests of the file read as a stream. Runs in a background isolate when the
+  /// file is on disk; falls back to the picker's own stream otherwise.
+  Future<Map<String, String>> hashes(List<String> algorithms) {
+    final p = path;
+    if (p != null) {
+      return FileZipUtils.hashFileInBackground(p, algorithms);
+    }
+    if (source != null) return FileZipUtils.hashStream(source!.readAsByteStream(), algorithms);
+    return FileZipUtils.hashStream(Stream.value(bytes), algorithms);
+  }
+
+  /// First [count] bytes of the file without reading the rest.
+  Future<Uint8List> head(int count) async {
+    final s = source;
+    return FileZipUtils.readHead(s != null ? s.readAsByteStream() : Stream.value(bytes), count);
+  }
 }
 
 class FileZipToolkitScreen extends StatefulWidget {
@@ -54,12 +75,15 @@ class FileZipToolkitScreen extends StatefulWidget {
 }
 
 class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
+  static const _maxListedEntries = 300;
+
   FileZipTab _activeTab = FileZipTab.createZip;
 
   // 1. Create ZIP State
   final List<PickedFileItem> _zipFiles = [];
   final TextEditingController _zipNameController = TextEditingController(text: 'Archive');
   bool _isCreatingZip = false;
+  int? _lastZipSize;
 
   // 2. Extract ZIP State
   PickedFileItem? _selectedZipFile;
@@ -86,10 +110,14 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
   String _sha512Hash = '';
   final TextEditingController _hashCompareController = TextEditingController();
   bool? _hashMatchResult;
+  bool _isHashing = false;
 
   // 6. Duplicate Finder State
   final List<PickedFileItem> _duplicateSearchFiles = [];
+  bool _duplicateScanDone = false;
   Map<String, List<PickedFileItem>> _duplicateGroups = {};
+  bool _isScanningDuplicates = false;
+  final Map<PickedFileItem, String> _duplicateHashes = {}; // sha256 per file, so adding files never re-hashes old ones
 
   // 7. Metadata State
   PickedFileItem? _metadataTargetFile;
@@ -123,21 +151,23 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
 
   // --- HELPERS ---
 
-  Future<List<PickedFileItem>> _pickMultipleFiles() async {
+  Future<List<PickedFileItem>> _pickMultipleFiles({bool loadBytes = true}) async {
     PreferencesService().triggerHaptic();
     try {
       final files = await FilePicker.pickFiles();
       if (files.isNotEmpty) {
         final List<PickedFileItem> items = [];
         for (final f in files) {
-          final bytes = await f.readAsBytes();
+          // Size-only callers skip reading the file so huge files don't OOM.
+          final bytes = loadBytes ? await f.readAsBytes() : Uint8List(0);
           items.add(
             PickedFileItem(
               name: f.name,
               extension: f.extension?.toUpperCase() ?? 'FILE',
-              sizeBytes: bytes.length,
+              sizeBytes: loadBytes ? bytes.length : (f.lengthSync() ?? await f.length() ?? 0),
               bytes: bytes,
               path: f.path,
+              source: f,
             ),
           );
         }
@@ -149,7 +179,8 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
     return [];
   }
 
-  Future<PickedFileItem?> _pickSingleGenericFile({List<String>? allowedExtensions}) async {
+  /// With [loadBytes] false the file is not read (hash / inspect callers stream it).
+  Future<PickedFileItem?> _pickSingleGenericFile({List<String>? allowedExtensions, bool loadBytes = true}) async {
     PreferencesService().triggerHaptic();
     try {
       final file = await FilePicker.pickFile(
@@ -157,19 +188,29 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
         allowedExtensions: allowedExtensions,
       );
       if (file != null) {
-        final bytes = await file.readAsBytes();
+        final bytes = loadBytes ? await file.readAsBytes() : Uint8List(0);
         return PickedFileItem(
           name: file.name,
           extension: file.extension?.toUpperCase() ?? 'FILE',
-          sizeBytes: bytes.length,
+          sizeBytes: loadBytes ? bytes.length : (file.lengthSync() ?? await file.length() ?? 0),
           bytes: bytes,
           path: file.path,
+          source: file,
         );
       }
     } catch (e) {
       _showToast('Error picking file: $e');
     }
     return null;
+  }
+
+  Future<void> _shareBytes(List<int> bytes, String filename) async {
+    try {
+      // The extension picks the MIME type, so keep it; strip any directory part.
+      await shareFileBytes(Uint8List.fromList(bytes), FileZipUtils.safeFileName(filename));
+    } catch (e) {
+      _showToast('Share failed: $e');
+    }
   }
 
   void _showToast(String message) {
@@ -182,8 +223,11 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
   // --- TAB 1: CREATE ZIP ---
   Future<void> _addZipFiles() async {
     final picked = await _pickMultipleFiles();
-    if (picked.isNotEmpty) {
-      setState(() => _zipFiles.addAll(picked));
+    if (picked.isNotEmpty && mounted) {
+      setState(() {
+        _zipFiles.addAll(picked);
+        _lastZipSize = null;
+      });
     }
   }
 
@@ -197,18 +241,13 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
     PreferencesService().triggerHaptic();
 
     try {
-      final archive = Archive();
-      for (final item in _zipFiles) {
-        final file = ArchiveFile(item.name, item.bytes.length, item.bytes);
-        archive.addFile(file);
-      }
-
-      final zipData = ZipEncoder().encode(archive);
-      final name = _zipNameController.text.trim().isEmpty ? 'Archive' : _zipNameController.text.trim();
-      await Printing.sharePdf(
-        bytes: Uint8List.fromList(zipData),
-        filename: '${name.replaceAll(' ', '_')}.zip',
-      );
+      final entries = [for (final f in _zipFiles) MapEntry(f.name, f.bytes)];
+      // Deflating many MB would freeze the UI, so do it in a background isolate.
+      final zipData = await FileZipUtils.createZipInBackground(entries);
+      if (mounted) setState(() => _lastZipSize = zipData.length);
+      var name = _zipNameController.text.trim().replaceAll(RegExp(r'\.zip$', caseSensitive: false), '');
+      if (name.isEmpty) name = 'Archive';
+      await _shareBytes(zipData, '${name.replaceAll(RegExp(r'[\s/\\]'), '_')}.zip');
     } catch (e) {
       _showToast('Failed to create ZIP: $e');
     } finally {
@@ -219,7 +258,7 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
   // --- TAB 2: EXTRACT ZIP ---
   Future<void> _pickZipToExtract() async {
     final file = await _pickSingleGenericFile(allowedExtensions: ['zip']);
-    if (file != null) {
+    if (file != null && mounted) {
       setState(() {
         _selectedZipFile = file;
         _extractedFiles.clear();
@@ -228,9 +267,7 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
 
       try {
         final archive = ZipDecoder().decodeBytes(file.bytes);
-        setState(() {
-          _extractedFiles.addAll(archive.files);
-        });
+        if (mounted) setState(() => _extractedFiles.addAll(archive.files));
       } catch (e) {
         _showToast('Error extracting ZIP archive: $e');
       } finally {
@@ -242,156 +279,149 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
   // --- TAB 3: BATCH RENAME ---
   Future<void> _addRenameFiles() async {
     final picked = await _pickMultipleFiles();
-    if (picked.isNotEmpty) {
+    if (picked.isNotEmpty && mounted) {
       setState(() => _renameFiles.addAll(picked));
     }
   }
 
-  String _computeRenamedName(String origName, int index) {
-    var nameWithoutExt = origName;
-    var ext = '';
-    if (origName.contains('.')) {
-      final lastDot = origName.lastIndexOf('.');
-      nameWithoutExt = origName.substring(0, lastDot);
-      ext = origName.substring(lastDot);
-    }
-
-    var result = nameWithoutExt;
-
-    // Find and replace
-    final find = _renameFindController.text;
-    final replace = _renameReplaceController.text;
-    if (find.isNotEmpty) {
-      result = result.replaceAll(find, replace);
-    }
-
-    // Prefix & Suffix
-    final prefix = _renamePrefixController.text;
-    final suffix = _renameSuffixController.text;
-    result = '$prefix$result$suffix';
-
-    // Numbering
-    if (_addNumbering) {
-      final numStr = (index + 1).toString().padLeft(3, '0');
-      result = '${result}_$numStr';
-    }
-
-    // Case formatting
-    if (_renameCaseMode == 'lowercase') {
-      result = result.toLowerCase();
-    } else if (_renameCaseMode == 'UPPERCASE') {
-      result = result.toUpperCase();
-    } else if (_renameCaseMode == 'Title Case') {
-      result = result.split('_').map((s) => s.isNotEmpty ? '${s[0].toUpperCase()}${s.substring(1).toLowerCase()}' : '').join('_');
-    }
-
-    return '$result$ext';
-  }
+  String _computeRenamedName(String origName, int index) => FileZipUtils.computeRenamedName(
+        origName,
+        index,
+        prefix: _renamePrefixController.text,
+        suffix: _renameSuffixController.text,
+        find: _renameFindController.text,
+        replace: _renameReplaceController.text,
+        caseMode: _renameCaseMode,
+        addNumbering: _addNumbering,
+      );
 
   Future<void> _exportRenamedZip() async {
-    if (_renameFiles.isEmpty) return;
+    if (_renameFiles.isEmpty || _isCreatingZip) return;
+    setState(() => _isCreatingZip = true);
     try {
-      final archive = Archive();
-      for (int i = 0; i < _renameFiles.length; i++) {
-        final item = _renameFiles[i];
-        final newName = _computeRenamedName(item.name, i);
-        archive.addFile(ArchiveFile(newName, item.bytes.length, item.bytes));
-      }
-      final zipData = ZipEncoder().encode(archive);
-      await Printing.sharePdf(
-        bytes: Uint8List.fromList(zipData),
-        filename: 'Renamed_Files.zip',
-      );
+      final entries = [
+        for (int i = 0; i < _renameFiles.length; i++)
+          MapEntry(_computeRenamedName(_renameFiles[i].name, i), _renameFiles[i].bytes),
+      ];
+      final zipData = await FileZipUtils.createZipInBackground(entries);
+      await _shareBytes(zipData, 'Renamed_Files.zip');
     } catch (e) {
       _showToast('Error exporting renamed files: $e');
+    } finally {
+      if (mounted) setState(() => _isCreatingZip = false);
     }
   }
 
   // --- TAB 4: SIZE ANALYZER ---
   Future<void> _addFilesToAnalyze() async {
-    final picked = await _pickMultipleFiles();
-    if (picked.isNotEmpty) {
+    final picked = await _pickMultipleFiles(loadBytes: false);
+    if (picked.isNotEmpty && mounted) {
       setState(() => _analyzedFiles.addAll(picked));
     }
   }
 
   // --- TAB 5: HASH CALCULATOR ---
   Future<void> _pickHashFile() async {
-    final file = await _pickSingleGenericFile();
-    if (file != null) {
-      final md5Val = md5.convert(file.bytes).toString();
-      final sha1Val = sha1.convert(file.bytes).toString();
-      final sha256Val = sha256.convert(file.bytes).toString();
-      final sha512Val = sha512.convert(file.bytes).toString();
-
+    final file = await _pickSingleGenericFile(loadBytes: false);
+    if (file == null || !mounted) return;
+    setState(() {
+      _hashTargetFile = file;
+      _isHashing = true;
+      _hashMatchResult = null;
+      _md5Hash = _sha1Hash = _sha256Hash = _sha512Hash = '';
+    });
+    try {
+      final h = await file.hashes(FileZipUtils.hashAlgorithms);
+      if (!mounted || !identical(_hashTargetFile, file)) return; // another file was picked meanwhile
       setState(() {
-        _hashTargetFile = file;
-        _md5Hash = md5Val;
-        _sha1Hash = sha1Val;
-        _sha256Hash = sha256Val;
-        _sha512Hash = sha512Val;
-        _hashMatchResult = null;
+        _md5Hash = h['md5']!;
+        _sha1Hash = h['sha1']!;
+        _sha256Hash = h['sha256']!;
+        _sha512Hash = h['sha512']!;
+        _isHashing = false;
       });
+      // Re-check an already pasted hash against the newly picked file.
+      _verifyHash(_hashCompareController.text);
+    } catch (e) {
+      _showToast('Could not read the file: $e');
+      if (mounted && identical(_hashTargetFile, file)) {
+        setState(() {
+          _hashTargetFile = null;
+          _isHashing = false;
+        });
+      }
     }
   }
 
   void _verifyHash(String target) {
-    if (_hashTargetFile == null || target.trim().isEmpty) {
+    if (_hashTargetFile == null || _isHashing || target.trim().isEmpty) {
       setState(() => _hashMatchResult = null);
       return;
     }
-    final clean = target.trim().toLowerCase();
+    final clean = target.replaceAll(RegExp(r'\s'), '').toLowerCase();
     final match = clean == _md5Hash || clean == _sha1Hash || clean == _sha256Hash || clean == _sha512Hash;
     setState(() => _hashMatchResult = match);
   }
 
   // --- TAB 6: DUPLICATE FINDER ---
   Future<void> _pickDuplicateFiles() async {
-    final picked = await _pickMultipleFiles();
-    if (picked.isNotEmpty) {
-      setState(() => _duplicateSearchFiles.addAll(picked));
-      _computeDuplicates();
+    final picked = await _pickMultipleFiles(loadBytes: false);
+    if (picked.isNotEmpty && mounted) {
+      // Re-picking the same file must not report it as a duplicate of itself.
+      final seenPaths = <String?>{for (final f in _duplicateSearchFiles) f.path};
+      setState(() {
+        _duplicateSearchFiles.addAll(picked.where((f) => f.path == null || seenPaths.add(f.path)));
+        _duplicateScanDone = true;
+      });
+      await _computeDuplicates();
     }
   }
 
-  void _computeDuplicates() {
-    final Map<String, List<PickedFileItem>> hashGroups = {};
+  /// Only files that share a size can be duplicates, so just those are hashed (streamed,
+  /// off the UI thread), and each file is hashed once.
+  Future<void> _computeDuplicates() async {
+    final bySize = <int, List<PickedFileItem>>{};
     for (final file in _duplicateSearchFiles) {
-      final hash = sha256.convert(file.bytes).toString();
-      hashGroups.putIfAbsent(hash, () => []).add(file);
+      bySize.putIfAbsent(file.sizeBytes, () => []).add(file);
     }
-    final duplicatesOnly = Map<String, List<PickedFileItem>>.fromEntries(
-      hashGroups.entries.where((e) => e.value.length > 1),
-    );
-    setState(() => _duplicateGroups = duplicatesOnly);
+    setState(() => _isScanningDuplicates = true);
+    try {
+      final groups = <String, List<PickedFileItem>>{};
+      for (final sameSize in bySize.values.where((l) => l.length > 1)) {
+        for (final file in sameSize) {
+          final hash = _duplicateHashes[file] ??= (await file.hashes(const ['sha256']))['sha256']!;
+          groups.putIfAbsent('${file.sizeBytes}:$hash', () => []).add(file);
+        }
+      }
+      if (!mounted) return;
+      setState(() => _duplicateGroups = {
+            for (final e in groups.entries)
+              if (e.value.length > 1) e.key: e.value,
+          });
+    } catch (e) {
+      _showToast('Could not scan a file: $e');
+    } finally {
+      if (mounted) setState(() => _isScanningDuplicates = false);
+    }
   }
 
   // --- TAB 7: METADATA ---
   Future<void> _pickMetadataFile() async {
-    final file = await _pickSingleGenericFile();
-    if (file != null) {
-      String mime = 'application/octet-stream';
-      String header = '';
-
-      final ext = file.extension.toUpperCase();
-      if (ext == 'PNG') mime = 'image/png';
-      if (ext == 'JPG' || ext == 'JPEG') mime = 'image/jpeg';
-      if (ext == 'PDF') mime = 'application/pdf';
-      if (ext == 'ZIP') mime = 'application/zip';
-      if (ext == 'CSV') mime = 'text/csv';
-      if (ext == 'JSON') mime = 'application/json';
-      if (ext == 'TXT') mime = 'text/plain';
-
-      if (file.bytes.isNotEmpty) {
-        final headBytes = file.bytes.take(8).toList();
-        header = headBytes.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-      }
-
+    final file = await _pickSingleGenericFile(loadBytes: false);
+    if (file == null || !mounted) return;
+    try {
+      // MIME sniffing and the magic header only need the first bytes.
+      final head = await file.head(16);
+      final mime = FileZipUtils.detectMimeType(head, file.extension);
+      final header = head.take(8).map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+      if (!mounted) return;
       setState(() {
         _metadataTargetFile = file;
         _mimeType = mime;
         _magicHeader = header;
       });
+    } catch (e) {
+      _showToast('Could not read the file: $e');
     }
   }
 
@@ -430,32 +460,10 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
     try {
       final raw = _jsonInputController.text.trim();
       if (raw.isEmpty) return;
-      final decoded = jsonDecode(raw);
-
-      if (decoded is List) {
-        final List<List<dynamic>> rows = [];
-        final Set<String> keys = {};
-        for (final item in decoded) {
-          if (item is Map) {
-            keys.addAll(item.keys.map((k) => k.toString()));
-          }
-        }
-
-        final headerList = keys.toList();
-        rows.add(headerList);
-
-        for (final item in decoded) {
-          if (item is Map) {
-            final row = headerList.map((k) => item[k] ?? '').toList();
-            rows.add(row);
-          }
-        }
-
-        final csvString = csv.encode(rows);
-        setState(() {
-          _csvInputController.text = csvString;
-        });
-      }
+      final rows = FileZipUtils.jsonToCsvRows(jsonDecode(raw));
+      setState(() {
+        _csvInputController.text = csv.encode(rows);
+      });
     } catch (e) {
       _showToast('JSON parse error: $e');
     }
@@ -467,7 +475,7 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
 
     return ToolScaffold(
       title: 'File & ZIP Suite',
-      category: ToolCategory.filesText,
+      category: ToolCategory.compression,
       toolId: 'file_zip_toolkit',
       actions: [
         IconButton(
@@ -482,14 +490,32 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
       onReset: () {
         setState(() {
           _zipFiles.clear();
+          _zipNameController.text = 'Archive';
           _selectedZipFile = null;
           _extractedFiles.clear();
+          _isExtracting = false;
           _renameFiles.clear();
+          _renamePrefixController.clear();
+          _renameSuffixController.clear();
+          _renameFindController.clear();
+          _renameReplaceController.clear();
+          _renameCaseMode = 'Keep Original';
+          _addNumbering = true;
           _analyzedFiles.clear();
           _hashTargetFile = null;
+          _isHashing = false;
+          _md5Hash = _sha1Hash = _sha256Hash = _sha512Hash = '';
+          _hashMatchResult = null;
+          _hashCompareController.clear();
           _duplicateSearchFiles.clear();
-          _duplicateGroups.clear();
+          _duplicateHashes.clear();
+          _duplicateGroups = {};
+          _isScanningDuplicates = false;
+          _duplicateScanDone = false;
           _metadataTargetFile = null;
+          _mimeType = 'Unknown';
+          _magicHeader = '';
+          _lastZipSize = null;
         });
       },
       body: Column(
@@ -523,14 +549,21 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
   // ===================== TABS =====================
 
   Widget _buildCreateZipTab(bool isDark) {
-    final totalSizeKb = _zipFiles.fold<int>(0, (sum, f) => sum + f.sizeBytes) / 1024;
+    final totalBytes = _zipFiles.fold<int>(0, (sum, f) => sum + f.sizeBytes);
+    final totalSizeKb = totalBytes / 1024;
+    var stats = 'Uncompressed Total: ${totalSizeKb.toStringAsFixed(1)} KB';
+    if (_lastZipSize != null) {
+      final saved = FileZipUtils.compressionSavingsPercent(totalBytes, _lastZipSize!);
+      stats += ' • ZIP: ${(_lastZipSize! / 1024).toStringAsFixed(1)} KB '
+          '(${saved >= 0 ? '${saved.toStringAsFixed(1)}% saved' : 'no reduction'})';
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ResultCard(
           title: 'ZIP Archiver',
           primaryResult: '${_zipFiles.length} Files Selected',
-          subtitle: 'Uncompressed Total: ${totalSizeKb.toStringAsFixed(1)} KB',
+          subtitle: stats,
           accentColor: AppColors.catPdf,
         ),
         const SizedBox(height: 16),
@@ -561,7 +594,10 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
                 icon: const Icon(Icons.clear_all_rounded),
                 label: const Text('Clear'),
                 style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
-                onPressed: () => setState(() => _zipFiles.clear()),
+                onPressed: () => setState(() {
+                  _zipFiles.clear();
+                  _lastZipSize = null;
+                }),
               ),
             ],
           ],
@@ -585,7 +621,10 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
                 subtitle: Text('${(file.sizeBytes / 1024).toStringAsFixed(1)} KB • ${file.extension}'),
                 trailing: IconButton(
                   icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error, size: 20),
-                  onPressed: () => setState(() => _zipFiles.removeAt(idx)),
+                  onPressed: () => setState(() {
+                    _zipFiles.removeAt(idx);
+                    _lastZipSize = null;
+                  }),
                 ),
               );
             },
@@ -643,7 +682,8 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
           ListView.separated(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            itemCount: _extractedFiles.length,
+            // A shrink-wrapped list builds every row, so very large archives show the first rows only.
+            itemCount: _extractedFiles.length > _maxListedEntries ? _maxListedEntries : _extractedFiles.length,
             separatorBuilder: (_, index) => const SizedBox(height: 8),
             itemBuilder: (context, idx) {
               final file = _extractedFiles[idx];
@@ -657,17 +697,31 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
                   color: AppColors.catPdf,
                 ),
                 title: Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: Text('${(file.size / 1024).toStringAsFixed(1)} KB'),
-                trailing: IconButton(
-                  icon: const Icon(Icons.share_rounded, size: 18),
-                  onPressed: () {
-                    final rawBytes = file.content as List<int>;
-                    Printing.sharePdf(bytes: Uint8List.fromList(rawBytes), filename: file.name);
-                  },
-                ),
+                subtitle: Text(file.isFile ? '${(file.size / 1024).toStringAsFixed(1)} KB' : 'Folder'),
+                trailing: file.isFile
+                    ? IconButton(
+                        icon: const Icon(Icons.share_rounded, size: 18),
+                        onPressed: () {
+                          try {
+                            // Entry names like "../x" or "dir/x" are reduced to a safe base name.
+                            _shareBytes(file.content, file.name);
+                          } catch (e) {
+                            _showToast('Cannot read entry (encrypted or corrupt?): $e');
+                          }
+                        },
+                      )
+                    : null,
               );
             },
           ),
+          if (_extractedFiles.length > _maxListedEntries)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'Showing the first $_maxListedEntries of ${_extractedFiles.length} entries.',
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
         ],
       ],
     );
@@ -718,7 +772,7 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
               labelText: 'Letter Case Mode',
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            value: _renameCaseMode,
+            initialValue: _renameCaseMode,
             items: ['Keep Original', 'lowercase', 'UPPERCASE', 'Title Case']
                 .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                 .toList(),
@@ -766,14 +820,14 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
             width: double.infinity,
             child: ElevatedButton.icon(
               icon: const Icon(Icons.save_rounded),
-              label: const Text('Export Renamed Files as ZIP'),
+              label: Text(_isCreatingZip ? 'Compressing...' : 'Export Renamed Files as ZIP'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.catPdf,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
-              onPressed: _exportRenamedZip,
+              onPressed: _isCreatingZip ? null : _exportRenamedZip,
             ),
           ),
         ],
@@ -869,9 +923,15 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
             minimumSize: const Size(double.infinity, 50),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           ),
-          onPressed: _pickHashFile,
+          onPressed: _isHashing ? null : _pickHashFile,
         ),
-        if (_hashTargetFile != null) ...[
+        if (_hashTargetFile != null && _isHashing) ...[
+          const SizedBox(height: 16),
+          const LinearProgressIndicator(color: AppColors.catPdf),
+          const SizedBox(height: 8),
+          Text('Hashing ${(_hashTargetFile!.sizeBytes / (1024 * 1024)).toStringAsFixed(1)} MB...'),
+        ],
+        if (_hashTargetFile != null && !_isHashing) ...[
           const SizedBox(height: 16),
           _hashRow('SHA-256', _sha256Hash),
           _hashRow('SHA-1', _sha1Hash),
@@ -948,8 +1008,32 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
             minimumSize: const Size(double.infinity, 50),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           ),
-          onPressed: _pickDuplicateFiles,
+          onPressed: _isScanningDuplicates ? null : _pickDuplicateFiles,
         ),
+        if (_isScanningDuplicates) ...[
+          const SizedBox(height: 16),
+          const LinearProgressIndicator(color: AppColors.catPdf),
+        ],
+        if (_duplicateSearchFiles.isNotEmpty && !_isScanningDuplicates) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              icon: const Icon(Icons.clear_all_rounded),
+              label: Text('Clear ${_duplicateSearchFiles.length} files'),
+              onPressed: () => setState(() {
+                _duplicateSearchFiles.clear();
+                _duplicateHashes.clear();
+                _duplicateGroups = {};
+                _duplicateScanDone = false;
+              }),
+            ),
+          ),
+        ],
+        if (_duplicateScanDone && !_isScanningDuplicates && _duplicateGroups.isEmpty) ...[
+          const SizedBox(height: 16),
+          Text('No duplicates among ${_duplicateSearchFiles.length} scanned files.'),
+        ],
         if (_duplicateGroups.isNotEmpty) ...[
           const SizedBox(height: 16),
           ..._duplicateGroups.entries.map((e) {
@@ -972,6 +1056,28 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
           }),
         ],
       ],
+    );
+  }
+
+  /// Label/value line whose value wraps, so long MIME types fit narrow screens and large fonts.
+  Widget _infoRow(String label, String value, {bool mono = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(flex: 2, child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600))),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 3,
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: TextStyle(fontFamily: mono ? 'monospace' : null),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -999,22 +1105,10 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
         ),
         if (_metadataTargetFile != null) ...[
           const SizedBox(height: 16),
-          ListTile(
-            title: const Text('File Size'),
-            trailing: Text('${(_metadataTargetFile!.sizeBytes / 1024).toStringAsFixed(2)} KB (${_metadataTargetFile!.sizeBytes} bytes)'),
-          ),
-          ListTile(
-            title: const Text('MIME Type'),
-            trailing: Text(_mimeType),
-          ),
-          ListTile(
-            title: const Text('Extension'),
-            trailing: Text(_metadataTargetFile!.extension),
-          ),
-          ListTile(
-            title: const Text('Magic Header (Hex)'),
-            subtitle: Text(_magicHeader, style: const TextStyle(fontFamily: 'monospace')),
-          ),
+          _infoRow('File Size', '${(_metadataTargetFile!.sizeBytes / 1024).toStringAsFixed(2)} KB (${_metadataTargetFile!.sizeBytes} bytes)'),
+          _infoRow('MIME Type', _mimeType),
+          _infoRow('Extension', _metadataTargetFile!.extension),
+          _infoRow('Magic Header (Hex)', _magicHeader.isEmpty ? '(empty file)' : _magicHeader, mono: true),
         ],
       ],
     );
@@ -1077,10 +1171,7 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
                 icon: const Icon(Icons.share_rounded),
                 label: const Text('Export JSON'),
                 style: ElevatedButton.styleFrom(backgroundColor: AppColors.catPdf, foregroundColor: Colors.white),
-                onPressed: () {
-                  final bytes = Uint8List.fromList(utf8.encode(_jsonInputController.text));
-                  Printing.sharePdf(bytes: bytes, filename: 'Data.json');
-                },
+                onPressed: () => _shareBytes(utf8.encode(_jsonInputController.text), 'Data.json'),
               ),
             ),
           ],

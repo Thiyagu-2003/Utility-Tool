@@ -2,14 +2,16 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:printing/printing.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/share_utils.dart';
 import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 import 'archive_compare_service.dart';
+import 'file_zip_utils.dart';
 
 enum ArchivePreviewTab {
   tarGzip('TAR & GZIP', Icons.archive_rounded),
@@ -35,7 +37,11 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
   late ArchivePreviewTab _activeTab;
 
   // 1. TAR & GZIP Archiver State
+  static const _maxDiffBytes = 2 * 1024 * 1024; // the line aligner is quadratic in the worst case
+  static const _previewFullLimit = 8 * 1024 * 1024;
+  static const _previewHeadLimit = 1024 * 1024;
   bool _isCreatingTar = false;
+  bool _isExtracting = false;
   String _tarCompressionType = 'tar.gz'; // 'tar', 'tar.gz', 'gz'
   final TextEditingController _archiveNameController = TextEditingController(text: 'backup_archive');
   final List<ArchiveEntry> _createFiles = [];
@@ -53,6 +59,8 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
   final List<ArchiveEntry> _folderBFiles = [];
   FolderDiffResult? _folderDiffResult;
   String _folderFilter = 'All'; // 'All', 'Identical', 'Modified', 'Only A', 'Only B'
+  bool _isComparingFolders = false;
+  int _folderRun = 0;
 
   // 4. File Diff State
   String _fileAName = 'original.txt';
@@ -64,11 +72,15 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
   final TextEditingController _manualTextAController = TextEditingController();
   final TextEditingController _manualTextBController = TextEditingController();
   bool _isManualInput = false;
+  bool _isDiffing = false;
+  int _diffRun = 0;
 
   // 5. Universal File Preview State
   String? _previewFileName;
   Uint8List? _previewFileBytes;
   PreviewFileType? _previewFileType;
+  int _previewTotalSize = 0;
+  List<String>? _previewLines; // decoded once per pick for the text viewer
   bool _isWordWrap = true;
 
   @override
@@ -83,36 +95,33 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
     _createFiles.addAll([
       ArchiveEntry(
         name: 'documents/readme.txt',
-        size: 42,
         bytes: Uint8List.fromList(utf8.encode('Welcome to Toolbox Pro archive management!')),
       ),
       ArchiveEntry(
         name: 'config/settings.json',
-        size: 58,
         bytes: Uint8List.fromList(utf8.encode('{"theme": "dark", "offline": true, "version": "1.0.86"}')),
       ),
       ArchiveEntry(
         name: 'data/notes.md',
-        size: 35,
         bytes: Uint8List.fromList(utf8.encode('# Project Notes\n- Task 1\n- Task 2')),
       ),
     ]);
 
     // Sample folder files
     _folderAFiles.addAll([
-      ArchiveEntry(name: 'src/index.js', size: 120, bytes: Uint8List.fromList(utf8.encode('console.log("v1");'))),
-      ArchiveEntry(name: 'src/utils.js', size: 85, bytes: Uint8List.fromList(utf8.encode('function add(a, b) { return a + b; }'))),
-      ArchiveEntry(name: 'assets/logo.png', size: 250, bytes: Uint8List.fromList(List.filled(250, 10))),
-      ArchiveEntry(name: 'docs/guide.md', size: 90, bytes: Uint8List.fromList(utf8.encode('# User Guide v1'))),
+      ArchiveEntry(name: 'src/index.js', bytes: Uint8List.fromList(utf8.encode('console.log("v1");'))),
+      ArchiveEntry(name: 'src/utils.js', bytes: Uint8List.fromList(utf8.encode('function add(a, b) { return a + b; }'))),
+      ArchiveEntry(name: 'assets/logo.png', bytes: Uint8List.fromList(List.filled(250, 10))),
+      ArchiveEntry(name: 'docs/guide.md', bytes: Uint8List.fromList(utf8.encode('# User Guide v1'))),
     ]);
 
     _folderBFiles.addAll([
-      ArchiveEntry(name: 'src/index.js', size: 135, bytes: Uint8List.fromList(utf8.encode('console.log("v2 updated");'))),
-      ArchiveEntry(name: 'src/utils.js', size: 85, bytes: Uint8List.fromList(utf8.encode('function add(a, b) { return a + b; }'))),
-      ArchiveEntry(name: 'assets/logo.png', size: 250, bytes: Uint8List.fromList(List.filled(250, 10))),
-      ArchiveEntry(name: 'docs/changelog.md', size: 110, bytes: Uint8List.fromList(utf8.encode('## Release Notes v2'))),
+      ArchiveEntry(name: 'src/index.js', bytes: Uint8List.fromList(utf8.encode('console.log("v2 updated");'))),
+      ArchiveEntry(name: 'src/utils.js', bytes: Uint8List.fromList(utf8.encode('function add(a, b) { return a + b; }'))),
+      ArchiveEntry(name: 'assets/logo.png', bytes: Uint8List.fromList(List.filled(250, 10))),
+      ArchiveEntry(name: 'docs/changelog.md', bytes: Uint8List.fromList(utf8.encode('## Release Notes v2'))),
     ]);
-    _runFolderComparison();
+    _folderDiffResult = ArchiveCompareService.compareFolders(_folderAFiles, _folderBFiles);
 
     // Sample diff texts
     const sampleTextA = 'First line: Welcome\nSecond line: Offline utility\nThird line: Build 85\nFourth line: Done.';
@@ -121,7 +130,7 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
     _manualTextBController.text = sampleTextB;
     _fileABytes = Uint8List.fromList(utf8.encode(sampleTextA));
     _fileBBytes = Uint8List.fromList(utf8.encode(sampleTextB));
-    _runFileDiff();
+    _fileDiffResult = ArchiveCompareService.compareFileContents(_fileAName, _fileABytes, _fileBName, _fileBBytes);
 
     // Default preview file
     _previewFileName = 'welcome_guide.md';
@@ -136,6 +145,14 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
       '> 100% Offline & Private on device.\n',
     ));
     _previewFileType = PreviewFileType.markdown;
+  }
+
+  Future<void> _share(Uint8List bytes, String filename) async {
+    try {
+      await shareFileBytes(bytes, FileZipUtils.safeFileName(filename));
+    } catch (e) {
+      _showToast('Share failed: $e');
+    }
   }
 
   void _showToast(String msg) {
@@ -172,7 +189,7 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
   Widget build(BuildContext context) {
     return ToolScaffold(
       title: 'Archive, Diff & File Studio',
-      category: ToolCategory.filesText,
+      category: ToolCategory.compression,
       toolId: 'archive_compare_toolkit',
       actions: [
         IconButton(
@@ -231,51 +248,43 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: ModernTextField(
-                      controller: _archiveNameController,
-                      label: 'Archive Base Name',
-                      hintText: 'archive_name',
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  DropdownButton<String>(
-                    value: _tarCompressionType,
-                    items: const [
-                      DropdownMenuItem(value: 'tar', child: Text('.tar (Standard)')),
-                      DropdownMenuItem(value: 'tar.gz', child: Text('.tar.gz (Gzip)')),
-                      DropdownMenuItem(value: 'gz', child: Text('.gz (Single) ')),
-                    ],
-                    onChanged: (val) {
-                      if (val != null) setState(() => _tarCompressionType = val);
-                    },
-                  ),
+              ModernTextField(
+                controller: _archiveNameController,
+                label: 'Archive Base Name',
+                hintText: 'archive_name',
+              ),
+              const SizedBox(height: 8),
+              DropdownButton<String>(
+                isExpanded: true,
+                value: _tarCompressionType,
+                items: const [
+                  DropdownMenuItem(value: 'tar', child: Text('.tar (Standard)')),
+                  DropdownMenuItem(value: 'tar.gz', child: Text('.tar.gz (Gzip)')),
+                  DropdownMenuItem(value: 'gz', child: Text('.gz (Single file)')),
                 ],
+                onChanged: (val) {
+                  if (val != null) setState(() => _tarCompressionType = val);
+                },
               ),
               const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Text(
                     'Files to Pack (${_createFiles.length})',
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  Row(
-                    children: [
-                      TextButton.icon(
-                        icon: const Icon(Icons.add_rounded, size: 18),
-                        label: const Text('Add Files'),
-                        onPressed: _pickFilesForCreateArchive,
-                      ),
-                      if (_createFiles.isNotEmpty)
-                        TextButton(
-                          child: const Text('Clear', style: TextStyle(color: Colors.redAccent)),
-                          onPressed: () => setState(() => _createFiles.clear()),
-                        ),
-                    ],
+                  TextButton.icon(
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('Add Files'),
+                    onPressed: _pickFilesForCreateArchive,
                   ),
+                  if (_createFiles.isNotEmpty)
+                    TextButton(
+                      child: const Text('Clear', style: TextStyle(color: Colors.redAccent)),
+                      onPressed: () => setState(() => _createFiles.clear()),
+                    ),
                 ],
               ),
               if (_createFiles.isEmpty)
@@ -301,7 +310,7 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                   child: ListView.separated(
                     shrinkWrap: true,
                     itemCount: _createFiles.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, idx) {
                       final item = _createFiles[idx];
                       return ListTile(
@@ -361,7 +370,7 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                               style: const TextStyle(fontWeight: FontWeight.bold),
                             ),
                             Text(
-                              'Size: ${(_selectedArchiveSize / 1024).toStringAsFixed(1)} KB • Extracted: ${_extractedEntries.length} files',
+                              _isExtracting ? 'Size: ${(_selectedArchiveSize / 1024).toStringAsFixed(1)} KB • Unpacking...' : 'Size: ${(_selectedArchiveSize / 1024).toStringAsFixed(1)} KB • Extracted: ${_extractedEntries.length} files',
                               style: const TextStyle(fontSize: 12, color: Colors.grey),
                             ),
                           ],
@@ -371,13 +380,15 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                   ),
                 ),
                 const SizedBox(height: 12),
+                if (_isExtracting) const LinearProgressIndicator(color: AppColors.primaryOrange),
                 if (_extractedEntries.isNotEmpty) ...[
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'Extracted Contents (${_extractedEntries.length})',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      Expanded(
+                        child: Text(
+                          'Extracted Contents (${_extractedEntries.length})',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
                       TextButton.icon(
                         icon: const Icon(Icons.share_rounded, size: 16),
@@ -396,7 +407,7 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                     child: ListView.separated(
                       shrinkWrap: true,
                       itemCount: _extractedEntries.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (context, idx) {
                         final entry = _extractedEntries[idx];
                         return ListTile(
@@ -408,14 +419,13 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                           ),
                           title: Text(entry.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                           subtitle: Text('${entry.formattedSize} • SHA-256: ${entry.checksumSha256.substring(0, 8)}...'),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.share_rounded, size: 18),
-                            tooltip: 'Share File',
-                            onPressed: () => Printing.sharePdf(
-                              bytes: entry.bytes,
-                              filename: entry.name.split('/').last,
-                            ),
-                          ),
+                          trailing: entry.isDirectory
+                              ? null
+                              : IconButton(
+                                  icon: const Icon(Icons.share_rounded, size: 18),
+                                  tooltip: 'Share File',
+                                  onPressed: () => _share(entry.bytes, entry.name),
+                                ),
                         );
                       },
                     ),
@@ -433,15 +443,17 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
     try {
       final files = await FilePicker.pickFiles();
       if (files.isNotEmpty) {
+        final picked = <ArchiveEntry>[];
         for (final f in files) {
           final bytes = await f.readAsBytes();
-          _createFiles.add(ArchiveEntry(
+          picked.add(ArchiveEntry(
             name: f.name,
             size: bytes.length,
             bytes: bytes,
           ));
         }
-        setState(() {});
+        if (!mounted) return;
+        setState(() => _createFiles.addAll(picked));
         _showToast('Added ${files.length} files to archive builder.');
       }
     } catch (e) {
@@ -455,28 +467,29 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
 
     try {
       final baseName = _archiveNameController.text.trim().isEmpty ? 'archive' : _archiveNameController.text.trim();
-      Uint8List outputBytes;
+      final Uint8List outputBytes;
       String filename;
 
-      if (_tarCompressionType == 'tar') {
-        outputBytes = ArchiveCompareService.createTar(_createFiles);
-        filename = '$baseName.tar';
-      } else if (_tarCompressionType == 'tar.gz') {
-        outputBytes = ArchiveCompareService.createTarGz(_createFiles);
-        filename = '$baseName.tar.gz';
-      } else {
-        // Gzip first file
+      if (_tarCompressionType == 'gz') {
+        // .gz holds a single file: compress the first one and say so.
         final first = _createFiles.first;
-        outputBytes = ArchiveCompareService.compressGzip(first.bytes);
-        filename = '${first.name}.gz';
+        outputBytes = await ArchiveCompareService.buildArchiveInBackground([first], 'gz');
+        filename = '${FileZipUtils.safeFileName(first.name)}.gz';
+        if (_createFiles.length > 1) {
+          _showToast('.gz holds one file: only "${first.name}" was compressed. Use .tar.gz for several.');
+        }
+      } else {
+        outputBytes = await ArchiveCompareService.buildArchiveInBackground(List.of(_createFiles), _tarCompressionType);
+        filename = '$baseName.$_tarCompressionType';
       }
 
-      await Printing.sharePdf(bytes: outputBytes, filename: filename);
+      filename = FileZipUtils.safeFileName(filename);
+      await shareFileBytes(outputBytes, filename);
       _showToast('Successfully generated $filename (${outputBytes.length} bytes)');
     } catch (e) {
       _showToast('Archive build error: $e');
     } finally {
-      setState(() => _isCreatingTar = false);
+      if (mounted) setState(() => _isCreatingTar = false);
     }
   }
 
@@ -486,53 +499,31 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
       if (files.isNotEmpty) {
         final f = files.first;
         final bytes = await f.readAsBytes();
-        _processExtractArchive(f.name, bytes);
+        if (!mounted) return;
+        await _processExtractArchive(f.name, bytes);
       }
     } catch (e) {
       _showToast('Error picking archive: $e');
     }
   }
 
-  void _processExtractArchive(String filename, Uint8List bytes) {
+  Future<void> _processExtractArchive(String filename, Uint8List bytes) async {
     setState(() {
       _selectedArchiveName = filename;
       _selectedArchiveSize = bytes.length;
       _extractedEntries.clear();
+      _isExtracting = true;
     });
 
     try {
-      final lower = filename.toLowerCase();
-      if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) {
-        final extracted = ArchiveCompareService.extractTarGz(bytes);
-        setState(() => _extractedEntries.addAll(extracted));
-        _showToast('Unpacked ${extracted.length} files from TAR.GZ archive');
-      } else if (lower.endsWith('.tar')) {
-        final extracted = ArchiveCompareService.extractTar(bytes);
-        setState(() => _extractedEntries.addAll(extracted));
-        _showToast('Unpacked ${extracted.length} files from TAR archive');
-      } else if (lower.endsWith('.gz')) {
-        final decompressed = ArchiveCompareService.decompressGzip(bytes);
-        final innerName = filename.replaceAll(RegExp(r'\.gz$', caseSensitive: false), '');
-        setState(() {
-          _extractedEntries.add(ArchiveEntry(
-            name: innerName,
-            size: decompressed.length,
-            bytes: decompressed,
-          ));
-        });
-        _showToast('Decompressed GZIP file ($innerName)');
-      } else {
-        // Auto-detect format by trial
-        try {
-          final extracted = ArchiveCompareService.extractTarGz(bytes);
-          setState(() => _extractedEntries.addAll(extracted));
-        } catch (_) {
-          final extracted = ArchiveCompareService.extractTar(bytes);
-          setState(() => _extractedEntries.addAll(extracted));
-        }
-      }
+      final extracted = await ArchiveCompareService.extractInBackground(filename, bytes);
+      if (!mounted || _selectedArchiveName != filename) return;
+      setState(() => _extractedEntries.addAll(extracted));
+      _showToast(extracted.isEmpty ? 'No TAR/GZIP contents found in this file' : 'Unpacked ${extracted.length} file(s) from $filename');
     } catch (e) {
-      _showToast('Extraction error: $e');
+      _showToast('Could not unpack $filename: it is not a valid TAR / GZIP archive, or it is too large ($e)');
+    } finally {
+      if (mounted) setState(() => _isExtracting = false);
     }
   }
 
@@ -540,11 +531,8 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
     if (_extractedEntries.isEmpty) return;
     try {
       // Re-pack into tar.gz for universal clean export
-      final tarGz = ArchiveCompareService.createTarGz(_extractedEntries);
-      await Printing.sharePdf(
-        bytes: tarGz,
-        filename: 'extracted_${DateTime.now().millisecondsSinceEpoch}.tar.gz',
-      );
+      final tarGz = await ArchiveCompareService.buildArchiveInBackground(List.of(_extractedEntries), 'tar.gz');
+      await shareFileBytes(tarGz, 'extracted_${DateTime.now().millisecondsSinceEpoch}.tar.gz');
       _showToast('Exported all unpacked files');
     } catch (e) {
       _showToast('Export error: $e');
@@ -568,21 +556,19 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                 style: TextStyle(fontSize: 13, color: Colors.grey),
               ),
               const SizedBox(height: 16),
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
                 children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.folder_zip_rounded),
-                      label: const Text('Open .7z / .rar Archive'),
-                      onPressed: _pickSevenZipFile,
-                    ),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.folder_zip_rounded),
+                    label: const Text('Open .7z / .rar Archive'),
+                    onPressed: _pickSevenZipFile,
                   ),
-                  const SizedBox(width: 8),
                   ElevatedButton(
                     onPressed: _loadDemoSevenZip,
                     child: const Text('Sample 7z'),
                   ),
-                  const SizedBox(width: 8),
                   ElevatedButton(
                     onPressed: _loadDemoRar,
                     child: const Text('Sample RAR'),
@@ -657,7 +643,8 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(entry.key, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                            Text('${entry.value}', style: const TextStyle(fontSize: 12, fontFamily: 'monospace', fontWeight: FontWeight.bold)),
+                            const SizedBox(width: 12),
+                            Flexible(child: Text('${entry.value}', textAlign: TextAlign.end, style: const TextStyle(fontSize: 12, fontFamily: 'monospace', fontWeight: FontWeight.bold))),
                           ],
                         ),
                       );
@@ -680,7 +667,7 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                         label: const Text('Export Stream'),
                         onPressed: () {
                           final file = _sevenZipInfo!.extractedFiles.first;
-                          Printing.sharePdf(bytes: file.bytes, filename: file.name);
+                          _share(file.bytes, file.name);
                         },
                       ),
                     ],
@@ -765,7 +752,8 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(entry.key, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                            Text(entry.value.toString(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                            const SizedBox(width: 12),
+                            Flexible(child: Text(entry.value.toString(), textAlign: TextAlign.end, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
                           ],
                         ),
                       );
@@ -785,7 +773,10 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
       final files = await FilePicker.pickFiles();
       if (files.isNotEmpty) {
         final f = files.first;
-        final bytes = await f.readAsBytes();
+        // Only the header is inspected, so never load a multi-GB archive into memory.
+        final bytes = await FileZipUtils.readHead(f.readAsByteStream(), 1024 * 1024);
+        final totalSize = f.lengthSync() ?? await f.length() ?? bytes.length;
+        if (!mounted) return;
         final lower = f.name.toLowerCase();
 
         // Check if RAR or 7z
@@ -793,7 +784,7 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
             (bytes.length >= 7 && bytes[0] == 0x52 && bytes[1] == 0x61 && bytes[2] == 0x72);
 
         if (isRar) {
-          final rarInfo = ArchiveCompareService.inspectRarArchive(bytes);
+          final rarInfo = ArchiveCompareService.inspectRarArchive(bytes, totalSize: totalSize);
           setState(() {
             _sevenZipFileName = f.name;
             _rarInfo = rarInfo;
@@ -801,7 +792,7 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
           });
           _showToast(rarInfo.isValidRar ? 'RAR Archive parsed successfully' : 'Warning: Not a valid RAR archive');
         } else {
-          final info = ArchiveCompareService.inspect7zArchive(bytes);
+          final info = ArchiveCompareService.inspect7zArchive(bytes, totalSize: totalSize);
           setState(() {
             _sevenZipFileName = f.name;
             _sevenZipInfo = info;
@@ -853,7 +844,12 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
     bytes[5] = 0x07;
     bytes[6] = 0x01;
     bytes[7] = 0x00;
-    bytes[10] = 0x04; // solid archive
+    // Main archive header after the CRC32: size, type 1, no header flags, then
+    // archive flags (vints).
+    bytes[12] = 0x03;
+    bytes[13] = 0x01;
+    bytes[14] = 0x00;
+    bytes[15] = 0x04; // solid archive
 
     final rarInfo = ArchiveCompareService.inspectRarArchive(bytes);
     setState(() {
@@ -896,6 +892,10 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                 ],
               ),
               const SizedBox(height: 16),
+              if (_isComparingFolders) ...[
+                const LinearProgressIndicator(color: AppColors.primaryOrange),
+                const SizedBox(height: 16),
+              ],
 
               if (_folderDiffResult != null) ...[
                 // Metric Summary Cards
@@ -979,7 +979,7 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                       child: ListView.separated(
                         shrinkWrap: true,
                         itemCount: filteredItems.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        separatorBuilder: (_, _) => const Divider(height: 1),
                         itemBuilder: (context, idx) {
                           final item = filteredItems[idx];
                           return ListTile(
@@ -1054,30 +1054,46 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
     try {
       final files = await FilePicker.pickFiles();
       if (files.isNotEmpty) {
-        final target = isFolderA ? _folderAFiles : _folderBFiles;
-        target.clear();
+        final picked = <ArchiveEntry>[];
         for (final f in files) {
           final bytes = await f.readAsBytes();
-          target.add(ArchiveEntry(name: f.name, size: bytes.length, bytes: bytes));
+          picked.add(ArchiveEntry(name: f.name, size: bytes.length, bytes: bytes));
         }
-        setState(() {});
-        _runFolderComparison();
+        if (!mounted) return;
+        final target = isFolderA ? _folderAFiles : _folderBFiles;
+        target
+          ..clear()
+          ..addAll(picked);
         _showToast('Updated ${isFolderA ? "Folder A" : "Folder B"} with ${files.length} files');
+        await _runFolderComparison();
       }
     } catch (e) {
       _showToast('Error picking folder files: $e');
     }
   }
 
-  void _runFolderComparison() {
-    setState(() {
-      _folderDiffResult = ArchiveCompareService.compareFolders(_folderAFiles, _folderBFiles);
-    });
+  Future<void> _runFolderComparison() async {
+    final run = ++_folderRun;
+    setState(() => _isComparingFolders = true);
+    try {
+      // Hashing every file would freeze the UI, so compare in a background isolate.
+      final result = await ArchiveCompareService.compareFoldersInBackground(List.of(_folderAFiles), List.of(_folderBFiles));
+      if (!mounted || run != _folderRun) return;
+      setState(() => _folderDiffResult = result);
+    } catch (e) {
+      _showToast('Folder comparison failed: $e');
+    } finally {
+      if (mounted && run == _folderRun) setState(() => _isComparingFolders = false);
+    }
   }
 
   void _openInDiff(String relativePath) {
     final entryA = _folderAFiles.firstWhere((e) => e.name == relativePath);
     final entryB = _folderBFiles.firstWhere((e) => e.name == relativePath);
+    if (entryA.bytes.length > _maxDiffBytes || entryB.bytes.length > _maxDiffBytes) {
+      _showToast('Files over ${_maxDiffBytes ~/ (1024 * 1024)} MB are too large to diff line by line.');
+      return;
+    }
     setState(() {
       _fileAName = 'A: $relativePath';
       _fileBName = 'B: $relativePath';
@@ -1125,21 +1141,18 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                 ],
               ),
               const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Row(
-                    children: [
-                      const Text('Diff Mode: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      SegmentedButton<bool>(
-                        segments: const [
-                          ButtonSegment(value: true, label: Text('Side-by-Side', style: TextStyle(fontSize: 11))),
-                          ButtonSegment(value: false, label: Text('Unified', style: TextStyle(fontSize: 11))),
-                        ],
-                        selected: {_isSideBySide},
-                        onSelectionChanged: (set) => setState(() => _isSideBySide = set.first),
-                      ),
+                  const Text('Diff Mode', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(value: true, label: Text('Side-by-Side', style: TextStyle(fontSize: 11))),
+                      ButtonSegment(value: false, label: Text('Unified', style: TextStyle(fontSize: 11))),
                     ],
+                    selected: {_isSideBySide},
+                    onSelectionChanged: (set) => setState(() => _isSideBySide = set.first),
                   ),
                   TextButton.icon(
                     icon: Icon(_isManualInput ? Icons.check_rounded : Icons.edit_note_rounded, size: 18),
@@ -1195,6 +1208,10 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                 ),
               ],
               const SizedBox(height: 16),
+              if (_isDiffing) ...[
+                const LinearProgressIndicator(color: AppColors.primaryOrange),
+                const SizedBox(height: 16),
+              ],
 
               if (_fileDiffResult != null) ...[
                 // Diff KPI Row
@@ -1404,7 +1421,13 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
       final files = await FilePicker.pickFiles();
       if (files.isNotEmpty) {
         final f = files.first;
+        final size = f.lengthSync() ?? await f.length() ?? 0;
+        if (size > _maxDiffBytes) {
+          _showToast('${f.name} is ${(size / (1024 * 1024)).toStringAsFixed(1)} MB: files over ${_maxDiffBytes ~/ (1024 * 1024)} MB are too large to diff line by line.');
+          return;
+        }
         final bytes = await f.readAsBytes();
+        if (!mounted) return;
         setState(() {
           if (isFileA) {
             _fileAName = f.name;
@@ -1423,15 +1446,27 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
     }
   }
 
-  void _runFileDiff() {
-    setState(() {
-      _fileDiffResult = ArchiveCompareService.compareFileContents(
+  Future<void> _runFileDiff() async {
+    if (_fileABytes.length > _maxDiffBytes || _fileBBytes.length > _maxDiffBytes) {
+      _showToast('Text over ${_maxDiffBytes ~/ (1024 * 1024)} MB is too large to diff line by line.');
+      return;
+    }
+    final run = ++_diffRun;
+    setState(() => _isDiffing = true);
+    try {
+      final result = await ArchiveCompareService.compareFileContentsInBackground(
         _fileAName,
         _fileABytes,
         _fileBName,
         _fileBBytes,
       );
-    });
+      if (!mounted || run != _diffRun) return;
+      setState(() => _fileDiffResult = result);
+    } catch (e) {
+      _showToast('Diff failed: $e');
+    } finally {
+      if (mounted && run == _diffRun) setState(() => _isDiffing = false);
+    }
   }
 
   // ==========================================
@@ -1484,9 +1519,14 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
                         style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primaryOrange),
                       ),
                     ),
-                    Text(
-                      '${(_previewFileBytes!.length / 1024).toStringAsFixed(1)} KB',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    Flexible(
+                      child: Text(
+                        _previewFileBytes!.length < _previewTotalSize
+                            ? 'First ${(_previewFileBytes!.length / 1024).round()} KB of ${(_previewTotalSize / (1024 * 1024)).toStringAsFixed(1)} MB'
+                            : '${(_previewFileBytes!.length / 1024).toStringAsFixed(1)} KB',
+                        textAlign: TextAlign.end,
+                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
                     ),
                   ],
                 ),
@@ -1519,6 +1559,10 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
               child: Image.memory(
                 _previewFileBytes!,
                 fit: BoxFit.contain,
+                errorBuilder: (_, _, _) => const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text('Unable to decode this image (corrupt or unsupported format).'),
+                ),
               ),
             ),
           ),
@@ -1558,15 +1602,20 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
               ElevatedButton.icon(
                 icon: const Icon(Icons.visibility_rounded),
                 label: const Text('View PDF via Printing Engine'),
-                onPressed: () => Printing.layoutPdf(onLayout: (_) async => _previewFileBytes!),
+                onPressed: () async {
+                  try {
+                    await Printing.layoutPdf(onLayout: (_) async => _previewFileBytes!);
+                  } catch (e) {
+                    _showToast('Cannot open this PDF: $e');
+                  }
+                },
               ),
             ],
           ),
         );
 
       case PreviewFileType.textCode:
-        final text = utf8.decode(_previewFileBytes!, allowMalformed: true);
-        final lines = text.split('\n');
+        final lines = _previewLines ?? utf8.decode(_previewFileBytes!, allowMalformed: true).split('\n');
         return Container(
           constraints: const BoxConstraints(maxHeight: 420),
           decoration: BoxDecoration(
@@ -1642,12 +1691,28 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
       final files = await FilePicker.pickFiles();
       if (files.isNotEmpty) {
         final f = files.first;
-        final bytes = await f.readAsBytes();
-        final type = ArchiveCompareService.detectFileType(f.name, bytes);
+        final total = f.lengthSync() ?? await f.length() ?? 0;
+        // Big files would exhaust memory (and a text preview re-lays-out every line), so only
+        // the first 1 MB of a large text / binary file is read; images and PDFs need it all.
+        final truncated = total > _previewFullLimit;
+        final bytes = truncated
+            ? await FileZipUtils.readHead(f.readAsByteStream(), _previewHeadLimit)
+            : await f.readAsBytes();
+        var type = ArchiveCompareService.detectFileType(f.name, bytes);
+        // Rendering huge Markdown would freeze the UI; show it as plain text instead.
+        if (type == PreviewFileType.markdown && bytes.length > 512 * 1024) type = PreviewFileType.textCode;
+        if (truncated && (type == PreviewFileType.image || type == PreviewFileType.pdf)) {
+          _showToast('${f.name} is too large to preview (limit ${_previewFullLimit ~/ (1024 * 1024)} MB for images and PDFs).');
+          return;
+        }
+        if (!mounted) return;
         setState(() {
           _previewFileName = f.name;
           _previewFileBytes = bytes;
           _previewFileType = type;
+          _previewTotalSize = total;
+          // Decoded once here, not on every rebuild.
+          _previewLines = type == PreviewFileType.textCode ? utf8.decode(bytes, allowMalformed: true).split('\n') : null;
         });
       }
     } catch (e) {
@@ -1657,15 +1722,19 @@ class _ArchivePreviewToolkitScreenState extends State<ArchivePreviewToolkitScree
 
   void _copyPreviewContent() {
     if (_previewFileBytes == null) return;
-    try {
-      final text = utf8.decode(_previewFileBytes!, allowMalformed: true);
-      Clipboard.setData(ClipboardData(text: text));
-      _showToast('File content copied to clipboard');
-    } catch (_) {
+    // utf8.decode(allowMalformed) never throws, so pick hex for binaries explicitly.
+    if (_previewFileType == PreviewFileType.binaryHex ||
+        _previewFileType == PreviewFileType.image ||
+        _previewFileType == PreviewFileType.pdf ||
+        _previewFileType == PreviewFileType.audio) {
       final hex = ArchiveCompareService.generateHexDump(_previewFileBytes!).join('\n');
       Clipboard.setData(ClipboardData(text: hex));
       _showToast('Hex dump copied to clipboard');
+      return;
     }
+    final text = utf8.decode(_previewFileBytes!, allowMalformed: true);
+    Clipboard.setData(ClipboardData(text: text));
+    _showToast('File content copied to clipboard');
   }
 
   void _showInfoDialog() {

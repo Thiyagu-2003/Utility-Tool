@@ -41,10 +41,12 @@ class _DateDifferenceScreenState extends State<DateDifferenceScreen> {
   }
 
   Map<String, dynamic> _computeDifference() {
-    DateTime s = DateTime(_startDate.year, _startDate.month, _startDate.day);
-    DateTime e = DateTime(_endDate.year, _endDate.month, _endDate.day);
+    // UTC dates so DST changes can't make a day 23h/25h long and skew the counts.
+    DateTime s = DateTime.utc(_startDate.year, _startDate.month, _startDate.day);
+    DateTime e = DateTime.utc(_endDate.year, _endDate.month, _endDate.day);
 
-    if (e.isBefore(s)) {
+    final swapped = e.isBefore(s);
+    if (swapped) {
       final temp = s;
       s = e;
       e = temp;
@@ -79,6 +81,7 @@ class _DateDifferenceScreenState extends State<DateDifferenceScreen> {
       'weeks': weeks,
       'remainingDays': remainingDays,
       'totalHours': totalHours,
+      'swapped': swapped,
     };
   }
 
@@ -104,7 +107,7 @@ class _DateDifferenceScreenState extends State<DateDifferenceScreen> {
           ResultCard(
             title: 'Difference',
             primaryResult: '$totalDays ${totalDays == 1 ? 'Day' : 'Days'}',
-            subtitle: '${diff['weeks']} weeks and ${diff['remainingDays']} days',
+            subtitle: '${diff['weeks']} weeks and ${diff['remainingDays']} days${diff['swapped'] == true ? ' (end date is before start date; compared in reverse)' : ''}',
             accentColor: AppColors.catDate,
             breakdowns: [
               BreakdownItem(
@@ -154,7 +157,7 @@ class _DateDifferenceScreenState extends State<DateDifferenceScreen> {
             ),
             subtitle: const Text('Add 1 day to include the final date itself'),
             value: _includeEndDay,
-            activeColor: AppColors.primaryOrange,
+            activeThumbColor: AppColors.primaryOrange,
             onChanged: (val) {
               PreferencesService().triggerHaptic();
               setState(() {

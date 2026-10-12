@@ -32,8 +32,14 @@ class _PercentageCalculatorScreenState extends State<PercentageCalculatorScreen>
   final NumberFormat _fmt = NumberFormat('#,##0.######');
 
   Map<String, dynamic> _compute() {
-    final v1 = double.tryParse(_val1Controller.text.trim()) ?? 0;
-    final v2 = double.tryParse(_val2Controller.text.trim()) ?? 0;
+    // Non-finite input ("1e999") is treated like empty input instead of printing Infinity/NaN.
+    double parse(TextEditingController c) {
+      final v = double.tryParse(c.text.trim());
+      return v != null && v.isFinite ? v : 0;
+    }
+
+    final v1 = parse(_val1Controller);
+    final v2 = parse(_val2Controller);
 
     String primary = '0';
     String subtitle = '';
@@ -44,9 +50,9 @@ class _PercentageCalculatorScreenState extends State<PercentageCalculatorScreen>
         // What is v1% of v2?
         final res = (v1 / 100) * v2;
         primary = _fmt.format(res);
-        subtitle = '$v1% of $v2 is $primary';
+        subtitle = '${_fmt.format(v1)}% of ${_fmt.format(v2)} is $primary';
         items = [
-          BreakdownItem(label: 'Percentage', value: '$v1%'),
+          BreakdownItem(label: 'Percentage', value: '${_fmt.format(v1)}%'),
           BreakdownItem(label: 'Base Number', value: _fmt.format(v2)),
           BreakdownItem(label: 'Remaining (${(100 - v1).toStringAsFixed(1)}%)', value: _fmt.format(v2 - res)),
         ];
@@ -60,11 +66,11 @@ class _PercentageCalculatorScreenState extends State<PercentageCalculatorScreen>
         } else {
           final res = (v1 / v2) * 100;
           primary = '${_fmt.format(res)}%';
-          subtitle = '$v1 is $primary of $v2';
+          subtitle = '${_fmt.format(v1)} is $primary of ${_fmt.format(v2)}';
           items = [
             BreakdownItem(label: 'Part (X)', value: _fmt.format(v1)),
             BreakdownItem(label: 'Total (Y)', value: _fmt.format(v2)),
-            BreakdownItem(label: 'Ratio', value: '1 : ${_fmt.format(v2 / (v1 == 0 ? 1 : v1))}'),
+            BreakdownItem(label: 'Ratio', value: v1 == 0 ? '—' : '1 : ${_fmt.format(v2 / v1)}'),
           ];
         }
         break;
@@ -76,7 +82,7 @@ class _PercentageCalculatorScreenState extends State<PercentageCalculatorScreen>
           subtitle = 'Initial value cannot be zero';
         } else {
           final diff = v2 - v1;
-          final pct = (diff / v1) * 100;
+          final pct = (diff / v1.abs()) * 100; // |X| keeps the sign right for negative starting values
           final isIncrease = diff >= 0;
           primary = '${isIncrease ? '+' : ''}${_fmt.format(pct)}%';
           subtitle = '${isIncrease ? 'Increase' : 'Decrease'} of ${_fmt.format(diff.abs())}';

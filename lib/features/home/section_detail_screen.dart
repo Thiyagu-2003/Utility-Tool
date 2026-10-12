@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/localization/app_localizations.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/registry/tool_registry.dart';
 import '../../core/services/preferences_service.dart';
@@ -26,7 +27,7 @@ class SectionDetailScreen extends StatelessWidget {
       backgroundColor: isDark ? AppColors.darkBackground : AppColors.lightBackground,
       appBar: AppBar(
         title: Text(
-          category.label,
+          categoryLabel(context, category),
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
         ),
         actions: [
@@ -34,7 +35,7 @@ class SectionDetailScreen extends StatelessWidget {
             margin: const EdgeInsets.only(right: 16),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: category.color.withOpacity(0.12),
+              color: category.color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
@@ -67,15 +68,15 @@ class SectionDetailScreen extends StatelessWidget {
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  category.color.withOpacity(0.15),
-                  category.color.withOpacity(0.03),
+                  category.color.withValues(alpha: 0.15),
+                  category.color.withValues(alpha: 0.03),
                 ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: category.color.withOpacity(0.2),
+                color: category.color.withValues(alpha: 0.2),
                 width: 1,
               ),
             ),
@@ -85,7 +86,7 @@ class SectionDetailScreen extends StatelessWidget {
                   width: 52,
                   height: 52,
                   decoration: BoxDecoration(
-                    color: category.color.withOpacity(0.15),
+                    color: category.color.withValues(alpha: 0.15),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(category.icon, color: category.color, size: 26),
@@ -96,7 +97,7 @@ class SectionDetailScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        category.label,
+                        categoryLabel(context, category),
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -105,7 +106,7 @@ class SectionDetailScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        category.description,
+                        categoryDescription(context, category),
                         style: TextStyle(
                           fontSize: 13,
                           color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,

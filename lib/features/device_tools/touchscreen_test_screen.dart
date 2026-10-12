@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/models/tool_model.dart';
+import '../../core/services/preferences_service.dart';
 import '../../core/services/vibration_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../shared/widgets/tool_scaffold.dart';
@@ -23,9 +24,12 @@ class _TouchscreenTestScreenState extends State<TouchscreenTestScreen> {
   // Multi-Touch Pointer State
   final Map<int, Offset> _activePointers = {};
   final List<List<Offset>> _drawnTrails = [];
-  List<Offset> _currentTrail = [];
+  // Each finger extends its own trail; a single shared trail joined fingers together.
+  final Map<int, List<Offset>> _trailByPointer = {};
 
   void _markCellAt(Offset localPos, Size size) {
+    // Dragging past the grid edge must not light up the border cells.
+    if (!(Offset.zero & size).contains(localPos)) return;
     final cellWidth = size.width / _cols;
     final cellHeight = size.height / _rows;
 
@@ -37,10 +41,11 @@ class _TouchscreenTestScreenState extends State<TouchscreenTestScreen> {
       setState(() {
         _testedCells.add(index);
       });
+      // Respect the Settings haptics switch.
       if (_testedCells.length == _totalCells) {
-        VibrationService.heavyImpact();
+        if (PreferencesService().hapticEnabled) VibrationService.heavyImpact();
       } else {
-        VibrationService.selectionClick();
+        PreferencesService().triggerSelectionHaptic();
       }
     }
   }
@@ -51,7 +56,7 @@ class _TouchscreenTestScreenState extends State<TouchscreenTestScreen> {
 
     return ToolScaffold(
       title: 'Touchscreen Digitizer Test',
-      category: ToolCategory.moreTools,
+      category: ToolCategory.deviceTests,
       toolId: 'touchscreen_test',
       isScrollable: false,
       body: Column(
@@ -79,7 +84,7 @@ class _TouchscreenTestScreenState extends State<TouchscreenTestScreen> {
                     setState(() {
                       _testedCells.clear();
                       _drawnTrails.clear();
-                      _currentTrail.clear();
+                      _trailByPointer.clear();
                     });
                   },
                 ),
@@ -103,12 +108,16 @@ class _TouchscreenTestScreenState extends State<TouchscreenTestScreen> {
                       color: _testedCells.length == _totalCells ? AppColors.success : AppColors.primaryOrange,
                     ),
                   ),
-                  Text(
-                    _testedCells.length == _totalCells ? 'PASSED: 100% HEALTHY' : 'Drag finger across screen',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: _testedCells.length == _totalCells ? AppColors.success : (isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted),
+                  Flexible(
+                    child: Text(
+                      _testedCells.length == _totalCells ? 'PASSED: 100% HEALTHY' : 'Drag finger across screen',
+                      textAlign: TextAlign.end,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _testedCells.length == _totalCells ? AppColors.success : (isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted),
+                      ),
                     ),
                   ),
                 ] else ...[
@@ -116,9 +125,13 @@ class _TouchscreenTestScreenState extends State<TouchscreenTestScreen> {
                     'Active Fingers: ${_activePointers.length}',
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.catConverter),
                   ),
-                  Text(
-                    'Touch and draw with multiple fingers',
-                    style: TextStyle(fontSize: 12, color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted),
+                  Flexible(
+                    child: Text(
+                      'Touch and draw with multiple fingers',
+                      textAlign: TextAlign.end,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted),
+                    ),
                   ),
                 ],
               ],
@@ -184,25 +197,28 @@ class _TouchscreenTestScreenState extends State<TouchscreenTestScreen> {
       onPointerDown: (event) {
         setState(() {
           _activePointers[event.pointer] = event.localPosition;
-          _currentTrail = [event.localPosition];
-          _drawnTrails.add(_currentTrail);
+          final trail = [event.localPosition];
+          _trailByPointer[event.pointer] = trail;
+          _drawnTrails.add(trail);
         });
-        VibrationService.selectionClick();
+        PreferencesService().triggerSelectionHaptic();
       },
       onPointerMove: (event) {
         setState(() {
           _activePointers[event.pointer] = event.localPosition;
-          _currentTrail.add(event.localPosition);
+          _trailByPointer[event.pointer]?.add(event.localPosition);
         });
       },
       onPointerUp: (event) {
         setState(() {
           _activePointers.remove(event.pointer);
+          _trailByPointer.remove(event.pointer);
         });
       },
       onPointerCancel: (event) {
         setState(() {
           _activePointers.remove(event.pointer);
+          _trailByPointer.remove(event.pointer);
         });
       },
       child: Container(

@@ -25,6 +25,72 @@ class DiffLine {
   DiffLine({required this.type, required this.text, this.origLineNum, this.modLineNum});
 }
 
+const _maxLcsCells = 4000000;
+
+/// Line diff based on the longest common subsequence, so moved or edited
+/// lines produce a minimal set of additions and removals. Empty text has no lines.
+List<DiffLine> computeLineDiff(String original, String modified) {
+  final a = original.isEmpty ? <String>[] : original.split('\n');
+  final b = modified.isEmpty ? <String>[] : modified.split('\n');
+
+  // Trim the common prefix and suffix to keep the LCS table small.
+  var start = 0;
+  while (start < a.length && start < b.length && a[start] == b[start]) {
+    start++;
+  }
+  var endA = a.length, endB = b.length;
+  while (endA > start && endB > start && a[endA - 1] == b[endB - 1]) {
+    endA--;
+    endB--;
+  }
+
+  final n = endA - start, m = endB - start;
+  // The LCS table is n*m ints; past this size treat the middle as replaced
+  // rather than freezing or running out of memory on huge pastes.
+  if (n * m > _maxLcsCells) {
+    return [
+      for (var k = 0; k < start; k++)
+        DiffLine(type: DiffType.unchanged, text: a[k], origLineNum: k + 1, modLineNum: k + 1),
+      for (var k = start; k < endA; k++) DiffLine(type: DiffType.removed, text: a[k], origLineNum: k + 1),
+      for (var k = start; k < endB; k++) DiffLine(type: DiffType.added, text: b[k], modLineNum: k + 1),
+      for (var k = 0; k < a.length - endA; k++)
+        DiffLine(type: DiffType.unchanged, text: a[endA + k], origLineNum: endA + k + 1, modLineNum: endB + k + 1),
+    ];
+  }
+  // lcs[i][j] = LCS length of a[start+i..endA) and b[start+j..endB)
+  final lcs = List.generate(n + 1, (_) => List<int>.filled(m + 1, 0));
+  for (var i = n - 1; i >= 0; i--) {
+    for (var j = m - 1; j >= 0; j--) {
+      lcs[i][j] = a[start + i] == b[start + j]
+          ? lcs[i + 1][j + 1] + 1
+          : (lcs[i + 1][j] >= lcs[i][j + 1] ? lcs[i + 1][j] : lcs[i][j + 1]);
+    }
+  }
+
+  final diffs = <DiffLine>[
+    for (var k = 0; k < start; k++)
+      DiffLine(type: DiffType.unchanged, text: a[k], origLineNum: k + 1, modLineNum: k + 1),
+  ];
+  var i = 0, j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && a[start + i] == b[start + j]) {
+      diffs.add(DiffLine(type: DiffType.unchanged, text: a[start + i], origLineNum: start + i + 1, modLineNum: start + j + 1));
+      i++;
+      j++;
+    } else if (i < n && (j == m || lcs[i + 1][j] >= lcs[i][j + 1])) {
+      diffs.add(DiffLine(type: DiffType.removed, text: a[start + i], origLineNum: start + i + 1));
+      i++;
+    } else {
+      diffs.add(DiffLine(type: DiffType.added, text: b[start + j], modLineNum: start + j + 1));
+      j++;
+    }
+  }
+  for (var k = 0; k < a.length - endA; k++) {
+    diffs.add(DiffLine(type: DiffType.unchanged, text: a[endA + k], origLineNum: endA + k + 1, modLineNum: endB + k + 1));
+  }
+  return diffs;
+}
+
 class TextDiffCleanerScreen extends StatefulWidget {
   const TextDiffCleanerScreen({super.key});
 
@@ -68,48 +134,7 @@ class _TextDiffCleanerScreenState extends State<TextDiffCleanerScreen> {
   }
 
   // --- DIFF LOGIC ---
-  List<DiffLine> _computeDiff() {
-    final origLines = _origTextCtrl.text.split('\n');
-    final modLines = _modTextCtrl.text.split('\n');
-
-    final List<DiffLine> diffs = [];
-    final origSet = origLines.toSet();
-    final modSet = modLines.toSet();
-
-    int origIdx = 0;
-    int modIdx = 0;
-
-    while (origIdx < origLines.length || modIdx < modLines.length) {
-      if (origIdx < origLines.length && modIdx < modLines.length) {
-        if (origLines[origIdx] == modLines[modIdx]) {
-          diffs.add(DiffLine(type: DiffType.unchanged, text: origLines[origIdx], origLineNum: origIdx + 1, modLineNum: modIdx + 1));
-          origIdx++;
-          modIdx++;
-          continue;
-        }
-      }
-
-      if (origIdx < origLines.length && !modSet.contains(origLines[origIdx])) {
-        diffs.add(DiffLine(type: DiffType.removed, text: origLines[origIdx], origLineNum: origIdx + 1));
-        origIdx++;
-      } else if (modIdx < modLines.length && !origSet.contains(modLines[modIdx])) {
-        diffs.add(DiffLine(type: DiffType.added, text: modLines[modIdx], modLineNum: modIdx + 1));
-        modIdx++;
-      } else {
-        // Line modified or displaced
-        if (origIdx < origLines.length) {
-          diffs.add(DiffLine(type: DiffType.removed, text: origLines[origIdx], origLineNum: origIdx + 1));
-          origIdx++;
-        }
-        if (modIdx < modLines.length) {
-          diffs.add(DiffLine(type: DiffType.added, text: modLines[modIdx], modLineNum: modIdx + 1));
-          modIdx++;
-        }
-      }
-    }
-
-    return diffs;
-  }
+  List<DiffLine> _computeDiff() => computeLineDiff(_origTextCtrl.text, _modTextCtrl.text);
 
   // --- DEDUPE LOGIC ---
   void _processDeduplication() {
@@ -151,7 +176,7 @@ class _TextDiffCleanerScreenState extends State<TextDiffCleanerScreen> {
 
     return ToolScaffold(
       title: 'Text Diff & Cleaner',
-      category: ToolCategory.filesText,
+      category: ToolCategory.textTools,
       toolId: 'text_diff_cleaner',
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -166,12 +191,12 @@ class _TextDiffCleanerScreenState extends State<TextDiffCleanerScreen> {
   }
 
   Widget _buildSegmentChips(bool isDark) {
-    return Row(
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
       children: TextToolTab.values.map((tab) {
         final isSelected = _activeTab == tab;
-        return Padding(
-          padding: const EdgeInsets.only(right: 8.0),
-          child: ChoiceChip(
+        return ChoiceChip(
             showCheckmark: false,
             avatar: Icon(tab.icon, size: 16, color: isSelected ? Colors.white : null),
             label: Text(tab.label),
@@ -181,7 +206,6 @@ class _TextDiffCleanerScreenState extends State<TextDiffCleanerScreen> {
               PreferencesService().triggerHaptic();
               setState(() => _activeTab = tab);
             },
-          ),
         );
       }).toList(),
     );
@@ -236,10 +260,10 @@ class _TextDiffCleanerScreenState extends State<TextDiffCleanerScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Difference Highlighting', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            const Flexible(child: Text('Difference Highlighting', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
             TextButton.icon(
               icon: const Icon(Icons.copy_rounded, size: 16),
-              label: const Text('Copy Unified Diff'),
+              label: const Text('Copy Diff'),
               onPressed: () {
                 final str = diffs.map((d) {
                   final p = d.type == DiffType.added ? '+ ' : d.type == DiffType.removed ? '- ' : '  ';
@@ -308,7 +332,7 @@ class _TextDiffCleanerScreenState extends State<TextDiffCleanerScreen> {
 
   // --- TAB 2: DEDUPE ---
   Widget _buildDedupeTab(bool isDark) {
-    final origCount = _dedupeInputCtrl.text.split('\n').length;
+    final origCount = _dedupeInputCtrl.text.isEmpty ? 0 : _dedupeInputCtrl.text.split('\n').length;
     final cleanCount = _cleanedResult.isEmpty ? 0 : _cleanedResult.split('\n').length;
     final removed = origCount - cleanCount;
 
@@ -364,7 +388,8 @@ class _TextDiffCleanerScreenState extends State<TextDiffCleanerScreen> {
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
-          value: _sortMode,
+          isExpanded: true,
+          initialValue: _sortMode,
           decoration: InputDecoration(labelText: 'Sort Order', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
           items: [
             'Keep Original Order',

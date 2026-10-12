@@ -1,8 +1,111 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:math_expressions/math_expressions.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
+
+/// Evaluates a calculator display expression (×, ÷, %, π, e, lg, √, !).
+/// Throws on malformed input; undefined results come back as NaN/Infinity.
+double evaluateCalculatorExpression(String expression, {bool degrees = false}) {
+  var exp = expression
+      .replaceAll(',', '') // grouping separators from formatted results
+      .replaceAll('×', '*')
+      .replaceAll('÷', '/')
+      .replaceAll('%', '*(0.01)')
+      .replaceAll('π', '(pi)')
+      .replaceAll('e', '(e)')
+      .replaceAll('lg(', 'log(10,');
+  // Auto-close any brackets the user left open, e.g. "sqrt(9".
+  final open = '('.allMatches(exp).length - ')'.allMatches(exp).length;
+  if (open > 0) exp += ')' * open;
+  exp = _wrapSignedExponents(exp);
+  final parsed = GrammarParser(const ParserOptions(implicitMultiplication: true)).parse(exp);
+  return _CalculatorEvaluator(degrees).evaluate(parsed).toDouble() + 0.0;
+}
+
+/// The grammar rejects `2^-1`; rewrite a signed exponent as `2^(-1)`.
+String _wrapSignedExponents(String s) {
+  final out = StringBuffer();
+  var i = 0;
+  while (i < s.length) {
+    final c = s[i++];
+    out.write(c);
+    if (c != '^' || i >= s.length || (s[i] != '-' && s[i] != '+')) continue;
+    final j = i + 1;
+    var k = j;
+    int closing(int open) {
+      var depth = 0;
+      for (var m = open; m < s.length; m++) {
+        if (s[m] == '(') depth++;
+        if (s[m] == ')' && --depth == 0) return m + 1;
+      }
+      return s.length;
+    }
+    if (k < s.length && s[k] == '(') {
+      k = closing(k);
+    } else {
+      while (k < s.length && RegExp(r'[0-9.]').hasMatch(s[k])) {
+        k++;
+      }
+      if (k == j) {
+        while (k < s.length && RegExp(r'[a-z]').hasMatch(s[k])) {
+          k++;
+        }
+        if (k > j && k < s.length && s[k] == '(') k = closing(k);
+      }
+    }
+    if (k == j) continue; // nothing to wrap; let the parser report it
+    out.write('(${s.substring(i, k)})');
+    i = k;
+  }
+  return out.toString();
+}
+
+class _CalculatorEvaluator extends RealEvaluator {
+  _CalculatorEvaluator(this.degrees) : super(ContextModel(), true);
+
+  final bool degrees;
+
+  void _toRadians() {
+    if (!degrees) return;
+    final (val,) = pop1();
+    push1(val / 180 * math.pi);
+  }
+
+  @override
+  void visitSin(Sin func) {
+    _toRadians();
+    super.visitSin(func);
+  }
+
+  @override
+  void visitCos(Cos func) {
+    _toRadians();
+    super.visitCos(func);
+  }
+
+  @override
+  void visitTan(Tan func) {
+    _toRadians();
+    super.visitTan(func);
+  }
+
+  @override
+  void visitFactorial(Factorial func) {
+    final (val,) = pop1();
+    // n! is only defined here for non-negative integers; 171! overflows a double.
+    if (val < 0 || val != val.truncateToDouble()) {
+      push1(double.nan);
+    } else if (val > 170) {
+      push1(double.infinity);
+    } else {
+      push1(val);
+      super.visitFactorial(func);
+    }
+  }
+}
 
 class CalculatorScreen extends StatefulWidget {
   const CalculatorScreen({super.key});
@@ -44,20 +147,19 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         }
       } else if (value == 'x!') {
         _appendOperator('!');
+        _calculatePreview();
       } else if (value == '√') {
         _expression += 'sqrt(';
         _calculatePreview();
-      } else if (value == 'π') {
-        _expression += '3.14159265';
-        _calculatePreview();
-      } else if (value == 'e') {
-        _expression += '2.71828182';
+      } else if (value == '.') {
+        final last = _expression.isEmpty ? '' : _expression[_expression.length - 1];
+        _expression += RegExp(r'[0-9]').hasMatch(last) ? '.' : '0.';
         _calculatePreview();
       } else if (value == 'x^y') {
-        _expression += '^';
+        if (_expression.isNotEmpty) _expression += '^';
       } else if (['sin', 'cos', 'tan', 'ln', 'lg'].contains(value)) {
         if (value == 'lg') {
-          _expression += 'log(';
+          _expression += 'lg(';
         } else {
           _expression += '$value(';
         }
@@ -87,20 +189,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     }
 
     try {
-      String parsedExp = _expression
-          .replaceAll('×', '*')
-          .replaceAll('÷', '/')
-          .replaceAll('%', '*0.01');
-
-      // Handle deg/rad for trig
-      if (_isDegreeMode) {
-        // approximate degree parsing or direct math evaluation
-      }
-
-      Parser p = Parser();
-      Expression exp = p.parse(parsedExp);
-      ContextModel cm = ContextModel();
-      double eval = exp.evaluate(EvaluationType.REAL, cm);
+      final eval = evaluateCalculatorExpression(_expression, degrees: _isDegreeMode);
 
       if (eval.isNaN || eval.isInfinite) {
         _previewResult = 'Error';
@@ -115,15 +204,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   void _evaluateFinal() {
     if (_expression.isEmpty) return;
     try {
-      String parsedExp = _expression
-          .replaceAll('×', '*')
-          .replaceAll('÷', '/')
-          .replaceAll('%', '*0.01');
-
-      Parser p = Parser();
-      Expression exp = p.parse(parsedExp);
-      ContextModel cm = ContextModel();
-      double eval = exp.evaluate(EvaluationType.REAL, cm);
+      final eval = evaluateCalculatorExpression(_expression, degrees: _isDegreeMode);
 
       if (eval.isNaN || eval.isInfinite) {
         setState(() {
@@ -205,7 +286,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.history_toggle_off_rounded, size: 48, color: AppColors.darkTextMuted.withOpacity(0.5)),
+                            Icon(Icons.history_toggle_off_rounded, size: 48, color: AppColors.darkTextMuted.withValues(alpha: 0.5)),
                             const SizedBox(height: 12),
                             const Text('No recent calculations'),
                           ],
@@ -213,7 +294,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                       )
                     : ListView.separated(
                         itemCount: history.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        separatorBuilder: (_, _) => const Divider(height: 1),
                         itemBuilder: (context, index) {
                           final item = history[index];
                           return ListTile(
@@ -274,8 +355,8 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       resolvedBg = AppColors.primaryOrange;
     } else if (isOperator) {
       resolvedBg = isDark
-          ? AppColors.primaryOrange.withOpacity(0.12)
-          : AppColors.primaryOrange.withOpacity(0.08);
+          ? AppColors.primaryOrange.withValues(alpha: 0.12)
+          : AppColors.primaryOrange.withValues(alpha: 0.08);
     } else {
       resolvedBg = isDark ? AppColors.darkSurface : AppColors.lightCardHover;
     }
@@ -350,7 +431,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: AppColors.primaryOrange.withOpacity(0.1),
+                        color: AppColors.primaryOrange.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
@@ -412,7 +493,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                           style: TextStyle(
                             fontSize: 22,
                             fontWeight: FontWeight.w500,
-                            color: AppColors.primaryOrange.withOpacity(0.8),
+                            color: AppColors.primaryOrange.withValues(alpha: 0.8),
                           ),
                           textAlign: TextAlign.right,
                         ),

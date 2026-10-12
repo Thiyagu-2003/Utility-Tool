@@ -1,4 +1,20 @@
 
+/// Whole calendar days from [from] to [to], ignoring the time of day.
+/// Uses UTC dates so a DST change (23h/25h local day) can't shift the count.
+int calendarDaysBetween(DateTime from, DateTime to) {
+  final a = DateTime.utc(from.year, from.month, from.day);
+  final b = DateTime.utc(to.year, to.month, to.day);
+  return b.difference(a).inDays;
+}
+
+/// [date] plus [months], clamping the day to the target month's length
+/// (Jan 31 + 1 month = Feb 28/29, not Mar 3).
+DateTime _addMonthsClamped(DateTime date, int months) {
+  final firstOfTarget = DateTime(date.year, date.month + months, 1);
+  final lastDay = DateTime(firstOfTarget.year, firstOfTarget.month + 1, 0).day;
+  return DateTime(firstOfTarget.year, firstOfTarget.month, date.day > lastDay ? lastDay : date.day);
+}
+
 /// Priority levels for tasks and events
 enum PriorityLevel {
   low('Low'),
@@ -51,7 +67,7 @@ class NoteItem {
     title: json['title'] ?? '',
     content: json['content'] ?? '',
     category: json['category'] ?? 'General',
-    colorValue: json['colorValue'] ?? 0xFF3B82F6,
+    colorValue: (json['colorValue'] as num?)?.toInt() ?? 0xFF3B82F6,
     isPinned: json['isPinned'] ?? false,
     updatedAt: DateTime.tryParse(json['updatedAt'] ?? '') ?? DateTime.now(),
   );
@@ -148,12 +164,21 @@ class SubscriptionItem {
     return cost;
   }
 
-  int get daysUntilRenewal {
-    final now = DateTime.now();
+  /// A recurring subscription renews again once its stored date has passed, so
+  /// roll the date forward by whole billing cycles until it is today or later.
+  DateTime nextRenewalFrom(DateTime now) {
     final today = DateTime(now.year, now.month, now.day);
-    final target = DateTime(nextRenewalDate.year, nextRenewalDate.month, nextRenewalDate.day);
-    return target.difference(today).inDays;
+    final step = billingCycle == 'Yearly' ? 12 : 1;
+    var target = DateTime(nextRenewalDate.year, nextRenewalDate.month, nextRenewalDate.day);
+    for (var cycles = step; target.isBefore(today); cycles += step) {
+      target = _addMonthsClamped(nextRenewalDate, cycles);
+    }
+    return target;
   }
+
+  DateTime get upcomingRenewalDate => nextRenewalFrom(DateTime.now());
+
+  int get daysUntilRenewal => calendarDaysBetween(DateTime.now(), upcomingRenewalDate);
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -173,7 +198,7 @@ class SubscriptionItem {
     billingCycle: json['billingCycle'] ?? 'Monthly',
     nextRenewalDate: DateTime.tryParse(json['nextRenewalDate'] ?? '') ?? DateTime.now(),
     category: json['category'] ?? 'Streaming',
-    alertDaysBefore: json['alertDaysBefore'] ?? 3,
+    alertDaysBefore: (json['alertDaysBefore'] as num?)?.toInt() ?? 3,
     isActive: json['isActive'] ?? true,
   );
 }
@@ -198,12 +223,7 @@ class BillItem {
     this.category = 'Utilities',
   });
 
-  int get daysUntilDue {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final due = DateTime(dueDate.year, dueDate.month, dueDate.day);
-    return due.difference(today).inDays;
-  }
+  int get daysUntilDue => calendarDaysBetween(DateTime.now(), dueDate);
 
   bool get isOverdue => !isPaid && daysUntilDue < 0;
 
@@ -267,10 +287,32 @@ class WorkSessionItem {
     id: json['id'] ?? '',
     startTime: DateTime.tryParse(json['startTime'] ?? '') ?? DateTime.now(),
     endTime: json['endTime'] != null ? DateTime.tryParse(json['endTime']) : null,
-    breakMinutes: json['breakMinutes'] ?? 0,
+    breakMinutes: (json['breakMinutes'] as num?)?.toInt() ?? 0,
     hourlyRate: (json['hourlyRate'] as num?)?.toDouble() ?? 25.0,
     taskDescription: json['taskDescription'] ?? 'General Work',
   );
+}
+
+/// Which tasks the To-Do tab shows.
+enum TodoFilter { all, active, completed }
+
+/// Applies the category chip ('All' = every category) and the status tab.
+List<TodoItem> filterTodos(
+  List<TodoItem> todos, {
+  String category = 'All',
+  TodoFilter status = TodoFilter.all,
+}) {
+  return todos.where((t) {
+    if (category != 'All' && t.category != category) return false;
+    switch (status) {
+      case TodoFilter.all:
+        return true;
+      case TodoFilter.active:
+        return !t.isCompleted;
+      case TodoFilter.completed:
+        return t.isCompleted;
+    }
+  }).toList();
 }
 
 /// 6. To-Do & Checklist Item model
@@ -283,6 +325,9 @@ class TodoItem {
   final String category;
   final List<String> subtasks;
 
+  /// Indexes into [subtasks] that are ticked off.
+  final List<int> doneSubtasks;
+
   TodoItem({
     required this.id,
     required this.title,
@@ -291,7 +336,34 @@ class TodoItem {
     this.dueDate,
     this.category = 'Tasks',
     this.subtasks = const [],
+    this.doneSubtasks = const [],
   });
+
+  bool isSubtaskDone(int index) => doneSubtasks.contains(index);
+
+  TodoItem addSubtask(String text) {
+    final clean = text.trim();
+    if (clean.isEmpty) return this;
+    return copyWith(subtasks: [...subtasks, clean]);
+  }
+
+  TodoItem toggleSubtask(int index) {
+    if (index < 0 || index >= subtasks.length) return this;
+    final done = isSubtaskDone(index) ? doneSubtasks.where((i) => i != index).toList() : [...doneSubtasks, index];
+    return copyWith(doneSubtasks: done);
+  }
+
+  /// Removes a subtask and shifts the done markers of the ones after it.
+  TodoItem removeSubtask(int index) {
+    if (index < 0 || index >= subtasks.length) return this;
+    return copyWith(
+      subtasks: [...subtasks]..removeAt(index),
+      doneSubtasks: [
+        for (final i in doneSubtasks)
+          if (i != index) i > index ? i - 1 : i,
+      ],
+    );
+  }
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -301,17 +373,25 @@ class TodoItem {
     'dueDate': dueDate?.toIso8601String(),
     'category': category,
     'subtasks': subtasks,
+    'doneSubtasks': doneSubtasks,
   };
 
-  factory TodoItem.fromJson(Map<String, dynamic> json) => TodoItem(
-    id: json['id'] ?? '',
-    title: json['title'] ?? '',
-    isCompleted: json['isCompleted'] ?? false,
-    priority: PriorityLevel.fromString(json['priority'] ?? 'medium'),
-    dueDate: json['dueDate'] != null ? DateTime.tryParse(json['dueDate']) : null,
-    category: json['category'] ?? 'Tasks',
-    subtasks: (json['subtasks'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
-  );
+  factory TodoItem.fromJson(Map<String, dynamic> json) {
+    final subtasks = (json['subtasks'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? <String>[];
+    return TodoItem(
+      id: json['id'] ?? '',
+      title: json['title'] ?? '',
+      isCompleted: json['isCompleted'] ?? false,
+      priority: PriorityLevel.fromString(json['priority'] ?? 'medium'),
+      dueDate: json['dueDate'] != null ? DateTime.tryParse(json['dueDate']) : null,
+      category: json['category'] ?? 'Tasks',
+      subtasks: subtasks,
+      doneSubtasks: [
+        for (final i in (json['doneSubtasks'] as List<dynamic>? ?? const []))
+          if (i is int && i >= 0 && i < subtasks.length) i,
+      ],
+    );
+  }
 
   TodoItem copyWith({
     String? title,
@@ -320,6 +400,7 @@ class TodoItem {
     DateTime? dueDate,
     String? category,
     List<String>? subtasks,
+    List<int>? doneSubtasks,
   }) {
     return TodoItem(
       id: id,
@@ -329,6 +410,7 @@ class TodoItem {
       dueDate: dueDate ?? this.dueDate,
       category: category ?? this.category,
       subtasks: subtasks ?? this.subtasks,
+      doneSubtasks: doneSubtasks ?? this.doneSubtasks,
     );
   }
 }
