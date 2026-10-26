@@ -89,6 +89,12 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
       UnitDefinition('Square Yard', 'yd²', 0.83612736),
       UnitDefinition('Acre', 'ac', 4046.8564224),
       UnitDefinition('Hectare', 'ha', 10000.0),
+      UnitDefinition('Cent', 'cent', 40.468564224),
+      UnitDefinition('Guntha', 'guntha', 101.17141056),
+      UnitDefinition('Ground', 'ground', 222.967296),
+      UnitDefinition('Bigha', 'bigha', 2508.38208),
+      UnitDefinition('Bigha (UP/Bihar Pucca)', 'bigha (UP)', 2529.285264),
+      UnitDefinition('Bigha (Bengal/Assam)', 'bigha (WB)', 1337.803776),
     ],
     UnitType.volume: [
       UnitDefinition('Liter', 'L', 1.0),

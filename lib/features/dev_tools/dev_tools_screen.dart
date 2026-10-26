@@ -13,7 +13,8 @@ enum DevToolTab {
   json('JSON Formatter', Icons.data_object_rounded),
   base64('Base64 / URL', Icons.enhanced_encryption_rounded),
   uuid('UUID Generator', Icons.fingerprint_rounded),
-  color('Color (HEX/RGB)', Icons.palette_rounded);
+  color('Color (HEX/RGB)', Icons.palette_rounded),
+  downloadTime('Download Time', Icons.download_rounded);
 
   final String label;
   final IconData icon;
@@ -88,6 +89,12 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
   final TextEditingController _bController = TextEditingController();
   Color _previewColor = const Color(0xFFFF6D00);
   bool _colorInputValid = true;
+
+  // Download Time state
+  final TextEditingController _dlSizeCtrl = TextEditingController(text: '45');
+  String _dlSizeUnit = 'GB';
+  final TextEditingController _dlSpeedCtrl = TextEditingController(text: '100');
+  String _dlSpeedUnit = 'Mbps';
 
   @override
   void initState() {
@@ -216,6 +223,47 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
     });
   }
 
+  Map<String, dynamic> _calcDownloadTime() {
+    final sizeVal = double.tryParse(_dlSizeCtrl.text) ?? 0;
+    final speedVal = double.tryParse(_dlSpeedCtrl.text) ?? 0;
+
+    if (sizeVal <= 0 || speedVal <= 0) {
+      return {'time': '0s', 'desc': 'Invalid inputs'};
+    }
+
+    // Size in Megabits (Mb)
+    double sizeMegabits = sizeVal * 8; // if MB
+    if (_dlSizeUnit == 'GB') sizeMegabits = sizeVal * 8 * 1024;
+    if (_dlSizeUnit == 'TB') sizeMegabits = sizeVal * 8 * 1024 * 1024;
+
+    // Speed in Megabits per second (Mbps)
+    double speedMbps = speedVal;
+    if (_dlSpeedUnit == 'MBps' || _dlSpeedUnit == 'MB/s') speedMbps = speedVal * 8;
+    if (_dlSpeedUnit == 'Gbps') speedMbps = speedVal * 1000;
+
+    final seconds = sizeMegabits / speedMbps;
+    if (!seconds.isFinite || seconds > 3.15e10) {
+      return {'time': 'Over 1,000 years', 'desc': 'Check the file size and speed values'};
+    }
+    final totalSeconds = seconds.round();
+    final dd = totalSeconds ~/ 86400;
+    final hh = (totalSeconds % 86400) ~/ 3600;
+    final mm = (totalSeconds % 3600) ~/ 60;
+    final ss = totalSeconds % 60;
+
+    String timeStr = '';
+    if (dd > 0) timeStr += '${dd}d ';
+    if (hh > 0 || dd > 0) timeStr += '${hh}h ';
+    timeStr += '${mm}m ${ss}s';
+
+    final effectiveMbSec = (speedMbps / 8).toStringAsFixed(1);
+
+    return {
+      'time': timeStr.trim(),
+      'desc': 'Effective transfer speed: ~$effectiveMbSec MB/second',
+    };
+  }
+
   @override
   void dispose() {
     _jsonController.dispose();
@@ -225,6 +273,8 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
     _rController.dispose();
     _gController.dispose();
     _bController.dispose();
+    _dlSizeCtrl.dispose();
+    _dlSpeedCtrl.dispose();
     super.dispose();
   }
 
@@ -440,6 +490,81 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
                 Expanded(child: ModernTextField(label: 'B (0-255)', controller: _bController, keyboardType: TextInputType.number, onChanged: _parseRgb)),
               ],
             ),
+          ],
+
+          // Download Time Tab
+          if (_activeTab == DevToolTab.downloadTime) ...[
+            Builder(builder: (context) {
+              final res = _calcDownloadTime();
+              return Column(
+                children: [
+                  ResultCard(
+                    title: 'Estimated Download Time',
+                    primaryResult: res['time'] as String,
+                    subtitle: res['desc'] as String,
+                    accentColor: AppColors.catDev,
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: ModernTextField(
+                          label: 'File Size',
+                          controller: _dlSizeCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          onChanged: (_) => setState(() {}),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          isExpanded: true,
+                          initialValue: _dlSizeUnit,
+                          decoration: InputDecoration(
+                            labelText: 'Unit',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          items: ['MB', 'GB', 'TB']
+                              .map((u) => DropdownMenuItem(value: u, child: Text(u)))
+                              .toList(),
+                          onChanged: (v) => setState(() => _dlSizeUnit = v ?? _dlSizeUnit),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: ModernTextField(
+                          label: 'Network / Internet Speed',
+                          controller: _dlSpeedCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          onChanged: (_) => setState(() {}),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          isExpanded: true,
+                          initialValue: _dlSpeedUnit,
+                          decoration: InputDecoration(
+                            labelText: 'Unit',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          items: ['Mbps', 'MB/s', 'Gbps']
+                              .map((u) => DropdownMenuItem(value: u, child: Text(u)))
+                              .toList(),
+                          onChanged: (v) => setState(() => _dlSpeedUnit = v ?? _dlSpeedUnit),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            }),
           ],
         ],
       ),

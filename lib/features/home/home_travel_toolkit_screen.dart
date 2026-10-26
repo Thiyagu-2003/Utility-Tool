@@ -14,11 +14,7 @@ enum HomeTravelTab {
   paint('Paint Calculator', Icons.format_paint_rounded),
   flooring('Tile & Flooring', Icons.dashboard_rounded),
   concrete('Concrete & Cement', Icons.foundation_rounded),
-  land('Land Area Converter', Icons.landscape_rounded),
-  waterTank('Water Tank Capacity', Icons.water_rounded),
-  appliance('Appliance Power', Icons.bolt_rounded),
-  tripSplitter('Trip Expense Splitter', Icons.group_rounded),
-  downloadTime('Download Time', Icons.download_rounded);
+  waterTank('Water Tank Capacity', Icons.water_rounded);
 
   final String label;
   final IconData icon;
@@ -97,39 +93,12 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
   final _concDCtrl = TextEditingController(text: '0.15'); // 15cm thickness
   String _concMix = '1:2:4 (M15 General)';
 
-  // 6. LAND CONVERTER
-  final _landInputCtrl = TextEditingController(text: '1');
-  String _landFromUnit = 'Acres';
-
-  // 7. WATER TANK
+  // 6. WATER TANK
   bool _isRectTank = true;
   final _tankLCtrl = TextEditingController(text: '2.5'); // meters
   final _tankWCtrl = TextEditingController(text: '2.0');
   final _tankHCtrl = TextEditingController(text: '1.5');
   final _tankDiamCtrl = TextEditingController(text: '1.8');
-
-  // 8. APPLIANCE ELECTRICITY
-  final _appPowerCtrl = TextEditingController(text: '1500'); // Watts
-  final _appHoursCtrl = TextEditingController(text: '6');
-  final _appRateCtrl = TextEditingController(text: '0.15'); // per kWh
-
-  // 9. TRIP BUDGET SPLITTER
-  final List<String> _tripMembers = ['Alice', 'Bob', 'Charlie'];
-  final List<TripExpenseItem> _tripExpenses = [
-    TripExpenseItem(title: 'Hotel Stay', amount: 240, paidBy: 'Alice'),
-    TripExpenseItem(title: 'Rental Car & Fuel', amount: 150, paidBy: 'Bob'),
-    TripExpenseItem(title: 'Dinner & Groceries', amount: 90, paidBy: 'Charlie'),
-  ];
-  final _newExpTitleCtrl = TextEditingController();
-  final _newExpAmtCtrl = TextEditingController();
-  String _newExpPayer = 'Alice';
-  final _newMemberCtrl = TextEditingController();
-
-  // 10. DOWNLOAD TIME
-  final _dlSizeCtrl = TextEditingController(text: '45');
-  String _dlSizeUnit = 'GB';
-  final _dlSpeedCtrl = TextEditingController(text: '100');
-  String _dlSpeedUnit = 'Mbps';
 
   @override
   void dispose() {
@@ -157,19 +126,10 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
     _concLCtrl.dispose();
     _concWCtrl.dispose();
     _concDCtrl.dispose();
-    _landInputCtrl.dispose();
     _tankLCtrl.dispose();
     _tankWCtrl.dispose();
     _tankHCtrl.dispose();
     _tankDiamCtrl.dispose();
-    _appPowerCtrl.dispose();
-    _appHoursCtrl.dispose();
-    _appRateCtrl.dispose();
-    _newExpTitleCtrl.dispose();
-    _newExpAmtCtrl.dispose();
-    _newMemberCtrl.dispose();
-    _dlSizeCtrl.dispose();
-    _dlSpeedCtrl.dispose();
     super.dispose();
   }
 
@@ -309,23 +269,7 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
     };
   }
 
-  // 6. Land Area Converter
-  Map<String, String> _calcLand() {
-    final sqFt = landToSqFt(ValidationUtils.safeParseDouble(_landInputCtrl.text), _landFromUnit);
-    final out = <String, String>{};
-    for (final entry in landUnitSqFt.entries) {
-      final v = sqFt / entry.value;
-      out[entry.key] = switch (entry.key) {
-        'Acres' || 'Hectares' => v.toStringAsFixed(4),
-        'Square Feet' => v.toStringAsFixed(1),
-        'Cents' || 'Square Meters' || 'Guntha' || 'Ground' => v.toStringAsFixed(2),
-        _ => v.toStringAsFixed(3),
-      };
-    }
-    return out;
-  }
-
-  // 7. Water Tank Capacity
+  // 6. Water Tank Capacity
   Map<String, dynamic> _calcTank() {
     double volM3 = 0;
     if (_isRectTank) {
@@ -350,146 +294,6 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
     };
   }
 
-  // 8. Appliance Consumption
-  Map<String, dynamic> _calcAppliance() {
-    final watts = ValidationUtils.safeParseDouble(_appPowerCtrl.text);
-    final hours = ValidationUtils.safeParseDouble(_appHoursCtrl.text);
-    final rate = ValidationUtils.safeParseDouble(_appRateCtrl.text);
-
-    final dailyKwh = (watts * hours) / 1000.0;
-    final monthlyKwh = dailyKwh * 30;
-    final dailyCost = dailyKwh * rate;
-    final monthlyCost = dailyCost * 30;
-    final yearlyCost = dailyCost * 365;
-
-    return {
-      'monthlyCost': '\$${monthlyCost.toStringAsFixed(2)} / month (${monthlyKwh.toStringAsFixed(1)} kWh)',
-      'daily': '\$${dailyCost.toStringAsFixed(2)} / day (${dailyKwh.toStringAsFixed(2)} kWh)',
-      'yearly': '\$${yearlyCost.toStringAsFixed(2)} / year (${(dailyKwh * 365).toStringAsFixed(0)} kWh)',
-    };
-  }
-
-  // 9. Travel Budget Splitter
-  Map<String, dynamic> _calcTripDebts() {
-    if (_tripMembers.isEmpty || _tripExpenses.isEmpty) {
-      return {'total': '\$0', 'perPerson': '\$0', 'settlements': <String>[]};
-    }
-
-    double totalExp = 0;
-    final Map<String, double> paidMap = {for (var m in _tripMembers) m: 0.0};
-
-    for (final exp in _tripExpenses) {
-      totalExp += exp.amount;
-      paidMap[exp.paidBy] = (paidMap[exp.paidBy] ?? 0) + exp.amount;
-    }
-
-    final perPerson = totalExp / _tripMembers.length;
-    final Map<String, double> netBalance = {};
-    for (final m in _tripMembers) {
-      netBalance[m] = (paidMap[m] ?? 0) - perPerson;
-    }
-
-    // Compute minimal debt settlements
-    final List<MapEntry<String, double>> debtors = [];
-    final List<MapEntry<String, double>> creditors = [];
-
-    netBalance.forEach((name, bal) {
-      if (bal < -0.01) {
-        debtors.add(MapEntry(name, -bal));
-      } else if (bal > 0.01) {
-        creditors.add(MapEntry(name, bal));
-      }
-    });
-
-    final List<String> settlements = [];
-    int dIdx = 0, cIdx = 0;
-    while (dIdx < debtors.length && cIdx < creditors.length) {
-      final debtor = debtors[dIdx];
-      final creditor = creditors[cIdx];
-      final settleAmt = math.min(debtor.value, creditor.value);
-
-      settlements.add('${debtor.key} pays ${creditor.key}: \$${settleAmt.toStringAsFixed(2)}');
-
-      debtors[dIdx] = MapEntry(debtor.key, debtor.value - settleAmt);
-      creditors[cIdx] = MapEntry(creditor.key, creditor.value - settleAmt);
-
-      if (debtors[dIdx].value <= 0.01) dIdx++;
-      if (creditors[cIdx].value <= 0.01) cIdx++;
-    }
-
-    return {
-      'total': '\$${totalExp.toStringAsFixed(2)}',
-      'perPerson': '\$${perPerson.toStringAsFixed(2)}',
-      'settlements': settlements,
-    };
-  }
-
-  void _addMember() {
-    final name = _newMemberCtrl.text.trim();
-    if (name.isEmpty || _tripMembers.any((m) => m.toLowerCase() == name.toLowerCase())) return;
-    setState(() {
-      _tripMembers.add(name);
-      _newMemberCtrl.clear();
-    });
-  }
-
-  void _removeMember(String name) {
-    if (_tripExpenses.any((e) => e.paidBy == name)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Delete $name\'s expenses before removing them.')),
-      );
-      return;
-    }
-    setState(() {
-      _tripMembers.remove(name);
-      if (!_tripMembers.contains(_newExpPayer)) {
-        _newExpPayer = _tripMembers.isEmpty ? '' : _tripMembers.first;
-      }
-    });
-  }
-
-  // 10. Download Time
-  Map<String, dynamic> _calcDownloadTime() {
-    final sizeVal = ValidationUtils.safeParseDouble(_dlSizeCtrl.text);
-    final speedVal = ValidationUtils.safeParseDouble(_dlSpeedCtrl.text);
-
-    if (sizeVal <= 0 || speedVal <= 0) {
-      return {'time': '0s', 'desc': 'Invalid inputs'};
-    }
-
-    // Size in Megabits (Mb)
-    double sizeMegabits = sizeVal * 8; // if MB
-    if (_dlSizeUnit == 'GB') sizeMegabits = sizeVal * 8 * 1024;
-    if (_dlSizeUnit == 'TB') sizeMegabits = sizeVal * 8 * 1024 * 1024;
-
-    // Speed in Megabits per second (Mbps)
-    double speedMbps = speedVal;
-    if (_dlSpeedUnit == 'MBps' || _dlSpeedUnit == 'MB/s') speedMbps = speedVal * 8;
-    if (_dlSpeedUnit == 'Gbps') speedMbps = speedVal * 1000;
-
-    final seconds = sizeMegabits / speedMbps;
-    if (!seconds.isFinite || seconds > 3.15e10) {
-      return {'time': 'Over 1,000 years', 'desc': 'Check the file size and speed values'};
-    }
-    final totalSeconds = seconds.round();
-    final dd = totalSeconds ~/ 86400;
-    final hh = (totalSeconds % 86400) ~/ 3600;
-    final mm = (totalSeconds % 3600) ~/ 60;
-    final ss = totalSeconds % 60;
-
-    String timeStr = '';
-    if (dd > 0) timeStr += '${dd}d ';
-    if (hh > 0 || dd > 0) timeStr += '${hh}h ';
-    timeStr += '${mm}m ${ss}s';
-
-    final effectiveMbSec = (speedMbps / 8).toStringAsFixed(1);
-
-    return {
-      'time': timeStr.trim(),
-      'desc': 'Effective transfer speed: ~$effectiveMbSec MB/second',
-    };
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -508,11 +312,7 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
           if (_activeTab == HomeTravelTab.paint) _buildPaintTab(isDark),
           if (_activeTab == HomeTravelTab.flooring) _buildFlooringTab(isDark),
           if (_activeTab == HomeTravelTab.concrete) _buildConcreteTab(isDark),
-          if (_activeTab == HomeTravelTab.land) _buildLandTab(isDark),
           if (_activeTab == HomeTravelTab.waterTank) _buildWaterTankTab(isDark),
-          if (_activeTab == HomeTravelTab.appliance) _buildApplianceTab(isDark),
-          if (_activeTab == HomeTravelTab.tripSplitter) _buildTripSplitterTab(isDark),
-          if (_activeTab == HomeTravelTab.downloadTime) _buildDownloadTimeTab(isDark),
         ],
       ),
     );
@@ -699,66 +499,7 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
     );
   }
 
-  // --- TAB 6: LAND AREA ---
-  Widget _buildLandTab(bool isDark) {
-    final res = _calcLand();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              flex: 2,
-              child: ModernTextField(
-                label: 'Land Quantity',
-                controller: _landInputCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                onChanged: (_) => setState(() {}),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              flex: 2,
-              child: DropdownButtonFormField<String>(
-                isExpanded: true,
-                initialValue: _landFromUnit,
-                decoration: InputDecoration(labelText: 'Unit', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
-                items: landUnitSqFt.keys
-                    .map((u) => DropdownMenuItem(value: u, child: Text(u, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13))))
-                    .toList(),
-                onChanged: (v) => setState(() => _landFromUnit = v ?? _landFromUnit),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        const Text('Converted Land Units', style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 4),
-        const Text('The size of a bigha varies by state, so pick the regional value that matches your land records.', style: TextStyle(fontSize: 12, color: Colors.grey)),
-        const SizedBox(height: 8),
-        ...res.entries.map((e) {
-          return Container(
-            margin: const EdgeInsets.only(bottom: 6),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(child: Text(e.key, style: const TextStyle(fontWeight: FontWeight.w600))),
-                const SizedBox(width: 8),
-                Text(e.value, style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.catHomeTravel)),
-              ],
-            ),
-          );
-        }),
-      ],
-    );
-  }
-
-  // --- TAB 7: WATER TANK ---
+  // --- TAB 6: WATER TANK ---
   Widget _buildWaterTankTab(bool isDark) {
     final res = _calcTank();
     return Column(
@@ -801,237 +542,6 @@ class _HomeTravelToolkitScreenState extends State<HomeTravelToolkitScreen> {
             ],
           ),
         ],
-      ],
-    );
-  }
-
-  // --- TAB 8: APPLIANCE POWER ---
-  Widget _buildApplianceTab(bool isDark) {
-    final res = _calcAppliance();
-    return Column(
-      children: [
-        ResultCard(
-          title: 'Monthly Electricity Cost',
-          primaryResult: res['monthlyCost'] as String,
-          subtitle: '${res['daily']}\n${res['yearly']}',
-          accentColor: AppColors.catHomeTravel,
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(child: ModernTextField(label: 'Power Rating (Watts)', controller: _appPowerCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), hintText: 'e.g. 1500 (AC/Heater)', onChanged: (_) => setState(() {}))),
-            const SizedBox(width: 10),
-            Expanded(child: ModernTextField(label: 'Hours Used / Day', controller: _appHoursCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), hintText: 'e.g. 8', onChanged: (_) => setState(() {}))),
-          ],
-        ),
-        const SizedBox(height: 12),
-        ModernTextField(
-          label: 'Electricity Tariff (\$/kWh)',
-          controller: _appRateCtrl,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          hintText: 'e.g. 0.15',
-          onChanged: (_) => setState(() {}),
-        ),
-      ],
-    );
-  }
-
-  // --- TAB 9: TRIP BUDGET SPLITTER ---
-  Widget _buildTripSplitterTab(bool isDark) {
-    final res = _calcTripDebts();
-    final settlements = res['settlements'] as List<String>;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ResultCard(
-          title: 'Trip Expenses Summary',
-          primaryResult: '${res['total']} Total Spend',
-          subtitle: '${res['perPerson']} Fair Share per Traveler',
-          accentColor: AppColors.catHomeTravel,
-        ),
-        const SizedBox(height: 16),
-        const Text('Who Owes Whom (Settlements)', style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        if (settlements.isEmpty)
-          const Text('All expenses are perfectly settled!', style: TextStyle(color: Colors.green))
-        else
-          ...settlements.map((s) => Container(
-                margin: const EdgeInsets.only(bottom: 6),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.arrow_forward_rounded, size: 16, color: AppColors.catHomeTravel),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(s, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
-                  ],
-                ),
-              )),
-        const SizedBox(height: 16),
-        const Text('Travelers', style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          children: [
-            for (final m in _tripMembers)
-              InputChip(
-                label: Text(m),
-                onDeleted: () => _removeMember(m),
-              ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(child: ModernTextField(label: 'Add traveler', controller: _newMemberCtrl, hintText: 'Name')),
-            const SizedBox(width: 8),
-            IconButton.filledTonal(
-              tooltip: 'Add traveler',
-              icon: const Icon(Icons.person_add_alt_1_rounded),
-              onPressed: _addMember,
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        const Text('Expenses', style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        if (_tripExpenses.isEmpty) const Text('No expenses yet.', style: TextStyle(color: Colors.grey)),
-        for (var i = 0; i < _tripExpenses.length; i++)
-          Container(
-            margin: const EdgeInsets.only(bottom: 6),
-            padding: const EdgeInsets.only(left: 12),
-            decoration: BoxDecoration(
-              color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${_tripExpenses[i].title}  (paid by ${_tripExpenses[i].paidBy})',
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                ),
-                Text('\$${_tripExpenses[i].amount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                IconButton(
-                  tooltip: 'Delete expense',
-                  icon: const Icon(Icons.close_rounded, size: 18),
-                  onPressed: () => setState(() => _tripExpenses.removeAt(i)),
-                ),
-              ],
-            ),
-          ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              flex: 2,
-              child: ModernTextField(label: 'Expense', controller: _newExpTitleCtrl, hintText: 'e.g. Museum passes'),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: ModernTextField(
-                label: 'Amount (\$)',
-                controller: _newExpAmtCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                key: ValueKey('payer-$_newExpPayer-${_tripMembers.length}'),
-                isExpanded: true,
-                initialValue: _tripMembers.contains(_newExpPayer) ? _newExpPayer : null,
-                decoration: InputDecoration(labelText: 'Paid By', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
-                items: _tripMembers.map((m) => DropdownMenuItem(value: m, child: Text(m, overflow: TextOverflow.ellipsis))).toList(),
-                onChanged: (v) => setState(() => _newExpPayer = v ?? _newExpPayer),
-              ),
-            ),
-            const SizedBox(width: 10),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Add'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.catHomeTravel,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              ),
-              onPressed: () {
-                final title = _newExpTitleCtrl.text.trim();
-                final amt = ValidationUtils.safeParseDouble(_newExpAmtCtrl.text);
-                if (title.isNotEmpty && amt > 0 && _tripMembers.contains(_newExpPayer)) {
-                  setState(() {
-                    _tripExpenses.add(TripExpenseItem(title: title, amount: amt, paidBy: _newExpPayer));
-                    _newExpTitleCtrl.clear();
-                    _newExpAmtCtrl.clear();
-                  });
-                }
-              },
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  // --- TAB 10: DOWNLOAD TIME ---
-  Widget _buildDownloadTimeTab(bool isDark) {
-    final res = _calcDownloadTime();
-    return Column(
-      children: [
-        ResultCard(
-          title: 'Estimated Download Time',
-          primaryResult: res['time'] as String,
-          subtitle: res['desc'] as String,
-          accentColor: AppColors.catHomeTravel,
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              flex: 2,
-              child: ModernTextField(label: 'File Size', controller: _dlSizeCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {})),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                isExpanded: true,
-                initialValue: _dlSizeUnit,
-                decoration: InputDecoration(labelText: 'Unit', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
-                items: ['MB', 'GB', 'TB'].map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
-                onChanged: (v) => setState(() => _dlSizeUnit = v ?? _dlSizeUnit),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              flex: 2,
-              child: ModernTextField(label: 'Internet Speed', controller: _dlSpeedCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {})),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                isExpanded: true,
-                initialValue: _dlSpeedUnit,
-                decoration: InputDecoration(labelText: 'Unit', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
-                items: ['Mbps', 'MB/s', 'Gbps'].map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
-                onChanged: (v) => setState(() => _dlSpeedUnit = v ?? _dlSpeedUnit),
-              ),
-            ),
-          ],
-        ),
       ],
     );
   }

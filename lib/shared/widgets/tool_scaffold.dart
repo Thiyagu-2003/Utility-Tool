@@ -6,6 +6,7 @@ import '../../core/theme/app_colors.dart';
 
 class ToolScaffold extends StatelessWidget {
   final String title;
+  final String? subtitle;
   final ToolCategory category;
   final String toolId;
   final Widget body;
@@ -17,6 +18,7 @@ class ToolScaffold extends StatelessWidget {
   const ToolScaffold({
     super.key,
     required this.title,
+    this.subtitle,
     required this.category,
     required this.toolId,
     required this.body,
@@ -64,22 +66,34 @@ class ToolScaffold extends StatelessWidget {
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
             ),
             const SizedBox(height: 2),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: category.color.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                categoryLabel(context, category).toUpperCase(),
+            if (subtitle != null)
+              Text(
+                subtitle!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: category.color,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.5,
+                  color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              )
+            else
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: category.color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  categoryLabel(context, category).toUpperCase(),
+                  style: TextStyle(
+                    color: category.color,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.5,
+                  ),
                 ),
               ),
-            ),
           ],
         ),
         actions: [

@@ -688,7 +688,7 @@ class _CategoryHubScreenState extends State<CategoryHubScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       sliver: SliverReorderableList(
                         itemCount: categories.length,
-                        onReorderItem: prefs.moveCategory,
+                        onReorder: prefs.moveCategory,
                         proxyDecorator: (child, index, animation) {
                           return Material(
                             elevation: 8,

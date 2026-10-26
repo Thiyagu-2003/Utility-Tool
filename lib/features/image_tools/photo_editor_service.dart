@@ -74,7 +74,13 @@ class PhotoEditorService {
     int maxSide = 4096,
     int previewSide = 1280,
   }) {
-    final raw = img.decodeImage(bytes);
+    if (bytes.length < 8) return null;
+    final img.Image? raw;
+    try {
+      raw = img.decodeImage(bytes);
+    } catch (_) {
+      return null;
+    }
     if (raw == null) return null;
     var image = toRgba8(raw);
     final originalWidth = image.width;

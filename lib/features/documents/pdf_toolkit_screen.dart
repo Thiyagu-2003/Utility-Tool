@@ -1102,7 +1102,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
             child: ReorderableListView.builder(
               scrollDirection: Axis.horizontal,
               itemCount: _selectedImages.length,
-              onReorderItem: (oldIdx, newIdx) => setState(() => ScanPdfService.moveItem(_selectedImages, oldIdx, newIdx)),
+              onReorder: (oldIdx, newIdx) => setState(() => ScanPdfService.moveItem(_selectedImages, oldIdx, newIdx)),
               itemBuilder: (context, idx) {
                 final img = _selectedImages[idx];
                 return Padding(
@@ -1247,7 +1247,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: _mergePdfs.length,
-            onReorderItem: (oldIdx, newIdx) => setState(() => ScanPdfService.moveItem(_mergePdfs, oldIdx, newIdx)),
+            onReorder: (oldIdx, newIdx) => setState(() => ScanPdfService.moveItem(_mergePdfs, oldIdx, newIdx)),
             itemBuilder: (context, idx) {
               final pdf = _mergePdfs[idx];
               return ListTile(

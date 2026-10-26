@@ -27,7 +27,12 @@ enum ProductivityTab {
 }
 
 class ProductivityToolkitScreen extends StatefulWidget {
-  const ProductivityToolkitScreen({super.key});
+  final ProductivityTab initialTab;
+
+  const ProductivityToolkitScreen({
+    super.key,
+    this.initialTab = ProductivityTab.notes,
+  });
 
   @override
   State<ProductivityToolkitScreen> createState() => _ProductivityToolkitScreenState();
@@ -35,7 +40,7 @@ class ProductivityToolkitScreen extends StatefulWidget {
 
 class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
   final ProductivityService _service = ProductivityService();
-  ProductivityTab _activeTab = ProductivityTab.notes;
+  late ProductivityTab _activeTab;
   bool _isLoading = true;
 
   // 1. Notes State
@@ -58,6 +63,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
   @override
   void initState() {
     super.initState();
+    _activeTab = widget.initialTab;
     _initData();
   }
 

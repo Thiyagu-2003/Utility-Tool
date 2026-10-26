@@ -11,6 +11,7 @@ import '../../features/finance/currency_converter_screen.dart';
 import '../../features/finance/interest_calculator_screen.dart';
 import '../../features/finance/tip_split_screen.dart';
 import '../../features/math/percentage_calculator_screen.dart';
+import '../../features/math/math_toolkit_screen.dart';
 import '../../features/text_tools/text_analyzer_screen.dart';
 import '../../features/dev_tools/dev_tools_screen.dart';
 import '../../features/everyday/random_utilities_screen.dart';
@@ -62,6 +63,15 @@ class ToolRegistry {
 
     // 1. Calculate
     ToolItem(
+      id: 'math_toolkit',
+      title: 'Advanced Math Suite',
+      description: 'Scientific calculator, equation solver, matrices, primes, GCD/LCM & combinatorics',
+      category: ToolCategory.calculate,
+      icon: Icons.functions_rounded,
+      keywords: ['math', 'scientific', 'calculator', 'equation', 'linear', 'quadratic', 'matrix', 'matrices', 'prime', 'factorization', 'gcd', 'lcm', 'permutation', 'combination'],
+      builder: (_) => const MathToolkitScreen(),
+    ),
+    ToolItem(
       id: 'percentage_calc',
       title: 'Percentage Calculator',
       description: 'Find percentages, ratios & percentage change',
@@ -75,10 +85,10 @@ class ToolRegistry {
     ToolItem(
       id: 'unit_converter',
       title: 'Unit Converter',
-      description: 'Length, Mass, Temperature, Area, Volume, Speed, Data',
+      description: 'Length, Mass, Temperature, Area, Regional Land, Volume, Speed, Data',
       category: ToolCategory.convert,
       icon: Icons.sync_alt_rounded,
-      keywords: ['unit', 'converter', 'length', 'mass', 'weight', 'temperature', 'area', 'volume', 'speed', 'data'],
+      keywords: ['unit', 'converter', 'length', 'mass', 'weight', 'temperature', 'area', 'volume', 'speed', 'data', 'land', 'cent', 'guntha', 'ground', 'bigha', 'acre', 'hectare'],
       builder: (_) => const UnitConverterScreen(),
     ),
 
@@ -168,12 +178,30 @@ class ToolRegistry {
     ),
     ToolItem(
       id: 'tip_split_calc',
-      title: 'Tip & Split Bill',
-      description: 'Calculate restaurant tips & split bills among people',
+      title: 'Tip & Expense Splitter',
+      description: 'Calculate restaurant tips, split dining bills & balance multi-person group travel costs',
       category: ToolCategory.finance,
       icon: Icons.group_rounded,
-      keywords: ['tip', 'split', 'bill', 'restaurant', 'dinner', 'people', 'food'],
+      keywords: ['tip', 'split', 'bill', 'restaurant', 'dinner', 'people', 'food', 'trip', 'travel', 'group', 'settlement'],
       builder: (_) => const TipSplitScreen(),
+    ),
+    ToolItem(
+      id: 'electricity_bill',
+      title: 'Electricity Bill',
+      description: 'Estimate monthly power cost by units or home appliances',
+      category: ToolCategory.finance,
+      icon: Icons.bolt_rounded,
+      keywords: ['electricity', 'bill', 'power', 'kwh', 'units', 'energy', 'appliances', 'watt', 'finance'],
+      builder: (_) => const ElectricityBillScreen(),
+    ),
+    ToolItem(
+      id: 'subscriptions_bills',
+      title: 'Subscriptions & Recurring Bills',
+      description: 'Track active subscriptions, recurring billing cycles, monthly expenditure & renewal alerts',
+      category: ToolCategory.finance,
+      icon: Icons.subscriptions_rounded,
+      keywords: ['subscription', 'recurring', 'bill', 'netflix', 'monthly spend', 'renewal', 'finance', 'cost'],
+      builder: (_) => const ProductivityToolkitScreen(initialTab: ProductivityTab.subscriptions),
     ),
 
     // 5. Health
@@ -200,10 +228,10 @@ class ToolRegistry {
     ToolItem(
       id: 'academic_toolkit',
       title: 'Academic & Education Suite',
-      description: 'Marks percentage, exam targets, attendance eligibility, scientific calc, equations, primes, GCD/LCM, matrix & permutations',
+      description: 'Marks percentage, grade scale, exam score needed & attendance eligibility',
       category: ToolCategory.education,
       icon: Icons.school_rounded,
-      keywords: ['marks', 'grade', 'exam', 'attendance', 'scientific', 'calculator', 'equation', 'quadratic', 'prime', 'factorization', 'gcd', 'lcm', 'matrix', 'permutation', 'combination', 'math', 'education'],
+      keywords: ['marks', 'grade', 'exam', 'attendance', 'percentage', 'classes', 'college', 'school', 'education'],
       builder: (_) => const AcademicToolkitScreen(),
     ),
     ToolItem(
@@ -220,20 +248,11 @@ class ToolRegistry {
     ToolItem(
       id: 'home_travel_toolkit',
       title: 'Home, Construction & Travel Suite',
-      description: 'Fuel cost, EV charging, paint, tile & flooring, concrete, land units, water tank, appliance power, trip splitter & download time',
+      description: 'Trip fuel cost, EV charging, paint coverage, tile & flooring, concrete cement & water tank capacity',
       category: ToolCategory.homeTravel,
       icon: Icons.holiday_village_rounded,
-      keywords: ['fuel', 'mileage', 'trip', 'ev', 'charging', 'paint', 'tile', 'flooring', 'concrete', 'cement', 'land', 'acre', 'cent', 'hectare', 'water tank', 'appliance', 'electricity', 'split', 'download', 'home', 'travel'],
+      keywords: ['fuel', 'mileage', 'trip', 'ev', 'charging', 'paint', 'tile', 'flooring', 'concrete', 'cement', 'water tank', 'home', 'travel'],
       builder: (_) => const HomeTravelToolkitScreen(),
-    ),
-    ToolItem(
-      id: 'electricity_bill',
-      title: 'Electricity Bill',
-      description: 'Estimate monthly power cost by units or home appliances',
-      category: ToolCategory.homeTravel,
-      icon: Icons.bolt_rounded,
-      keywords: ['electricity', 'bill', 'power', 'kwh', 'units', 'energy', 'appliances', 'watt', 'current', 'home', 'travel'],
-      builder: (_) => const ElectricityBillScreen(),
     ),
 
     // 8. Files & Text
@@ -294,28 +313,28 @@ class ToolRegistry {
     ToolItem(
       id: 'file_zip_toolkit',
       title: 'File & ZIP Suite',
-      description: 'Create ZIP (compress all), extract archives, batch rename, size analyzer, hash checksums & duplicate finder',
+      description: 'Create ZIP archives (deflate compression) and extract ZIP archives',
       category: ToolCategory.compression,
       icon: Icons.folder_zip_rounded,
-      keywords: ['zip', 'rar', 'archive', 'extract', 'compress', 'compress all', 'unzip', 'rename', 'hash', 'md5', 'sha256', 'duplicate', 'csv', 'json', 'files'],
+      keywords: ['zip', 'archive', 'extract', 'compress', 'compress all', 'unzip', 'deflate'],
       builder: (_) => const FileZipToolkitScreen(),
     ),
     ToolItem(
       id: 'archive_compare_toolkit',
       title: 'Archive, Diff & Preview Studio',
-      description: 'TAR & GZIP archiver, 7z & RAR explorer, folder comparison, visual file diff & universal previewer',
+      description: 'TAR & GZIP archiver, 7z & RAR explorer and container extractor',
       category: ToolCategory.compression,
       icon: Icons.archive_rounded,
-      keywords: ['tar', 'gzip', 'gz', '7z', 'rar', 'archive', 'extract', 'compress all', 'unrar', 'folder compare', 'diff', 'compare', 'file preview', 'hex dump'],
+      keywords: ['tar', 'gzip', 'gz', '7z', 'rar', 'archive', 'extract', 'compress all', 'unrar'],
       builder: (_) => const ArchivePreviewToolkitScreen(),
     ),
     ToolItem(
       id: 'ocr_toolkit',
       title: 'OCR & Voice Studio',
-      description: 'Extract photo & document text, image tables to CSV, contact extractor, TTS & voice dictation',
-      category: ToolCategory.textTools,
+      description: 'Extract photo & document text, image tables to CSV, contact extractor & PDF export',
+      category: ToolCategory.pdfDocuments,
       icon: Icons.document_scanner_rounded,
-      keywords: ['ocr', 'text', 'photo', 'scanner', 'table', 'csv', 'email', 'phone', 'tts', 'speech', 'voice', 'dictation'],
+      keywords: ['ocr', 'text', 'photo', 'scanner', 'table', 'csv', 'email', 'phone', 'tts', 'speech', 'voice', 'dictation', 'pdf', 'document'],
       builder: (_) => const OcrToolkitScreen(),
     ),
     ToolItem(
@@ -344,6 +363,15 @@ class ToolRegistry {
       icon: Icons.movie_creation_rounded,
       keywords: ['audio', 'music', 'sound', 'trim', 'cutter', 'waveform', 'video', 'compress', 'video trimmer', 'bitrate'],
       builder: (_) => const MediaToolsScreen(),
+    ),
+    ToolItem(
+      id: 'voice_studio',
+      title: 'Voice Studio (TTS & Speech-to-Text)',
+      description: 'Text-to-speech voice playback with speed/pitch controls & microphone voice dictation',
+      category: ToolCategory.media,
+      icon: Icons.record_voice_over_rounded,
+      keywords: ['voice', 'speech', 'tts', 'text to speech', 'dictation', 'speech to text', 'audio', 'mic', 'recording', 'media'],
+      builder: (_) => const OcrToolkitScreen(initialTab: OcrTab.textToSpeech),
     ),
     ToolItem(
       id: 'document_scanner',
@@ -414,10 +442,10 @@ class ToolRegistry {
     ToolItem(
       id: 'dev_tools',
       title: 'Developer Suite',
-      description: 'JSON Formatter, Base64, UUID, Color codes & URL Encoder',
+      description: 'JSON Formatter, Base64, UUID, Color codes, URL Encoder & Download Time Estimator',
       category: ToolCategory.developer,
       icon: Icons.code_rounded,
-      keywords: ['json', 'formatter', 'validator', 'base64', 'url', 'uuid', 'color', 'hex', 'rgb', 'developer'],
+      keywords: ['json', 'formatter', 'validator', 'base64', 'url', 'uuid', 'color', 'hex', 'rgb', 'developer', 'download time', 'transfer speed', 'bandwidth'],
       builder: (_) => const DevToolsScreen(),
     ),
 
@@ -446,12 +474,12 @@ class ToolRegistry {
     // 12. More Tools
     ToolItem(
       id: 'random_utilities',
-      title: 'Randomizer & Dice Roll',
-      description: 'Random numbers, 6-sided dice roller & fair coin toss',
+      title: 'Random & Decision',
+      description: 'Random numbers, dice roller & fair coin toss',
       category: ToolCategory.moreTools,
-      icon: Icons.tune_rounded,
-      customColor: const Color(0xFF8B5CF6),
-      keywords: ['random', 'dice', 'coin', 'flip', 'toss', 'roll', 'decision', 'utilities'],
+      icon: Icons.casino_rounded,
+      customColor: const Color(0xFFF97316),
+      keywords: ['random', 'dice', 'coin', 'flip', 'toss', 'roll', 'decision', 'utilities', 'number'],
       builder: (_) => const RandomUtilitiesScreen(),
     ),
     ToolItem(

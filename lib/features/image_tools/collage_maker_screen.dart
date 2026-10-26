@@ -18,9 +18,14 @@ const int collageCellSize = 800;
 Future<img.Image?> decodeCollageCell(Uint8List bytes) => Isolate.run(() => _decodeCell(bytes));
 
 img.Image? _decodeCell(Uint8List bytes) {
-  final decoded = img.decodeImage(bytes);
-  if (decoded == null) return null;
-  return img.copyResizeCropSquare(decoded, size: collageCellSize, interpolation: img.Interpolation.linear);
+  if (bytes.length < 8) return null;
+  try {
+    final decoded = img.decodeImage(bytes);
+    if (decoded == null) return null;
+    return img.copyResizeCropSquare(decoded, size: collageCellSize, interpolation: img.Interpolation.linear);
+  } catch (_) {
+    return null;
+  }
 }
 
 /// Total canvas size for a [cols]x[rows] grid with [spacing] px borders (also around the edge).

@@ -244,7 +244,13 @@ class ArchiveCompareService {
   /// is checked so an unrelated file throws instead of "unpacking" into junk.
   /// Symbolic links are skipped: they have no content to show or repack.
   static List<ArchiveEntry> extractTar(Uint8List tarBytes, {bool verify = false}) {
+    if (verify && tarBytes.isNotEmpty && tarBytes.length < 512) {
+      throw ArchiveException('Not a valid TAR archive');
+    }
     final archive = TarDecoder().decodeBytes(tarBytes, verify: verify);
+    if (verify && archive.isEmpty && tarBytes.isNotEmpty) {
+      throw ArchiveException('Not a valid TAR archive');
+    }
     final results = <ArchiveEntry>[];
     for (final f in archive.files) {
       if (f.isSymbolicLink) continue;
@@ -266,6 +272,9 @@ class ArchiveCompareService {
         mode: f.mode,
       ));
     }
+    if (verify && results.isEmpty && tarBytes.isNotEmpty) {
+      throw ArchiveException('Not a valid TAR archive');
+    }
     return results;
   }
 
@@ -283,7 +292,11 @@ class ArchiveCompareService {
   /// Decompresses GZIP bytes into raw uncompressed bytes. Throws an
   /// [ArchiveException] if the output would pass [maxOutputSize].
   static Uint8List decompressGzip(Uint8List gzipBytes, {int maxOutputSize = maxGzipOutputBytes}) {
-    return GZipDecoder().decodeBytes(gzipBytes, maxOutputSize: maxOutputSize);
+    final decoded = GZipDecoder().decodeBytes(gzipBytes);
+    if (decoded.length > maxOutputSize) {
+      throw ArchiveException('GZIP output exceeds maximum permitted size of $maxOutputSize bytes.');
+    }
+    return Uint8List.fromList(decoded);
   }
 
   /// Creates a TAR.GZ (.tgz) compressed archive

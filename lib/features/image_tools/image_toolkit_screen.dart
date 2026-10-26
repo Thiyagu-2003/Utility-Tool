@@ -15,6 +15,7 @@ import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 import 'photo_editor_screen.dart';
 import 'photo_editor_service.dart';
+import 'collage_maker_screen.dart';
 
 enum ImageToolkitTab {
   compress('Compress', Icons.compress_rounded),
@@ -1065,6 +1066,38 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        InkWell(
+          onTap: () {
+            PreferencesService().triggerHaptic();
+            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CollageMakerScreen()));
+          },
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [
+                AppColors.catImage.withValues(alpha: 0.15),
+                AppColors.catImage.withValues(alpha: 0.05),
+              ]),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.catImage.withValues(alpha: 0.3)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.dashboard_customize_rounded, color: AppColors.catImage, size: 20),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Looking for full creative collage layouts? Open Collage Maker Studio (Templates, borders & aspect ratios)',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.catImage),
+              ],
+            ),
+          ),
+        ),
         ResultCard(
           title: 'Combine & Stitch',
           primaryResult: '${_combineImages.length} Images Selected',
@@ -1626,28 +1659,37 @@ const int maxResizePixels = 40000000;
 const int _combineMaxSide = 2400;
 const int _combineMaxTotal = 12000;
 
+img.Image? _safeDecodeImage(Uint8List bytes) {
+  if (bytes.length < 8) return null;
+  try {
+    return img.decodeImage(bytes);
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Width and height of [bytes] after EXIF orientation, or null if it is not a decodable image.
 (int, int)? readImageSize(Uint8List bytes) {
-  final decoded = img.decodeImage(bytes);
+  final decoded = _safeDecodeImage(bytes);
   return decoded == null ? null : (decoded.width, decoded.height);
 }
 
 Uint8List? compressImage(Uint8List bytes, int quality) {
-  final decoded = img.decodeImage(bytes);
+  final decoded = _safeDecodeImage(bytes);
   if (decoded == null) return null;
   return Uint8List.fromList(img.encodeJpg(flattenOnWhite(decoded), quality: quality));
 }
 
 /// Centre-crops to the target ratio, resizes to exactly [width] x [height] and returns PNG bytes.
 Uint8List? resizeImage(Uint8List bytes, int width, int height) {
-  final decoded = img.decodeImage(bytes);
+  final decoded = _safeDecodeImage(bytes);
   if (decoded == null) return null;
   return Uint8List.fromList(img.encodePng(cropToAspect(decoded, width, height)));
 }
 
 /// Re-encodes [bytes] as 'JPG', 'PNG', 'BMP' or 'GIF'.
 Uint8List? convertImage(Uint8List bytes, String format) {
-  final decoded = img.decodeImage(bytes);
+  final decoded = _safeDecodeImage(bytes);
   if (decoded == null) return null;
   final List<int> out = switch (format) {
     'JPG' => img.encodeJpg(flattenOnWhite(decoded), quality: 90),
@@ -1675,7 +1717,7 @@ int nextRotation(int angle, int delta, bool flipH, bool flipV) {
 }
 
 Uint8List? transformImage(Uint8List bytes, int angle, bool flipH, bool flipV) {
-  final decoded = img.decodeImage(bytes);
+  final decoded = _safeDecodeImage(bytes);
   if (decoded == null) return null;
   return Uint8List.fromList(img.encodePng(applyTransform(decoded, angle, flipH, flipV)));
 }
@@ -1685,7 +1727,7 @@ Uint8List? transformImage(Uint8List bytes, int angle, bool flipH, bool flipV) {
 Uint8List? combineImages(List<Uint8List> inputs, String layout, int spacing) {
   final decodedList = <img.Image>[];
   for (final bytes in inputs) {
-    final d = img.decodeImage(bytes);
+    final d = _safeDecodeImage(bytes);
     if (d != null) decodedList.add(d);
   }
   if (decodedList.length < 2) return null;
@@ -1739,7 +1781,7 @@ Uint8List? combineImages(List<Uint8List> inputs, String layout, int spacing) {
 /// Draws red [text] at [position] ('Center', 'Bottom Right', 'Top Left' or 'Repeat Diagonal')
 /// with alpha [opacity] and returns PNG bytes.
 Uint8List? watermarkImage(Uint8List bytes, String text, String position, double opacity) {
-  final raw = img.decodeImage(bytes);
+  final raw = _safeDecodeImage(bytes);
   if (raw == null) return null;
   // Palette / 16-bit images cannot take an RGBA8 text colour directly.
   final decoded = PhotoEditorService.toRgba8(raw);
@@ -1767,7 +1809,7 @@ Uint8List? watermarkImage(Uint8List bytes, String text, String position, double 
 /// A centre-cropped [targetW] x [targetH] photo (PNG) and a 300-dpi 4x6" sheet (JPEG) holding
 /// up to [copies] of it at true size; `placed` is how many really fit.
 ({Uint8List single, Uint8List sheet, int placed})? makePassportPhotos(Uint8List bytes, int targetW, int targetH, int copies) {
-  final decoded = img.decodeImage(bytes);
+  final decoded = _safeDecodeImage(bytes);
   if (decoded == null) return null;
   // Centre-crop to the preset's aspect ratio, then resize (no stretching).
   final single = cropToAspect(decoded, targetW, targetH);

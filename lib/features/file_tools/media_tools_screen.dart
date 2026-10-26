@@ -10,6 +10,7 @@ import '../../core/utils/share_utils.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 import 'file_zip_utils.dart';
+import '../ocr_tools/ocr_toolkit_screen.dart';
 
 enum MediaTab {
   audio('WAV Audio Trimmer', Icons.music_note_rounded),
@@ -343,6 +344,40 @@ Use this plan in a video editor or converter: ToolBox Pro cannot re-encode video
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          InkWell(
+            onTap: () {
+              PreferencesService().triggerHaptic();
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const OcrToolkitScreen(initialTab: OcrTab.textToSpeech),
+              ));
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: [
+                  ToolCategory.media.color.withValues(alpha: 0.15),
+                  ToolCategory.media.color.withValues(alpha: 0.05),
+                ]),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: ToolCategory.media.color.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.record_voice_over_rounded, color: ToolCategory.media.color, size: 20),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Looking for Voice & Speech? Open Voice Studio (Text to Speech playback & Microphone dictation)',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Icon(Icons.arrow_forward_ios_rounded, size: 14, color: ToolCategory.media.color),
+                ],
+              ),
+            ),
+          ),
           _buildSegmentChips(isDark),
           const SizedBox(height: 16),
           if (_activeTab == MediaTab.audio) _buildAudioTab(isDark),

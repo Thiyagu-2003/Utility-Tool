@@ -131,14 +131,14 @@ void main() {
             title: 'Document Metrics',
             primaryResult: '$words Words',
             subtitle: '$chars Characters',
-            accentColor: AppColors.catPdf,
+            accentColor: AppColors.catText,
           ),
           const SizedBox(height: 16),
           TabBar(
             controller: _tabController,
-            labelColor: AppColors.catPdf,
+            labelColor: AppColors.catText,
             unselectedLabelColor: Colors.grey,
-            indicatorColor: AppColors.catPdf,
+            indicatorColor: AppColors.catText,
             tabs: const [
               Tab(icon: Icon(Icons.edit_rounded), text: 'Editor'),
               Tab(icon: Icon(Icons.visibility_rounded), text: 'Preview'),
@@ -271,7 +271,7 @@ void main() {
                   icon: const Icon(Icons.share_rounded),
                   label: const Text('Export .md File'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.catPdf,
+                    backgroundColor: AppColors.catText,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(double.infinity, 48),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

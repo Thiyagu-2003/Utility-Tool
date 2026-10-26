@@ -85,14 +85,15 @@ String textToCsv(String text) {
 }
 
 class OcrToolkitScreen extends StatefulWidget {
-  const OcrToolkitScreen({super.key});
+  final OcrTab initialTab;
+  const OcrToolkitScreen({super.key, this.initialTab = OcrTab.extractPhoto});
 
   @override
   State<OcrToolkitScreen> createState() => _OcrToolkitScreenState();
 }
 
 class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
-  OcrTab _activeTab = OcrTab.extractPhoto;
+  late OcrTab _activeTab;
   final TextRecognizer _textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
   final FlutterTts _flutterTts = FlutterTts();
   final stt.SpeechToText _speechToText = stt.SpeechToText();
@@ -132,6 +133,7 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
   @override
   void initState() {
     super.initState();
+    _activeTab = widget.initialTab;
     _initTts();
     _initStt();
     _entities = extractEntities(_textEditorController.text);

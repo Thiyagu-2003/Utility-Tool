@@ -232,9 +232,9 @@ void main() {
       expect(tool.keywords.contains('tar'), isTrue);
       expect(tool.keywords.contains('gzip'), isTrue);
       expect(tool.keywords.contains('7z'), isTrue);
-      expect(tool.keywords.contains('diff'), isTrue);
-      expect(tool.keywords.contains('folder compare'), isTrue);
-      expect(tool.keywords.contains('file preview'), isTrue);
+      expect(tool.keywords.contains('rar'), isTrue);
+      expect(tool.keywords.contains('extract'), isTrue);
+      expect(tool.keywords.contains('archive'), isTrue);
     });
   });
 
