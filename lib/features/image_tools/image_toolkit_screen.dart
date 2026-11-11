@@ -13,6 +13,7 @@ import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
+import 'image_compression_service.dart';
 import 'photo_editor_screen.dart';
 import 'photo_editor_service.dart';
 import 'collage_maker_screen.dart';
@@ -63,9 +64,29 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
 
   // 1. Compress State
   LoadedImage? _compressImage;
-  double _compressQuality = 75; // 1 to 100
+  double _compressQuality = 90; // Default 90% as requested
   Uint8List? _compressedBytes;
   int _compressedSizeBytes = 0;
+  ImageCompressionFormat _compressFormat = ImageCompressionFormat.original;
+  QualityPreset? _selectedQualityPreset = QualityPreset.high;
+  CompressionResult? _latestCompressionResult;
+
+  // Custom resolution overrides (optional)
+  bool _enableCustomDimensions = false;
+  final TextEditingController _compressWidthController = TextEditingController();
+  final TextEditingController _compressHeightController = TextEditingController();
+  bool _compressMaintainAspectRatio = true;
+  double _compressAspectRatioFactor = 1.0;
+
+  // Target file size (optional)
+  int? _targetSizeBytes; // null for quality mode, or bytes (e.g. 100 * 1024)
+  final TextEditingController _customTargetSizeKbController = TextEditingController();
+
+  // Batch Compression State
+  final List<LoadedImage> _batchImages = [];
+  final Map<String, CompressionResult> _batchResults = {};
+  bool _isBatchProcessing = false;
+  int _batchDoneCount = 0;
 
   // 2. Resize & Crop State
   LoadedImage? _resizeImage;
@@ -221,27 +242,160 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
         _compressImage = image;
         _compressedBytes = null;
         _compressedSizeBytes = 0;
+        _latestCompressionResult = null;
+        _compressWidthController.text = image.width.toString();
+        _compressHeightController.text = image.height.toString();
+        _compressAspectRatioFactor = image.width / (image.height == 0 ? 1 : image.height);
       });
       _runCompression();
     }
   }
 
+  Future<void> _pickBatchImages() async {
+    PreferencesService().triggerHaptic();
+    try {
+      final files = await FilePicker.pickFiles(type: FileType.image);
+      if (files.isEmpty) return;
+      final loaded = <LoadedImage>[];
+      for (final f in files) {
+        final bytes = await f.readAsBytes();
+        final size = await readImageSizeInBackground(bytes);
+        if (size != null) {
+          loaded.add(LoadedImage(
+            name: f.name,
+            bytes: bytes,
+            width: size.$1,
+            height: size.$2,
+            sizeBytes: bytes.length,
+            format: f.extension?.toUpperCase() ?? 'JPG',
+          ));
+        }
+      }
+      if (loaded.isNotEmpty && mounted) {
+        setState(() {
+          _batchImages.clear();
+          _batchImages.addAll(loaded);
+          _batchResults.clear();
+          if (_compressImage == null) {
+            _compressImage = loaded.first;
+            _compressWidthController.text = loaded.first.width.toString();
+            _compressHeightController.text = loaded.first.height.toString();
+            _compressAspectRatioFactor = loaded.first.width / (loaded.first.height == 0 ? 1 : loaded.first.height);
+          }
+        });
+        _runBatchCompression();
+      }
+    } catch (e) {
+      _showError('Error selecting multiple images: $e');
+    }
+  }
+
+  void _onCompressDimensionChanged({required bool widthChanged, required String text}) {
+    final value = int.tryParse(text);
+    if (_compressMaintainAspectRatio && value != null && value > 0) {
+      if (widthChanged) {
+        final h = (value / _compressAspectRatioFactor).round();
+        _compressHeightController.text = h > 0 ? h.toString() : '';
+      } else {
+        final w = (value * _compressAspectRatioFactor).round();
+        _compressWidthController.text = w > 0 ? w.toString() : '';
+      }
+    }
+    _runCompression();
+  }
+
+  void _applyCompressPreset(QualityPreset preset) {
+    setState(() {
+      _selectedQualityPreset = preset;
+      _compressQuality = preset.quality.toDouble();
+      _targetSizeBytes = null;
+      _customTargetSizeKbController.clear();
+    });
+    _runCompression();
+  }
+
+  void _setTargetSizePreset(int? kb) {
+    setState(() {
+      if (kb != null) {
+        _targetSizeBytes = kb * 1024;
+        _customTargetSizeKbController.text = '$kb';
+        _selectedQualityPreset = null;
+      } else {
+        _targetSizeBytes = null;
+        _customTargetSizeKbController.clear();
+      }
+    });
+    _runCompression();
+  }
+
+  CompressionConfig _buildCurrentConfig() {
+    int? customW;
+    int? customH;
+    if (_enableCustomDimensions) {
+      customW = int.tryParse(_compressWidthController.text.trim());
+      customH = int.tryParse(_compressHeightController.text.trim());
+    }
+
+    return CompressionConfig(
+      quality: _compressQuality.round().clamp(10, 100),
+      format: _compressFormat,
+      customWidth: customW,
+      customHeight: customH,
+      maintainAspectRatio: _compressMaintainAspectRatio,
+      targetSizeBytes: _targetSizeBytes,
+    );
+  }
+
   Future<void> _runCompression() async {
     final source = _compressImage;
     if (source == null) return;
-    final quality = _compressQuality.round().clamp(1, 100);
+    final config = _buildCurrentConfig();
+
     await _work('Compression error', () async {
-      final out = await compressImageInBackground(source.bytes, quality);
-      if (!mounted || !identical(source, _compressImage)) return; // another image was picked meanwhile
-      if (out == null) {
-        _showError('Could not read that image.');
+      final res = await processImageCompressionInBackground(source.bytes, config);
+      if (!mounted || !identical(source, _compressImage)) return;
+      if (res == null) {
+        _showError('Could not process that image.');
         return;
       }
       setState(() {
-        _compressedBytes = out;
-        _compressedSizeBytes = out.length;
+        _latestCompressionResult = res;
+        _compressedBytes = res.bytes;
+        _compressedSizeBytes = res.compressedSizeBytes;
+        if (res.achievedQuality != _compressQuality.round()) {
+          _compressQuality = res.achievedQuality.toDouble();
+        }
       });
+      if (res.warningMessage != null) {
+        _showInfo(res.warningMessage!);
+      }
     });
+  }
+
+  Future<void> _runBatchCompression() async {
+    if (_batchImages.isEmpty) return;
+    final config = _buildCurrentConfig();
+    setState(() {
+      _isBatchProcessing = true;
+      _batchDoneCount = 0;
+      _batchResults.clear();
+    });
+
+    try {
+      for (final img in _batchImages) {
+        final res = await processImageCompressionInBackground(img.bytes, config);
+        if (res != null && mounted) {
+          setState(() {
+            _batchResults[img.name] = res;
+            _batchDoneCount++;
+          });
+        }
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isBatchProcessing = false);
+      }
+    }
   }
 
   // --- TAB 2: RESIZE & CROP ---
@@ -611,7 +765,18 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
           _compressImage = null;
           _compressedBytes = null;
           _compressedSizeBytes = 0;
-          _compressQuality = 75;
+          _compressQuality = 90;
+          _compressFormat = ImageCompressionFormat.original;
+          _selectedQualityPreset = QualityPreset.high;
+          _latestCompressionResult = null;
+          _enableCustomDimensions = false;
+          _compressWidthController.clear();
+          _compressHeightController.clear();
+          _compressMaintainAspectRatio = true;
+          _targetSizeBytes = null;
+          _customTargetSizeKbController.clear();
+          _batchImages.clear();
+          _batchResults.clear();
           _resizeImage = null;
           _resizedBytes = null;
           _resizeWidthController.clear();
@@ -718,80 +883,601 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
   // ===================== INDIVIDUAL TABS =====================
 
   Widget _buildCompressTab(bool isDark) {
-    final origKb = _compressImage != null ? (_compressImage!.sizeBytes / 1024).toStringAsFixed(1) : '0';
+    final origBytes = _compressImage?.sizeBytes ?? 0;
+    final origKb = origBytes > 0 ? (origBytes / 1024).toStringAsFixed(1) : '0';
     final compKb = _compressedSizeBytes > 0 ? (_compressedSizeBytes / 1024).toStringAsFixed(1) : '0';
-    final savedPercent = (_compressImage != null && _compressedSizeBytes > 0)
-        ? (((_compressImage!.sizeBytes - _compressedSizeBytes) / _compressImage!.sizeBytes) * 100).round()
-        : 0;
+    final savedBytes = _latestCompressionResult?.bytesSaved ?? (origBytes - _compressedSizeBytes);
+    final savedKb = (savedBytes / 1024).abs().toStringAsFixed(1);
+    final savedPercent = _latestCompressionResult != null
+        ? _latestCompressionResult!.compressionPercentage.round()
+        : (origBytes > 0 && _compressedSizeBytes > 0
+            ? (((origBytes - _compressedSizeBytes) / origBytes) * 100).round()
+            : 0);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Overview Card
         ResultCard(
           title: 'Compression Overview',
           primaryResult: _compressedSizeBytes > 0 ? '$compKb KB' : 'Select an Image',
           subtitle: _compressedSizeBytes == 0
-              ? 'Reduces file size with smart JPEG encoding'
-              : (savedPercent >= 0
-                  ? 'Saved $savedPercent% of original $origKb KB'
-                  : '${-savedPercent}% larger than the original $origKb KB - lower the quality'),
+              ? 'Lossy or lossless optimization with format & resolution control'
+              : (savedBytes >= 0
+                  ? 'Saved $savedKb KB ($savedPercent% reduction from $origKb KB)'
+                  : 'Image size increased by $savedKb KB with chosen format/quality'),
           accentColor: AppColors.catConverter,
           breakdowns: [
             BreakdownItem(label: 'Original Size', value: '$origKb KB'),
-            BreakdownItem(label: 'Quality Level', value: '${_compressQuality.round()}%'),
-            BreakdownItem(label: 'Compression', value: _compressedSizeBytes == 0 ? 'Ready' : (savedPercent >= 0 ? '-$savedPercent%' : '+${-savedPercent}%')),
+            BreakdownItem(label: 'Output Size', value: _compressedSizeBytes > 0 ? '$compKb KB' : '—'),
+            BreakdownItem(label: 'Format', value: _compressFormat.label),
+            BreakdownItem(label: 'Quality', value: '${_compressQuality.round()}%'),
+            BreakdownItem(
+              label: 'Saved Space',
+              value: _compressedSizeBytes == 0
+                  ? 'Ready'
+                  : (savedBytes >= 0 ? '-$savedKb KB (-$savedPercent%)' : '+$savedKb KB (+${-savedPercent}%)'),
+            ),
           ],
         ),
-        const SizedBox(height: 20),
-        ElevatedButton.icon(
-          icon: const Icon(Icons.add_photo_alternate_rounded),
-          label: const Text('Pick Image to Compress'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.catConverter,
-            foregroundColor: Colors.white,
-            minimumSize: const Size(double.infinity, 50),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          ),
-          onPressed: _pickCompressImage,
+        const SizedBox(height: 16),
+
+        // Pick Image Buttons (Single and Batch)
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.add_photo_alternate_rounded),
+                label: Text(_compressImage == null ? 'Pick Single Image' : 'Change Image'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.catConverter,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(0, 48),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: _pickCompressImage,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.photo_library_rounded),
+                label: Text(_batchImages.isEmpty ? 'Batch Compress' : 'Batch (${_batchImages.length})'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 48),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: _pickBatchImages,
+              ),
+            ),
+          ],
         ),
+
+        // Batch summary if multiple images picked
+        if (_batchImages.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _buildBatchSummaryCard(isDark),
+        ],
+
         if (_compressImage != null) ...[
           const SizedBox(height: 20),
-          Text('Compression Quality: ${_compressQuality.round()}%', style: const TextStyle(fontWeight: FontWeight.bold)),
+
+          // --- SECTION A: QUALITY CONTROLS ---
+          const Text('Compression Quality Presets', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: QualityPreset.values.map((preset) {
+                final isSelected = _selectedQualityPreset == preset && _targetSizeBytes == null;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text('${preset.label} (${preset.quality}%)'),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      if (selected) _applyCompressPreset(preset);
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Quality Slider: ${_compressQuality.round()}%', style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text(
+                _targetSizeBytes != null ? 'Target Size Active' : '${_compressQuality.round()}% Quality',
+                style: TextStyle(color: Theme.of(context).hintColor, fontSize: 12),
+              ),
+            ],
+          ),
           Slider(
             value: _compressQuality,
-            min: 5,
+            min: 10,
             max: 100,
-            divisions: 19,
+            divisions: 18,
             activeColor: AppColors.catConverter,
             label: '${_compressQuality.round()}%',
-            onChanged: (val) => setState(() => _compressQuality = val),
-            // Re-encode once on release instead of on every drag tick.
+            onChanged: (val) {
+              setState(() {
+                _compressQuality = val;
+                _targetSizeBytes = null;
+                _selectedQualityPreset = null;
+                _customTargetSizeKbController.clear();
+              });
+            },
             onChangeEnd: (_) => _runCompression(),
           ),
-          if (_compressedBytes != null) ...[
-            const SizedBox(height: 16),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.memory(_compressedBytes!, height: 200, fit: BoxFit.contain),
+
+          const SizedBox(height: 12),
+
+          // --- SECTION D: IMAGE FORMAT SUPPORT ---
+          const Text('Output Format', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          const SizedBox(height: 6),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: ImageCompressionFormat.values.map((fmt) {
+                final isSelected = _compressFormat == fmt;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(fmt.label),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      if (selected) {
+                        setState(() => _compressFormat = fmt);
+                        _runCompression();
+                      }
+                    },
+                  ),
+                );
+              }).toList(),
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 8),
+            child: Text(
+              _compressFormat == ImageCompressionFormat.png
+                  ? 'PNG preserves full transparency using lossless optimization.'
+                  : (_compressFormat == ImageCompressionFormat.webp
+                      ? 'WebP supports transparency and lossy/lossless high compression.'
+                      : 'JPEG uses adjustable lossy compression (transparent backgrounds are flattened to white).'),
+              style: TextStyle(fontSize: 11, color: Theme.of(context).hintColor),
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // --- SECTION E: TARGET FILE SIZE ---
+          const Text('Target Output Size (Optional)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          const SizedBox(height: 6),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                ActionChip(
+                  label: const Text('Off (Quality Mode)'),
+                  avatar: _targetSizeBytes == null ? const Icon(Icons.check, size: 16) : null,
+                  onPressed: () => _setTargetSizePreset(null),
+                ),
+                const SizedBox(width: 6),
+                ActionChip(
+                  label: const Text('100 KB'),
+                  avatar: _targetSizeBytes == 100 * 1024 ? const Icon(Icons.check, size: 16) : null,
+                  onPressed: () => _setTargetSizePreset(100),
+                ),
+                const SizedBox(width: 6),
+                ActionChip(
+                  label: const Text('250 KB'),
+                  avatar: _targetSizeBytes == 250 * 1024 ? const Icon(Icons.check, size: 16) : null,
+                  onPressed: () => _setTargetSizePreset(250),
+                ),
+                const SizedBox(width: 6),
+                ActionChip(
+                  label: const Text('500 KB'),
+                  avatar: _targetSizeBytes == 500 * 1024 ? const Icon(Icons.check, size: 16) : null,
+                  onPressed: () => _setTargetSizePreset(500),
+                ),
+                const SizedBox(width: 6),
+                ActionChip(
+                  label: const Text('1 MB'),
+                  avatar: _targetSizeBytes == 1024 * 1024 ? const Icon(Icons.check, size: 16) : null,
+                  onPressed: () => _setTargetSizePreset(1024),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: ModernTextField(
+                  label: 'Custom Target (KB)',
+                  controller: _customTargetSizeKbController,
+                  keyboardType: TextInputType.number,
+                  prefixIcon: Icons.disc_full_rounded,
+                  onChanged: (text) {
+                    final kb = int.tryParse(text.trim());
+                    if (kb != null && kb > 0) {
+                      _targetSizeBytes = kb * 1024;
+                      _selectedQualityPreset = null;
+                    } else {
+                      _targetSizeBytes = null;
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: () {
+                  final kb = int.tryParse(_customTargetSizeKbController.text.trim());
+                  _setTargetSizePreset(kb);
+                },
+                child: const Text('Apply Target'),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // --- SECTION C: RESOLUTION CONTROLS ---
+          ExpansionTile(
+            title: const Text('Resolution Controls (Optional)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            subtitle: Text(
+              _enableCustomDimensions
+                  ? 'Custom: ${_compressWidthController.text} × ${_compressHeightController.text} px'
+                  : 'Preserve Original (${_compressImage!.width} × ${_compressImage!.height} px)',
+              style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
+            ),
+            children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Enable Custom Resolution'),
+                subtitle: const Text('By default, original dimensions are preserved without resizing.'),
+                value: _enableCustomDimensions,
+                onChanged: (val) {
+                  setState(() => _enableCustomDimensions = val);
+                  _runCompression();
+                },
+              ),
+              if (_enableCustomDimensions) ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: ModernTextField(
+                        label: 'Width (px)',
+                        controller: _compressWidthController,
+                        keyboardType: TextInputType.number,
+                        prefixIcon: Icons.swap_horiz_rounded,
+                        onChanged: (val) => _onCompressDimensionChanged(widthChanged: true, text: val),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ModernTextField(
+                        label: 'Height (px)',
+                        controller: _compressHeightController,
+                        keyboardType: TextInputType.number,
+                        prefixIcon: Icons.swap_vert_rounded,
+                        onChanged: (val) => _onCompressDimensionChanged(widthChanged: false, text: val),
+                      ),
+                    ),
+                  ],
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Maintain aspect ratio'),
+                  value: _compressMaintainAspectRatio,
+                  onChanged: (val) => setState(() => _compressMaintainAspectRatio = val ?? true),
+                ),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    ActionChip(
+                      label: const Text('Reset to Original'),
+                      onPressed: () {
+                        _compressWidthController.text = _compressImage!.width.toString();
+                        _compressHeightController.text = _compressImage!.height.toString();
+                        _runCompression();
+                      },
+                    ),
+                    ActionChip(
+                      label: const Text('50% Scale'),
+                      onPressed: () {
+                        _compressWidthController.text = (_compressImage!.width ~/ 2).toString();
+                        _compressHeightController.text = (_compressImage!.height ~/ 2).toString();
+                        _runCompression();
+                      },
+                    ),
+                    ActionChip(
+                      label: const Text('75% Scale'),
+                      onPressed: () {
+                        _compressWidthController.text = ((_compressImage!.width * 3) ~/ 4).toString();
+                        _compressHeightController.text = ((_compressImage!.height * 3) ~/ 4).toString();
+                        _runCompression();
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // --- SECTION B: BEFORE & AFTER COMPARISON PREVIEWS ---
+          if (_compressedBytes != null) ...[
+            _buildBeforeAfterComparison(isDark),
             const SizedBox(height: 20),
+
+            // Share / Save Button
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
                 icon: const Icon(Icons.share_rounded),
-                label: const Text('Save / Share Compressed Image'),
+                label: Text('Save / Share Compressed Image ($compKb KB)'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.catConverter,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 ),
-                onPressed: () => _share(_compressedBytes!, withExtension('Compressed_${_compressImage!.name}', 'jpg')),
+                onPressed: () {
+                  final ext = _latestCompressionResult?.outputExtension.isNotEmpty == true
+                      ? _latestCompressionResult!.outputExtension
+                      : 'jpg';
+                  _share(_compressedBytes!, withExtension('Compressed_${_compressImage!.name}', ext));
+                },
               ),
             ),
           ],
         ],
       ],
+    );
+  }
+
+  Widget _buildBeforeAfterComparison(bool isDark) {
+    final origBytes = _compressImage?.sizeBytes ?? 0;
+    final origKb = (origBytes / 1024).toStringAsFixed(1);
+    final compKb = (_compressedSizeBytes / 1024).toStringAsFixed(1);
+    final origW = _compressImage?.width ?? 0;
+    final origH = _compressImage?.height ?? 0;
+    final outW = _latestCompressionResult?.outputWidth ?? origW;
+    final outH = _latestCompressionResult?.outputHeight ?? origH;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Theme.of(context).dividerColor.withValues(alpha: 0.15)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Before & After Comparison', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              TextButton.icon(
+                icon: const Icon(Icons.compare_rounded, size: 16),
+                label: const Text('Side-by-Side Zoom'),
+                onPressed: () => _openComparisonModal(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              // Original Preview Card
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text('Original', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.memory(
+                        _compressImage!.bytes,
+                        height: 140,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text('$origKb KB', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    Text('$origW × $origH px', style: TextStyle(fontSize: 10, color: Theme.of(context).hintColor)),
+                  ],
+                ),
+              ),
+              const VerticalDivider(width: 16),
+              // Compressed Preview Card
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.catConverter.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        'Compressed (${_latestCompressionResult?.outputExtension.toUpperCase() ?? "JPG"})',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppColors.catConverter),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.memory(
+                        _compressedBytes!,
+                        height: 140,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text('$compKb KB', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.catConverter)),
+                    Text('$outW × $outH px', style: TextStyle(fontSize: 10, color: Theme.of(context).hintColor)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openComparisonModal(BuildContext context) {
+    if (_compressImage == null || _compressedBytes == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Visual Comparison'),
+        content: SizedBox(
+          width: 500,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Original Image (Full view)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(height: 6),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.memory(_compressImage!.bytes, fit: BoxFit.contain),
+                ),
+                const SizedBox(height: 16),
+                const Text('Compressed Image (Full view)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(height: 6),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.memory(_compressedBytes!, fit: BoxFit.contain),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBatchSummaryCard(bool isDark) {
+    int totalOrig = 0;
+    int totalComp = 0;
+    for (final img in _batchImages) {
+      totalOrig += img.sizeBytes;
+      final res = _batchResults[img.name];
+      if (res != null) {
+        totalComp += res.compressedSizeBytes;
+      }
+    }
+    final totalOrigKb = (totalOrig / 1024).toStringAsFixed(1);
+    final totalCompKb = (totalComp / 1024).toStringAsFixed(1);
+    final totalSavedBytes = totalOrig - totalComp;
+    final totalSavedKb = (totalSavedBytes / 1024).toStringAsFixed(1);
+    final totalSavedPercent = totalOrig > 0 && totalComp > 0 ? (((totalOrig - totalComp) / totalOrig) * 100).round() : 0;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.catConverter.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Batch Queue (${_batchImages.length} images)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              if (_isBatchProcessing)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                    const SizedBox(width: 6),
+                    Text('$_batchDoneCount/${_batchImages.length}', style: const TextStyle(fontSize: 11)),
+                  ],
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _batchResults.length == _batchImages.length
+                ? 'Total Space Saved: $totalSavedKb KB ($totalSavedPercent% reduction from $totalOrigKb KB to $totalCompKb KB)'
+                : 'Processing batch: $_batchDoneCount of ${_batchImages.length} done...',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: totalSavedBytes >= 0 ? Colors.green : Colors.orange,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ..._batchImages.take(5).map((img) {
+            final res = _batchResults[img.name];
+            final origK = (img.sizeBytes / 1024).toStringAsFixed(1);
+            final compK = res != null ? (res.compressedSizeBytes / 1024).toStringAsFixed(1) : '...';
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  const Icon(Icons.image_outlined, size: 14),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      img.name,
+                      style: const TextStyle(fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Text('$origK KB → $compK KB', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            );
+          }),
+          if (_batchImages.length > 5)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('+ ${_batchImages.length - 5} more images in batch', style: TextStyle(fontSize: 10, color: Theme.of(context).hintColor)),
+            ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => setState(() {
+                  _batchImages.clear();
+                  _batchResults.clear();
+                }),
+                child: const Text('Clear Batch', style: TextStyle(fontSize: 12, color: Colors.red)),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('Re-apply Settings to Batch', style: TextStyle(fontSize: 12)),
+                onPressed: _runBatchCompression,
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -1675,10 +2361,15 @@ img.Image? _safeDecodeImage(Uint8List bytes) {
 }
 
 Uint8List? compressImage(Uint8List bytes, int quality) {
-  final decoded = _safeDecodeImage(bytes);
-  if (decoded == null) return null;
-  return Uint8List.fromList(img.encodeJpg(flattenOnWhite(decoded), quality: quality));
+  final res = ImageCompressionService.processImage(
+    bytes,
+    CompressionConfig(quality: quality, format: ImageCompressionFormat.jpeg),
+  );
+  return res?.bytes;
 }
+
+Future<CompressionResult?> processImageCompressionInBackground(Uint8List bytes, CompressionConfig config) =>
+    Isolate.run(() => ImageCompressionService.processImage(bytes, config));
 
 /// Centre-crops to the target ratio, resizes to exactly [width] x [height] and returns PNG bytes.
 Uint8List? resizeImage(Uint8List bytes, int width, int height) {

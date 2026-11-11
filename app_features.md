@@ -1,8 +1,8 @@
 # App Features & Release Status
 
-> **Release Version**: `1.0.89` (Build `#89`)  
+> **Release Version**: `1.0.90` (Build `#90`)  
 > **Status**: Production Ready & Fully Tested (Pure Offline Client)  
-> **Total Built-in Tools**: 50 Registered Offline Tools  
+> **Total Built-in Tools**: 52 Registered Offline Tools  
 > **Architecture**: Pure Offline Flutter Client with Dynamic Scaling & Multi-Language Support (English, தமிழ், हिंदी, Español)
 
 Here is the comprehensive list of features currently implemented in the app, categorized by domain and screen toolkit:
@@ -12,7 +12,7 @@ Here is the comprehensive list of features currently implemented in the app, cat
 |---|---|
 | Percentage Calculation | Percentage Calculator (Scientific Calculator is its own bottom tab) |
 | Convert | Unit Converter |
-| Date & Time | Age, Date Difference, Duration Converter, Productivity & Organization Suite |
+| Date & Time | Age, Date Difference, Duration Converter, Productivity & Organization Suite, Notes, Calendar & Personal Planner |
 | Finance | GST, Loan EMI, Discount, Currency, Interest, Tip & Split Bill |
 | Health | Health & Fitness Suite, Health & Fitness Calculator |
 | Education | Academic & Education Suite, GPA & CGPA Calculator |
@@ -27,7 +27,7 @@ Here is the comprehensive list of features currently implemented in the app, cat
 | Device & Hardware | Device & Hardware Studio, Compass & Spirit Level, Sensor Tester, Battery Status, Mic & Speaker Tester, Touchscreen Digitizer Test, Screen Color & Pixel Test, Vibration & Haptics Tester, Screen Refresh Rate & Specs, Sound-Level (dB) Estimator |
 | Security | Password & Security Generator |
 | Kitchen | Kitchen & Recipe Tools |
-| More Tools | Slate, Randomizer & Dice Roll |
+| Everyday Tools / More Tools | Entertainment Notes & Tracker, Slate, Randomizer & Dice Roll |
 
 ---
 
@@ -235,8 +235,15 @@ Here is the comprehensive list of features currently implemented in the app, cat
   - **Draw and Annotate Image**: Freehand drawing canvas with Pen, Highlighter, Arrow with arrowhead, Rectangle, Circle, Line, color palette, adjustable stroke width, Undo, Redo, Clear, and export drawn onto the full-resolution photo (up to 4096 px on the long side)
   - **Add Text and Custom Logos**: Overlay text at the bottom-left (size slider scales with the photo, optional background badge) and a logo image with scale factor, opacity, and a 3x3 position grid
 
-- [x] **Image Toolkit** (`ImageToolkitScreen`):
-  - **Image Compression**: JPEG quality slider (re-encodes once you release it) with original-vs-compressed size comparison; use Resize & Crop for dimensions
+- [x] **Image Toolkit** (`ImageToolkitScreen`, `ImageCompressionService`):
+  - **Professional Image Compression**:
+    - **Quality Controls**: Adjustable slider (10% to 100%, defaults to 90%) with quick presets: **Low (40%)**, **Medium (70%)**, **High (90%)**, and **Best (98%)**
+    - **Format & Transparency Preservation**: Supports JPEG (lossy quality tuning), PNG (lossless optimization preserving full alpha transparency), and WebP (high-efficiency quality compression with alpha support). Automatically detects format and maintains transparency without flattening onto white.
+    - **Resolution Controls**: Original dimensions strictly preserved by default without downscaling. Optional custom width and height with aspect ratio lock and scale presets (Reset, 50%, 75%).
+    - **Target Output File Size**: Optional target size targeting (100 KB, 250 KB, 500 KB, 1 MB, or custom KB) with smart binary-search quality optimization and warnings if unreachable.
+    - **Interactive Previews & Comparison**: Side-by-side Before/After preview card, byte savings, percentage reduction, and full-screen side-by-side zoomable comparison dialog.
+    - **Batch Compression Queue**: Multi-image picker to apply unified compression settings, tracking per-item progress and cumulative space saved.
+    - **Performance & Safety**: Non-blocking background isolate processing (`Isolate.run`), never overwrites original files, works 100% offline.
   - **Format Conversion**: Convert images between JPG, PNG, BMP, and GIF formats (WebP files can be opened as input but cannot be written)
   - **Resize & Crop**: Custom pixel dimensions or aspect ratio presets (1:1, 16:9, 4:3, 9:16) with aspect lock
   - **Rotate & Flip**: 90°, 180°, 270° rotation, horizontal mirror flip, vertical mirror flip
@@ -663,14 +670,27 @@ Here is the comprehensive list of features currently implemented in the app, cat
 ---
 
 ## 23. Release Artifacts & Build Configuration
-- **Version**: `1.0.89`
-- **Build Number**: `89`
+- **Version**: `1.0.90`
+- **Build Number**: `90`
 - **Output Target**: Android Release APKs (`--split-per-abi`)
   - `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` (Target: ARM64 devices, Android 10+)
   - `build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk` (Target: 32-bit legacy ARM devices)
   - `build/app/outputs/flutter-apk/app-x86_64-release.apk` (Target: Emulators & x86 tablets)
 - **Zero Internet Permissions**: 100% offline security verified in `AndroidManifest.xml`
-- **Code Health**: Clean static analysis with `flutter analyze` across all modules
+- **Code Health**: Clean static analysis with `flutter analyze` (0 issues) across all modules; 339 tests passing
+- **Release 90 Updates (Notes, Calendar & Personal Planner + Entertainment Notes & Tracker Modules)**:
+  - Added **Notes, Calendar & Personal Planner** (`personal_planner`):
+    - **Notes Management**: Folder organization, custom categories, tags, pinned notes, full-text and tag search, markdown viewer/editor with live preview, checklist mode with interactive item completion, image and web link attachments, and auto-save.
+    - **3-View Calendar**: Modern interactive Month grid with event dots, 7-day horizontal Week strip, and detailed Day Agenda. Supports recurring events (daily, weekly, monthly, yearly), linked notes directly openable from event cards, and today navigation.
+    - **Tasks & To-Dos**: Due dates, priorities (Low, Medium, High, Urgent), subtask checklists, status filters (All, Active, Due Today, Overdue, Completed), and progress tracking.
+    - **Reminders & Local Notifications**: Powered by `flutter_local_notifications` (offline scheduled alarms, repeating alarms, deadline and birthday alerts) with restart reschedule recovery.
+    - **Planner Dashboard**: Today's agenda, overdue and pending task counters, upcoming events, pinned/recent notes, and quick-add actions.
+  - Added **Entertainment Notes & Tracker** (`entertainment_tracker`):
+    - **Library Management**: Anime, Drama, Movies, and TV Series categories. Tracks title, release year, poster image attachment, genres, personal ratings (0-10 slider), and favourites.
+    - **Watching Status**: Plan to Watch, Currently Watching, Completed, On Hold, and Dropped.
+    - **Episode & Season Tracking**: Tracks current and total seasons/episodes with progress indicators and 1-tap `+1 Ep` quick log. Movies supported without episode tracking.
+    - **Personal Notes & Highlights**: Multi-note support per title for Favourite Characters, Memorable Scenes, Memorable Quotes, and Personal Reviews with timestamps and filtering.
+    - **Tracker Dashboard**: Overview statistics (total titles, watching, completed, episodes watched, notes count), horizontal Currently Watching carousel, and Recently Updated log.
 - **Audit & Bug Fixes (Release 89 - Full Audit, Smart Scanner, Package Upgrades)**:
   - **Categories**: "Files & Text" split into PDF & Documents, Image & Photo, Compression & Archives, Text & Writing, Audio & Video, QR & Barcode, and Device & Hardware (18 categories); "Calculate" renamed Percentage Calculation. Category names and descriptions follow the app language (en, ta, hi, es).
   - **Document Scanner & Photo to PDF**: ML Kit auto-crop scanner (edge detection, perspective fix, filters, gallery import), page grid with reorder/rotate/retake, export options (size, margins, quality, OCR text layer, password). Photo to PDF auto-crops by default.

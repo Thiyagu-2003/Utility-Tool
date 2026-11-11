@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../core/services/notification_service.dart';
 import 'productivity_models.dart';
 
 class ProductivityService {
@@ -9,6 +11,8 @@ class ProductivityService {
   static const String _keyBills = 'prod_bills_list';
   static const String _keyWork = 'prod_work_sessions_list';
   static const String _keyTodos = 'prod_todos_list';
+  static const String _keyReminders = 'prod_reminders_list';
+  static const String _keyFolders = 'prod_note_folders_list';
 
   // In-memory caches
   List<NoteItem> _notes = [];
@@ -17,6 +21,8 @@ class ProductivityService {
   List<BillItem> _bills = [];
   List<WorkSessionItem> _workSessions = [];
   List<TodoItem> _todos = [];
+  List<ReminderItem> _reminders = [];
+  List<String> _customFolders = ['General', 'Personal', 'Work', 'Projects', 'Archive'];
   bool _isInitialized = false;
 
   static final ProductivityService _instance = ProductivityService._internal();
@@ -81,11 +87,32 @@ class ProductivityService {
       await _saveTodos(prefs);
     }
 
+    // 7. Reminders
+    final remindersRaw = prefs.getString(_keyReminders);
+    if (remindersRaw != null) {
+      _reminders = _decodeList(remindersRaw, ReminderItem.fromJson);
+    } else {
+      _reminders = <ReminderItem>[];
+      await _saveReminders(prefs);
+    }
+
+    // 8. Custom Note Folders
+    final foldersRaw = prefs.getStringList(_keyFolders);
+    if (foldersRaw != null && foldersRaw.isNotEmpty) {
+      _customFolders = List<String>.from(foldersRaw);
+    }
+
     _isInitialized = true;
+
+    // Reschedule active notifications in background
+    try {
+      NotificationService().rescheduleAll(_reminders).catchError((e) {
+        debugPrint('ProductivityService init notification reschedule: $e');
+      });
+    } catch (_) {}
   }
 
-  /// Decodes a stored list, skipping malformed entries instead of throwing
-  /// (a throw here left the whole suite stuck on its loading spinner).
+  /// Decodes a stored list, skipping malformed entries instead of throwing.
   static List<T> _decodeList<T>(String raw, T Function(Map<String, dynamic>) fromJson) {
     final result = <T>[];
     try {
@@ -102,6 +129,38 @@ class ProductivityService {
 
   // --- 1. NOTES ---
   List<NoteItem> get notes => List.unmodifiable(_notes);
+
+  List<NoteItem> get pinnedNotes => _notes.where((n) => n.isPinned).toList();
+
+  List<NoteItem> get recentNotes {
+    final sorted = List<NoteItem>.from(_notes);
+    sorted.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return sorted;
+  }
+
+  List<String> get noteFolders {
+    final set = Set<String>.from(_customFolders);
+    for (final n in _notes) {
+      if (n.folder.isNotEmpty) set.add(n.folder);
+    }
+    return set.toList();
+  }
+
+  List<String> get noteTags {
+    final set = <String>{};
+    for (final n in _notes) {
+      set.addAll(n.tags);
+    }
+    return set.toList();
+  }
+
+  Future<void> addFolder(String folderName) async {
+    final clean = folderName.trim();
+    if (clean.isEmpty || _customFolders.contains(clean)) return;
+    _customFolders.add(clean);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_keyFolders, _customFolders);
+  }
 
   Future<void> addNote(NoteItem note) async {
     _notes.insert(0, note);
@@ -128,7 +187,7 @@ class ProductivityService {
     final idx = _notes.indexWhere((n) => n.id == id);
     if (idx != -1) {
       _notes[idx] = _notes[idx].copyWith(isPinned: !_notes[idx].isPinned);
-      // Re-sort: pinned on top
+      // Re-sort: pinned on top, then by updatedAt
       _notes.sort((a, b) {
         if (a.isPinned == b.isPinned) return b.updatedAt.compareTo(a.updatedAt);
         return a.isPinned ? -1 : 1;
@@ -138,14 +197,23 @@ class ProductivityService {
     }
   }
 
-  List<NoteItem> searchNotes(String query, {String? category}) {
+  List<NoteItem> searchNotes(
+    String query, {
+    String? category,
+    String? folder,
+    String? tag,
+  }) {
     final q = query.trim().toLowerCase();
     return _notes.where((n) {
       final matchesQuery = q.isEmpty ||
           n.title.toLowerCase().contains(q) ||
-          n.content.toLowerCase().contains(q);
+          n.content.toLowerCase().contains(q) ||
+          n.checklist.any((c) => c.text.toLowerCase().contains(q)) ||
+          n.tags.any((t) => t.toLowerCase().contains(q));
       final matchesCat = category == null || category == 'All' || n.category == category;
-      return matchesQuery && matchesCat;
+      final matchesFolder = folder == null || folder == 'All' || n.folder == folder;
+      final matchesTag = tag == null || tag == 'All' || n.tags.contains(tag);
+      return matchesQuery && matchesCat && matchesFolder && matchesTag;
     }).toList();
   }
 
@@ -157,25 +225,93 @@ class ProductivityService {
     _events.sort((a, b) => a.date.compareTo(b.date));
     final prefs = await SharedPreferences.getInstance();
     await _saveEvents(prefs);
+
+    if (event.hasReminder) {
+      final reminderTime = event.date.subtract(Duration(minutes: event.reminderMinutesBefore));
+      final reminder = ReminderItem(
+        id: 'rem_ev_${event.id}',
+        title: 'Event: ${event.title}',
+        body: '${event.time} ${event.location.isNotEmpty ? "at ${event.location}" : ""}',
+        scheduledAt: reminderTime,
+        type: ReminderType.event,
+        relatedId: event.id,
+      );
+      await addReminder(reminder);
+    }
+  }
+
+  Future<void> updateEvent(CalendarEventItem updated) async {
+    final idx = _events.indexWhere((e) => e.id == updated.id);
+    if (idx != -1) {
+      _events[idx] = updated;
+      _events.sort((a, b) => a.date.compareTo(b.date));
+      final prefs = await SharedPreferences.getInstance();
+      await _saveEvents(prefs);
+
+      // Handle linked reminder
+      await deleteReminderByRelatedId(updated.id);
+      if (updated.hasReminder) {
+        final reminderTime = updated.date.subtract(Duration(minutes: updated.reminderMinutesBefore));
+        final reminder = ReminderItem(
+          id: 'rem_ev_${updated.id}',
+          title: 'Event: ${updated.title}',
+          body: '${updated.time} ${updated.location.isNotEmpty ? "at ${updated.location}" : ""}',
+          scheduledAt: reminderTime,
+          type: ReminderType.event,
+          relatedId: updated.id,
+        );
+        await addReminder(reminder);
+      }
+    }
   }
 
   Future<void> deleteEvent(String id) async {
     _events.removeWhere((e) => e.id == id);
     final prefs = await SharedPreferences.getInstance();
     await _saveEvents(prefs);
+    await deleteReminderByRelatedId(id);
   }
 
-  /// Events today or later (the Calendar header used to count past ones too).
+  /// Events occurring today or in the future.
   int upcomingEventsCount([DateTime? now]) {
     final n = now ?? DateTime.now();
     final today = DateTime(n.year, n.month, n.day);
-    return _events.where((e) => !DateTime(e.date.year, e.date.month, e.date.day).isBefore(today)).length;
+    return _events.where((e) {
+      if (e.recurrence != EventRecurrence.none) return true;
+      final evDate = DateTime(e.date.year, e.date.month, e.date.day);
+      return !evDate.isBefore(today);
+    }).length;
   }
 
+  /// Returns all events (including recurring ones) occurring on [day].
   List<CalendarEventItem> getEventsForDay(DateTime day) {
-    return _events.where((e) =>
-      e.date.year == day.year && e.date.month == day.month && e.date.day == day.day
-    ).toList();
+    return _events.where((e) => e.occursOnDate(day)).toList();
+  }
+
+  /// Returns events occurring within a date range [start, end] inclusive.
+  List<CalendarEventItem> getEventsForRange(DateTime start, DateTime end) {
+    final list = <CalendarEventItem>[];
+    for (var d = DateTime(start.year, start.month, start.day);
+        !d.isAfter(end);
+        d = d.add(const Duration(days: 1))) {
+      for (final ev in _events) {
+        if (ev.occursOnDate(d) && !list.contains(ev)) {
+          list.add(ev);
+        }
+      }
+    }
+    return list;
+  }
+
+  /// Today's agenda events.
+  List<CalendarEventItem> get todayAgenda => getEventsForDay(DateTime.now());
+
+  /// Upcoming events for the next [days] days.
+  List<CalendarEventItem> getUpcomingEvents({int days = 7}) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final end = today.add(Duration(days: days));
+    return getEventsForRange(today, end);
   }
 
   // --- 3. SUBSCRIPTIONS ---
@@ -325,8 +461,16 @@ class ProductivityService {
     await _saveWork(prefs);
   }
 
-  // --- 6. TODOS ---
+  // --- 6. TODOS & TASKS ---
   List<TodoItem> get todos => List.unmodifiable(_todos);
+
+  List<TodoItem> get overdueTodos => _todos.where((t) => t.isOverdue).toList();
+
+  List<TodoItem> get dueTodayTodos => _todos.where((t) => t.isDueToday).toList();
+
+  List<TodoItem> get upcomingTodos => _todos.where((t) => t.isUpcoming).toList();
+
+  List<TodoItem> get pendingTodos => _todos.where((t) => !t.isCompleted).toList();
 
   double get todoCompletionRate {
     if (_todos.isEmpty) return 0.0;
@@ -338,12 +482,30 @@ class ProductivityService {
     _todos.insert(0, item);
     final prefs = await SharedPreferences.getInstance();
     await _saveTodos(prefs);
+
+    if (item.hasReminder && item.dueDate != null) {
+      final reminderTime = item.dueDate!.subtract(Duration(minutes: item.reminderMinutesBefore));
+      final reminder = ReminderItem(
+        id: 'rem_td_${item.id}',
+        title: 'Task Due: ${item.title}',
+        body: 'Priority: ${item.priority.label} • ${item.category}',
+        scheduledAt: reminderTime,
+        type: ReminderType.task,
+        relatedId: item.id,
+      );
+      await addReminder(reminder);
+    }
   }
 
   Future<void> toggleTodo(String id) async {
     final idx = _todos.indexWhere((t) => t.id == id);
     if (idx != -1) {
-      _todos[idx] = _todos[idx].copyWith(isCompleted: !_todos[idx].isCompleted);
+      final current = _todos[idx];
+      final isNowDone = !current.isCompleted;
+      _todos[idx] = current.copyWith(
+        isCompleted: isNowDone,
+        completedAt: isNowDone ? DateTime.now() : null,
+      );
       final prefs = await SharedPreferences.getInstance();
       await _saveTodos(prefs);
     }
@@ -355,18 +517,80 @@ class ProductivityService {
     _todos[idx] = updated;
     final prefs = await SharedPreferences.getInstance();
     await _saveTodos(prefs);
+
+    // Update reminder if necessary
+    await deleteReminderByRelatedId(updated.id);
+    if (updated.hasReminder && updated.dueDate != null && !updated.isCompleted) {
+      final reminderTime = updated.dueDate!.subtract(Duration(minutes: updated.reminderMinutesBefore));
+      final reminder = ReminderItem(
+        id: 'rem_td_${updated.id}',
+        title: 'Task Due: ${updated.title}',
+        body: 'Priority: ${updated.priority.label} • ${updated.category}',
+        scheduledAt: reminderTime,
+        type: ReminderType.task,
+        relatedId: updated.id,
+      );
+      await addReminder(reminder);
+    }
   }
 
   Future<void> deleteTodo(String id) async {
     _todos.removeWhere((t) => t.id == id);
     final prefs = await SharedPreferences.getInstance();
     await _saveTodos(prefs);
+    await deleteReminderByRelatedId(id);
   }
 
   Future<void> clearCompletedTodos() async {
     _todos.removeWhere((t) => t.isCompleted);
     final prefs = await SharedPreferences.getInstance();
     await _saveTodos(prefs);
+  }
+
+  // --- 7. REMINDERS & NOTIFICATIONS ---
+  List<ReminderItem> get reminders => List.unmodifiable(_reminders);
+
+  Future<void> addReminder(ReminderItem reminder) async {
+    _reminders.removeWhere((r) => r.id == reminder.id);
+    _reminders.add(reminder);
+    _reminders.sort((a, b) => a.scheduledAt.compareTo(b.scheduledAt));
+    final prefs = await SharedPreferences.getInstance();
+    await _saveReminders(prefs);
+
+    if (reminder.isEnabled) {
+      await NotificationService().scheduleReminder(reminder);
+    }
+  }
+
+  Future<void> toggleReminderEnabled(String id) async {
+    final idx = _reminders.indexWhere((r) => r.id == id);
+    if (idx != -1) {
+      final cur = _reminders[idx];
+      final newEnabled = !cur.isEnabled;
+      _reminders[idx] = cur.copyWith(isEnabled: newEnabled);
+      final prefs = await SharedPreferences.getInstance();
+      await _saveReminders(prefs);
+
+      if (newEnabled) {
+        await NotificationService().scheduleReminder(_reminders[idx]);
+      } else {
+        await NotificationService().cancelReminder(cur.id);
+      }
+    }
+  }
+
+  Future<void> deleteReminder(String id) async {
+    _reminders.removeWhere((r) => r.id == id);
+    final prefs = await SharedPreferences.getInstance();
+    await _saveReminders(prefs);
+    await NotificationService().cancelReminder(id);
+  }
+
+  Future<void> deleteReminderByRelatedId(String relatedId) async {
+    final toRemove = _reminders.where((r) => r.relatedId == relatedId).toList();
+    for (final r in toRemove) {
+      await deleteReminder(r.id);
+    }
   }
 
   // --- PRIVATE PERSISTENCE ---
@@ -392,5 +616,9 @@ class ProductivityService {
 
   Future<void> _saveTodos(SharedPreferences prefs) async {
     await prefs.setString(_keyTodos, jsonEncode(_todos.map((t) => t.toJson()).toList()));
+  }
+
+  Future<void> _saveReminders(SharedPreferences prefs) async {
+    await prefs.setString(_keyReminders, jsonEncode(_reminders.map((r) => r.toJson()).toList()));
   }
 }

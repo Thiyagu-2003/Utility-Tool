@@ -496,4 +496,332 @@ void main() {
       expect(pdfSafe('x' * 130), '${'x' * 60} ${'x' * 60} ${'x' * 10}');
     });
   });
+
+  group('Notes Management Advanced Features', () {
+    test('NoteItem supports folders, tags, checklist items, image attachments, and web links', () {
+      final now = DateTime(2026, 11, 11, 12, 0);
+      final note = NoteItem(
+        id: 'note_full',
+        title: 'Project Roadmap',
+        content: '# Goals\n- Launch v1\n- Add docs',
+        category: 'Work',
+        folder: 'Q4 Initiatives',
+        tags: ['release', 'urgent', 'roadmap'],
+        isChecklist: true,
+        checklist: [
+          ChecklistItem(id: 'c1', text: 'Write specs', isDone: true),
+          ChecklistItem(id: 'c2', text: 'Deploy apk', isDone: false),
+        ],
+        imagePaths: ['/storage/emulated/0/Pictures/spec.png'],
+        webLinks: ['https://example.com/spec', 'https://github.com/project'],
+        updatedAt: now,
+        createdAt: now.subtract(const Duration(days: 3)),
+      );
+
+      final json = note.toJson();
+      final restored = NoteItem.fromJson(json);
+
+      expect(restored.id, 'note_full');
+      expect(restored.title, 'Project Roadmap');
+      expect(restored.folder, 'Q4 Initiatives');
+      expect(restored.tags, ['release', 'urgent', 'roadmap']);
+      expect(restored.isChecklist, isTrue);
+      expect(restored.checklist.length, 2);
+      expect(restored.checklist[0].isDone, isTrue);
+      expect(restored.checklist[1].isDone, isFalse);
+      expect(restored.imagePaths, ['/storage/emulated/0/Pictures/spec.png']);
+      expect(restored.webLinks, ['https://example.com/spec', 'https://github.com/project']);
+      expect(restored.createdAt, now.subtract(const Duration(days: 3)));
+    });
+
+    test('Checklist notes helpers add, toggle, and remove items', () {
+      var note = NoteItem(
+        id: 'n1',
+        title: 'Grocery List',
+        content: '',
+        isChecklist: true,
+        updatedAt: DateTime.now(),
+      );
+
+      note = note.addChecklistItem('Milk');
+      note = note.addChecklistItem('Apples');
+      expect(note.checklist.length, 2);
+      expect(note.checklist[0].text, 'Milk');
+      expect(note.checklist[0].isDone, isFalse);
+
+      note = note.toggleChecklistItem(0);
+      expect(note.checklist[0].isDone, isTrue);
+      expect(note.checklist[1].isDone, isFalse);
+
+      note = note.removeChecklistItem(0);
+      expect(note.checklist.length, 1);
+      expect(note.checklist[0].text, 'Apples');
+    });
+
+    test('ProductivityService searches notes across tags, folders, checklist, and content', () async {
+      final service = ProductivityService();
+      final n1 = NoteItem(
+        id: 'search_1',
+        title: 'Sprint Planning',
+        content: 'Review the sprint backlog',
+        folder: 'Work',
+        category: 'Work',
+        tags: ['agile', 'scrum'],
+        updatedAt: DateTime.now(),
+      );
+      final n2 = NoteItem(
+        id: 'search_2',
+        title: 'Packing List',
+        content: '',
+        folder: 'Travel',
+        category: 'Personal',
+        tags: ['vacation'],
+        isChecklist: true,
+        checklist: [ChecklistItem(id: 'c1', text: 'Passport and tickets')],
+        updatedAt: DateTime.now(),
+      );
+
+      await service.addNote(n1);
+      await service.addNote(n2);
+
+      // Search by tag
+      expect(service.searchNotes('', tag: 'agile').map((n) => n.id), contains('search_1'));
+      // Search by folder
+      expect(service.searchNotes('', folder: 'Travel').map((n) => n.id), contains('search_2'));
+      // Full text search in checklist text
+      expect(service.searchNotes('passport').map((n) => n.id), contains('search_2'));
+      // Search in content
+      expect(service.searchNotes('backlog').map((n) => n.id), contains('search_1'));
+
+      await service.deleteNote('search_1');
+      await service.deleteNote('search_2');
+    });
+  });
+
+  group('Calendar & Recurring Events Logic', () {
+    test('CalendarEventItem occursOnDate correctly handles recurrence rules', () {
+      final start = DateTime(2026, 11, 10); // Tuesday
+
+      final oneTime = CalendarEventItem(
+        id: 'e1',
+        title: 'Single Meeting',
+        date: start,
+        recurrence: EventRecurrence.none,
+      );
+      expect(oneTime.occursOnDate(DateTime(2026, 11, 10)), isTrue);
+      expect(oneTime.occursOnDate(DateTime(2026, 11, 11)), isFalse);
+      expect(oneTime.occursOnDate(DateTime(2026, 11, 9)), isFalse);
+
+      final daily = CalendarEventItem(
+        id: 'e2',
+        title: 'Daily Standup',
+        date: start,
+        recurrence: EventRecurrence.daily,
+      );
+      expect(daily.occursOnDate(DateTime(2026, 11, 10)), isTrue);
+      expect(daily.occursOnDate(DateTime(2026, 11, 15)), isTrue);
+      expect(daily.occursOnDate(DateTime(2026, 11, 9)), isFalse); // Before start date
+
+      final weekly = CalendarEventItem(
+        id: 'e3',
+        title: 'Weekly 1:1',
+        date: start, // Tuesday
+        recurrence: EventRecurrence.weekly,
+      );
+      expect(weekly.occursOnDate(DateTime(2026, 11, 10)), isTrue); // Same Tuesday
+      expect(weekly.occursOnDate(DateTime(2026, 11, 17)), isTrue); // Next Tuesday
+      expect(weekly.occursOnDate(DateTime(2026, 11, 11)), isFalse); // Wednesday
+
+      final monthly = CalendarEventItem(
+        id: 'e4',
+        title: 'Monthly Review',
+        date: DateTime(2026, 1, 15),
+        recurrence: EventRecurrence.monthly,
+      );
+      expect(monthly.occursOnDate(DateTime(2026, 2, 15)), isTrue);
+      expect(monthly.occursOnDate(DateTime(2026, 3, 15)), isTrue);
+      expect(monthly.occursOnDate(DateTime(2026, 3, 16)), isFalse);
+
+      final yearly = CalendarEventItem(
+        id: 'e5',
+        title: 'Annual Anniversary',
+        date: DateTime(2025, 4, 20),
+        recurrence: EventRecurrence.yearly,
+      );
+      expect(yearly.occursOnDate(DateTime(2026, 4, 20)), isTrue);
+      expect(yearly.occursOnDate(DateTime(2027, 4, 20)), isTrue);
+      expect(yearly.occursOnDate(DateTime(2026, 4, 21)), isFalse);
+    });
+
+    test('CalendarEventItem supports linked notes, end time, and description', () {
+      final event = CalendarEventItem(
+        id: 'ev_adv',
+        title: 'Architecture Review',
+        date: DateTime(2026, 11, 12),
+        time: '10:00 AM',
+        endTime: '11:30 AM',
+        location: 'Zoom Room #402',
+        description: 'Review microservice architecture diagrams',
+        recurrence: EventRecurrence.weekly,
+        linkedNoteIds: ['note_arch_1', 'note_arch_2'],
+        colorValue: 0xFF10B981,
+        hasReminder: true,
+        reminderMinutesBefore: 15,
+      );
+
+      final json = event.toJson();
+      final restored = CalendarEventItem.fromJson(json);
+
+      expect(restored.endTime, '11:30 AM');
+      expect(restored.description, 'Review microservice architecture diagrams');
+      expect(restored.recurrence, EventRecurrence.weekly);
+      expect(restored.linkedNoteIds, ['note_arch_1', 'note_arch_2']);
+      expect(restored.colorValue, 0xFF10B981);
+      expect(restored.hasReminder, isTrue);
+      expect(restored.reminderMinutesBefore, 15);
+    });
+
+    test('ProductivityService range and day queries include recurring events', () async {
+      final service = ProductivityService();
+      final recurringEvent = CalendarEventItem(
+        id: 'ev_rec_test',
+        title: 'Daily Checkin',
+        date: DateTime(2026, 11, 1),
+        recurrence: EventRecurrence.daily,
+      );
+      await service.addEvent(recurringEvent);
+
+      final dayEvents = service.getEventsForDay(DateTime(2026, 11, 20));
+      expect(dayEvents.any((e) => e.id == 'ev_rec_test'), isTrue);
+
+      final rangeEvents = service.getEventsForRange(
+        DateTime(2026, 11, 5),
+        DateTime(2026, 11, 10),
+      );
+      expect(rangeEvents.any((e) => e.id == 'ev_rec_test'), isTrue);
+
+      await service.deleteEvent('ev_rec_test');
+    });
+  });
+
+  group('Tasks & Overdue Status Logic', () {
+    test('TodoItem correctly computes isOverdue, isDueToday, and isUpcoming', () {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+
+      final overdue = TodoItem(
+        id: 't_over',
+        title: 'Overdue task',
+        dueDate: today.subtract(const Duration(days: 2)),
+      );
+      expect(overdue.isOverdue, isTrue);
+      expect(overdue.isDueToday, isFalse);
+      expect(overdue.isUpcoming, isFalse);
+
+      final dueToday = TodoItem(
+        id: 't_today',
+        title: 'Due today task',
+        dueDate: today,
+      );
+      expect(dueToday.isOverdue, isFalse);
+      expect(dueToday.isDueToday, isTrue);
+      expect(dueToday.isUpcoming, isFalse);
+
+      final upcoming = TodoItem(
+        id: 't_up',
+        title: 'Upcoming task',
+        dueDate: today.add(const Duration(days: 3)),
+      );
+      expect(upcoming.isOverdue, isFalse);
+      expect(upcoming.isDueToday, isFalse);
+      expect(upcoming.isUpcoming, isTrue);
+
+      // Completed task is never overdue
+      final completedOverdue = overdue.copyWith(isCompleted: true);
+      expect(completedOverdue.isOverdue, isFalse);
+    });
+
+    test('filterTodos supports overdue and today filters', () {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+
+      final tasks = [
+        TodoItem(id: '1', title: 'Task 1', dueDate: today.subtract(const Duration(days: 1))),
+        TodoItem(id: '2', title: 'Task 2', dueDate: today),
+        TodoItem(id: '3', title: 'Task 3', dueDate: today.add(const Duration(days: 2))),
+      ];
+
+      final overdueList = filterTodos(tasks, status: TodoFilter.overdue);
+      expect(overdueList.map((t) => t.id), ['1']);
+
+      final todayList = filterTodos(tasks, status: TodoFilter.today);
+      expect(todayList.map((t) => t.id), ['2']);
+    });
+  });
+
+  group('Reminders & Notification Scheduling Model', () {
+    test('ReminderItem serialization and deserialization', () {
+      final time = DateTime(2026, 11, 15, 9, 30);
+      final reminder = ReminderItem(
+        id: 'rem_101',
+        title: 'Call Doctor',
+        body: 'Confirm routine checkup',
+        scheduledAt: time,
+        type: ReminderType.recurringWeekly,
+        isEnabled: true,
+        relatedId: 'event_42',
+      );
+
+      final json = reminder.toJson();
+      final restored = ReminderItem.fromJson(json);
+
+      expect(restored.id, 'rem_101');
+      expect(restored.title, 'Call Doctor');
+      expect(restored.body, 'Confirm routine checkup');
+      expect(restored.scheduledAt, time);
+      expect(restored.type, ReminderType.recurringWeekly);
+      expect(restored.isEnabled, isTrue);
+      expect(restored.relatedId, 'event_42');
+    });
+
+    test('ProductivityService manages reminders CRUD and toggles', () async {
+      final service = ProductivityService();
+      final r = ReminderItem(
+        id: 'rem_test_toggle',
+        title: 'Take vitamins',
+        scheduledAt: DateTime.now().add(const Duration(hours: 2)),
+        type: ReminderType.recurringDaily,
+        isEnabled: true,
+      );
+
+      await service.addReminder(r);
+      expect(service.reminders.any((rem) => rem.id == 'rem_test_toggle'), isTrue);
+
+      await service.toggleReminderEnabled('rem_test_toggle');
+      final toggled = service.reminders.firstWhere((rem) => rem.id == 'rem_test_toggle');
+      expect(toggled.isEnabled, isFalse);
+
+      await service.deleteReminder('rem_test_toggle');
+      expect(service.reminders.any((rem) => rem.id == 'rem_test_toggle'), isFalse);
+    });
+  });
+
+  group('Personal Planner Module Registry Verification', () {
+    test('Notes, Calendar & Personal Planner tool is registered in ToolRegistry', () {
+      final tool = ToolRegistry.allTools.firstWhere(
+        (t) => t.id == 'personal_planner',
+        orElse: () => throw Exception('personal_planner not found in ToolRegistry'),
+      );
+
+      expect(tool.title, 'Notes, Calendar & Personal Planner');
+      expect(tool.category, ToolCategory.dateTime);
+      expect(tool.keywords, contains('planner'));
+      expect(tool.keywords, contains('notes'));
+      expect(tool.keywords, contains('calendar'));
+      expect(tool.keywords, contains('agenda'));
+      expect(tool.keywords, contains('todo'));
+      expect(tool.keywords, contains('reminders'));
+      expect(tool.builder, isNotNull);
+    });
+  });
 }

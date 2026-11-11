@@ -26,11 +26,25 @@ Future<Uint8List> buildNotesPdf(List<NoteItem> notes) async {
             style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
           ),
           pw.Text(
-            pdfSafe('${n.category} - ${stamp.format(n.updatedAt)}'),
+            pdfSafe('${n.category} • Folder: ${n.folder} • ${stamp.format(n.updatedAt)}'),
             style: const pw.TextStyle(fontSize: 9),
           ),
+          if (n.tags.isNotEmpty)
+            pw.Text(
+              pdfSafe('Tags: ${n.tags.map((t) => '#$t').join(' ')}'),
+              style: const pw.TextStyle(fontSize: 8),
+            ),
           pw.SizedBox(height: 3),
-          pw.Text(pdfSafe(n.content), overflow: pw.TextOverflow.span), // span: lets a long note flow onto the next page
+          if (n.content.isNotEmpty)
+            pw.Text(pdfSafe(n.content), overflow: pw.TextOverflow.span),
+          if (n.isChecklist && n.checklist.isNotEmpty) ...[
+            pw.SizedBox(height: 2),
+            for (final c in n.checklist)
+              pw.Text(
+                pdfSafe('${c.isDone ? "[x]" : "[ ]"} ${c.text}'),
+                style: const pw.TextStyle(fontSize: 10),
+              ),
+          ],
           pw.SizedBox(height: 14),
         ],
       ],
@@ -49,17 +63,22 @@ Future<Uint8List> buildAgendaPdf(DateTime day, List<CalendarEventItem> events) a
         if (events.isEmpty) pw.Text('No events scheduled.'),
         for (final e in events) ...[
           pw.Text(
-            pdfSafe('${e.time}  ${e.title}'),
+            pdfSafe('${e.time}${e.endTime.isNotEmpty ? " - ${e.endTime}" : ""}  ${e.title}'),
             style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
           ),
           pw.Text(
             pdfSafe([
               e.category,
               'Priority: ${e.priority.label}',
+              if (e.recurrence != EventRecurrence.none) 'Repeats ${e.recurrence.label}',
               if (e.location.isNotEmpty) e.location,
             ].join(' - ')),
             style: const pw.TextStyle(fontSize: 9),
           ),
+          if (e.description.isNotEmpty) ...[
+            pw.SizedBox(height: 2),
+            pw.Text(pdfSafe(e.description), style: const pw.TextStyle(fontSize: 10)),
+          ],
           pw.SizedBox(height: 10),
         ],
       ],

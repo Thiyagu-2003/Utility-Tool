@@ -45,6 +45,7 @@ import '../../features/everyday_tools/qr_contact_share_screen.dart';
 import '../../features/image_tools/photo_editor_screen.dart';
 import '../../features/documents/office_pdf_toolkit_screen.dart';
 import '../../features/productivity/productivity_toolkit_screen.dart';
+import '../../features/entertainment/entertainment_tracker_screen.dart';
 import '../../features/file_tools/archive_preview_toolkit_screen.dart';
 import '../../features/slate/slate_screen.dart';
 
@@ -121,12 +122,21 @@ class ToolRegistry {
       builder: (_) => const DurationConverterScreen(),
     ),
     ToolItem(
+      id: 'personal_planner',
+      title: 'Notes, Calendar & Personal Planner',
+      description: 'Daily agenda dashboard, rich notes with folders & markdown, 3-view calendar, and task reminders',
+      category: ToolCategory.dateTime,
+      icon: Icons.event_note_rounded,
+      keywords: ['planner', 'notes', 'calendar', 'agenda', 'todo', 'tasks', 'events', 'reminders', 'checklist', 'productivity'],
+      builder: (_) => const ProductivityToolkitScreen(initialTab: ProductivityTab.dashboard),
+    ),
+    ToolItem(
       id: 'productivity_toolkit',
       title: 'Productivity & Organization Suite',
-      description: 'Notes with categories, calendar & events, subscriptions, bills, work-hours tracker & to-do checklists',
+      description: 'Notes, 3-view calendar, to-do checklists, planner dashboard, reminders, subscriptions, bills & work hours',
       category: ToolCategory.dateTime,
       icon: Icons.task_alt_rounded,
-      keywords: ['productivity', 'notes', 'calendar', 'events', 'reminders', 'subscription', 'bill', 'due date', 'work hours', 'timesheet', 'todo', 'checklist', 'tasks', 'organization'],
+      keywords: ['productivity', 'notes', 'calendar', 'events', 'reminders', 'subscription', 'bill', 'due date', 'work hours', 'timesheet', 'todo', 'checklist', 'tasks', 'organization', 'planner', 'agenda', 'dashboard'],
       builder: (_) => const ProductivityToolkitScreen(),
     ),
 
@@ -560,6 +570,32 @@ class ToolRegistry {
       icon: Icons.contact_page_rounded,
       keywords: ['qr', 'contact', 'vcard', 'mecard', 'share', 'business card', 'phone', 'address'],
       builder: (_) => const QrContactShareScreen(),
+    ),
+    // Entertainment Notes & Watchlist Tracker
+    ToolItem(
+      id: 'entertainment_tracker',
+      title: 'Entertainment Notes & Tracker',
+      description: 'Organize, track progress and write notes for Anime, Drama, Movies & TV Series',
+      category: ToolCategory.everyday,
+      icon: Icons.movie_filter_rounded,
+      customColor: const Color(0xFFE11D48),
+      keywords: [
+        'entertainment',
+        'anime',
+        'drama',
+        'movies',
+        'tv series',
+        'shows',
+        'tracker',
+        'watchlist',
+        'episodes',
+        'seasons',
+        'reviews',
+        'notes',
+        'otaku',
+        'kdrama'
+      ],
+      builder: (_) => const EntertainmentTrackerScreen(),
     ),
   ];
 
