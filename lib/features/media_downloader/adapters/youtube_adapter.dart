@@ -334,9 +334,42 @@ class YouTubeSourceAdapter implements MediaSourceAdapter {
       );
     }
 
-    // Only fall back to adaptive streams when no muxed stream is available,
-    // because YouTube enforces PO-token checks on adaptive chunks > ~1 MB.
+    // Add an Audio M4A (AAC) option extracted cleanly from the muxed MP4
+    // stream so users can save audio-only tracks without hitting YouTube's
+    // PO-token gate on adaptive audio streams.
     if (options.isNotEmpty) {
+      MuxedStreamInfo? bestMp4Muxed;
+      for (final s in muxed) {
+        if (s.fragments.isNotEmpty || _isHlsUrl(s.url)) continue;
+        if (s.container.name.toLowerCase() == 'mp4') {
+          bestMp4Muxed = s;
+          break;
+        }
+      }
+      if (bestMp4Muxed != null) {
+        final sizeBytes =
+            bestMp4Muxed.size.totalBytes > 0
+                ? bestMp4Muxed.size.totalBytes
+                : null;
+        options.add(
+          MediaQualityOption(
+            id: 'yt_audio_m4a_${bestMp4Muxed.tag}',
+            label: 'Audio M4A (AAC)',
+            format: 'm4a',
+            resolution: 'Audio Only',
+            codec: _shortAudioCodec(bestMp4Muxed.audioCodec),
+            fileSizeBytes: sizeBytes,
+            downloadUrl: bestMp4Muxed.url.toString(),
+            isOriginal: false,
+            supportsResume: true,
+            mimeType: 'audio/mp4',
+            headers: downloadHeaders,
+            chunkSizeBytes: _youtubeChunkBytes,
+            fileName: '$safeBase.m4a',
+            extractAudioOnly: true,
+          ),
+        );
+      }
       return options;
     }
 

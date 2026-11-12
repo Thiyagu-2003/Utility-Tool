@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../file_tools/file_zip_utils.dart';
 import '../adapters/media_source_adapter.dart';
 import '../models/media_downloader_models.dart';
+import 'mp4_audio_extractor.dart';
 import 'platform_storage_service.dart';
 import 'url_security_validator.dart';
 
@@ -1164,7 +1166,26 @@ class DownloadManagerService extends ChangeNotifier {
       destPath = '${dir.path}${Platform.pathSeparator}$destName';
     }
 
-    await partFile.rename(destPath);
+    var finalBytes = totalBytes;
+    if (record.selectedQuality?.extractAudioOnly == true) {
+      final srcPath = partFile.path;
+      final outPath = destPath;
+      try {
+        await Isolate.run(
+          () => Mp4AudioExtractor.extractM4a(
+            inputMp4Path: srcPath,
+            outputM4aPath: outPath,
+          ),
+        );
+      } catch (e) {
+        await _deleteTempFile(outPath);
+        rethrow;
+      }
+      await _deleteTempFile(srcPath);
+      finalBytes = await File(destPath).length();
+    } else {
+      await partFile.rename(destPath);
+    }
 
     final hashes = await FileZipUtils.hashFileInBackground(
       destPath,
@@ -1177,8 +1198,8 @@ class DownloadManagerService extends ChangeNotifier {
       (r) => r.copyWith(
         fileName: destName,
         filePath: destPath,
-        totalBytes: totalBytes,
-        downloadedBytes: totalBytes,
+        totalBytes: finalBytes,
+        downloadedBytes: finalBytes,
         status: DownloadStatus.completed,
         completedAt: DateTime.now(),
         sha256: sha256,

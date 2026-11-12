@@ -192,6 +192,7 @@ class MediaQualityOption {
   final Map<String, String> headers;
   final int? chunkSizeBytes;
   final String? fileName;
+  final bool extractAudioOnly;
 
   const MediaQualityOption({
     required this.id,
@@ -208,6 +209,7 @@ class MediaQualityOption {
     this.headers = const {},
     this.chunkSizeBytes,
     this.fileName,
+    this.extractAudioOnly = false,
   });
 
   String get subtitleSummary {
@@ -237,6 +239,7 @@ class MediaQualityOption {
     if (headers.isNotEmpty) 'headers': headers,
     if (chunkSizeBytes != null) 'chunkSizeBytes': chunkSizeBytes,
     if (fileName != null) 'fileName': fileName,
+    if (extractAudioOnly) 'extractAudioOnly': true,
   };
 
   factory MediaQualityOption.fromJson(Map<String, dynamic> json) {
@@ -265,6 +268,7 @@ class MediaQualityOption {
       headers: headers,
       chunkSizeBytes: json['chunkSizeBytes'] as int?,
       fileName: json['fileName'] as String?,
+      extractAudioOnly: json['extractAudioOnly'] as bool? ?? false,
     );
   }
 }

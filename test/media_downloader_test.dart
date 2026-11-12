@@ -18,6 +18,7 @@ import 'package:utility_tool/features/media_downloader/adapters/x_adapter.dart';
 import 'package:utility_tool/features/media_downloader/adapters/youtube_adapter.dart';
 import 'package:utility_tool/features/media_downloader/models/media_downloader_models.dart';
 import 'package:utility_tool/features/media_downloader/services/download_manager_service.dart';
+import 'package:utility_tool/features/media_downloader/services/mp4_audio_extractor.dart';
 import 'package:utility_tool/features/media_downloader/services/platform_storage_service.dart';
 import 'package:utility_tool/features/media_downloader/services/url_security_validator.dart';
 import 'package:utility_tool/features/media_downloader/ui/media_downloader_screen.dart';
@@ -439,9 +440,11 @@ void main() {
       expect(result.sourceId, 'youtube');
       expect(result.title, 'Flutter Demo Video');
       expect(result.author, 'Flutter Dev');
-      expect(result.qualityOptions.length, 1);
+      expect(result.qualityOptions.length, 2);
       expect(result.qualityOptions.first.format, 'mp4');
       expect(result.qualityOptions.first.resolution, contains('360p'));
+      expect(result.qualityOptions[1].format, 'm4a');
+      expect(result.qualityOptions[1].extractAudioOnly, isTrue);
     });
 
     test('YouTube adapter fails clearly when URL has no video ID', () async {
@@ -519,8 +522,10 @@ void main() {
       expect(ig.extension, 'mp4');
       expect(ig.fileSizeBytes, 2048000);
       expect(ig.supportsResume, isTrue);
-      expect(ig.qualityOptions.length, 2);
+      expect(ig.qualityOptions.length, 3);
       expect(ig.qualityOptions.first.downloadUrl, contains('reel_1080.mp4'));
+      expect(ig.qualityOptions.last.format, 'm4a');
+      expect(ig.qualityOptions.last.extractAudioOnly, isTrue);
 
       // Carousel post via embed fallback
       final carouselJson = jsonEncode({
@@ -680,6 +685,102 @@ void main() {
       );
       final doneAudio = manager.records.firstWhere((r) => r.id == audioId);
       expect(await File(doneAudio.filePath).readAsBytes(), mp3Bytes);
+    });
+
+    test('extracts standalone M4A audio track from MP4 file', () async {
+      Uint8List box(String type, List<int> payload) {
+        final out = Uint8List(8 + payload.length);
+        ByteData.sublistView(out).setUint32(0, out.length);
+        out[4] = type.codeUnitAt(0);
+        out[5] = type.codeUnitAt(1);
+        out[6] = type.codeUnitAt(2);
+        out[7] = type.codeUnitAt(3);
+        out.setRange(8, out.length, payload);
+        return out;
+      }
+
+      Uint8List fullBox(String type, List<int> body) =>
+          box(type, [0, 0, 0, 0, ...body]);
+
+      Uint8List u32(int v) {
+        final b = Uint8List(4);
+        ByteData.sublistView(b).setUint32(0, v);
+        return b;
+      }
+
+      // Build minimal MP4 with ftyp + moov (mvhd + video trak + audio soun trak) + mdat.
+      final audioChunk1 = List<int>.generate(64, (i) => (i + 0xA0) & 0xFF);
+      final videoChunk = List<int>.generate(128, (i) => (i + 0x10) & 0xFF);
+      final audioChunk2 = List<int>.generate(48, (i) => (i + 0xC0) & 0xFF);
+
+      final ftyp = box('ftyp', [
+        ...'mp42'.codeUnits,
+        0, 0, 0, 0,
+        ...'isom'.codeUnits,
+      ]);
+
+      final mvhd = fullBox('mvhd', List<int>.filled(96, 0));
+      final videHdlr = fullBox('hdlr', [
+        0, 0, 0, 0,
+        ...'vide'.codeUnits,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0,
+      ]);
+      final videTrak = box('trak', box('mdia', videHdlr));
+
+      final sounHdlr = fullBox('hdlr', [
+        0, 0, 0, 0,
+        ...'soun'.codeUnits,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0,
+      ]);
+      // Placeholder stco offsets; patched below once moov size is known.
+      Uint8List buildSounTrak(int off1, int off2) {
+        final stsc = fullBox('stsc', [
+          ...u32(1), // 1 entry
+          ...u32(1), // first_chunk = 1
+          ...u32(1), // samples_per_chunk = 1
+          ...u32(1), // sample_description_index = 1
+        ]);
+        final stsz = fullBox('stsz', [
+          ...u32(0), // variable sample sizes
+          ...u32(2), // 2 samples
+          ...u32(audioChunk1.length),
+          ...u32(audioChunk2.length),
+        ]);
+        final stco = fullBox('stco', [
+          ...u32(2), // 2 chunks
+          ...u32(off1),
+          ...u32(off2),
+        ]);
+        final stbl = box('stbl', [...stsc, ...stsz, ...stco]);
+        final minf = box('minf', stbl);
+        return box('trak', box('mdia', [...sounHdlr, ...minf]));
+      }
+
+      final dummyMoov = box('moov', [...mvhd, ...videTrak, ...buildSounTrak(0, 0)]);
+      final mdatDataStart = ftyp.length + dummyMoov.length + 8;
+      final realOff1 = mdatDataStart;
+      final realOff2 = mdatDataStart + audioChunk1.length + videoChunk.length;
+      final realMoov = box('moov', [...mvhd, ...videTrak, ...buildSounTrak(realOff1, realOff2)]);
+      final mdat = box('mdat', [...audioChunk1, ...videoChunk, ...audioChunk2]);
+
+      final mp4File = File('${tempDir.path}${Platform.pathSeparator}src.mp4');
+      await mp4File.writeAsBytes([...ftyp, ...realMoov, ...mdat]);
+
+      final m4aFile = File('${tempDir.path}${Platform.pathSeparator}out.m4a');
+      await Mp4AudioExtractor.extractM4a(
+        inputMp4Path: mp4File.path,
+        outputM4aPath: m4aFile.path,
+      );
+
+      final outBytes = await m4aFile.readAsBytes();
+      expect(String.fromCharCodes(outBytes.sublist(4, 12)), 'ftypM4A ');
+      // Output should contain only audio chunks (no video chunk bytes) and be smaller.
+      expect(outBytes.length, lessThan(await mp4File.length()));
+      // Last (64 + 48) bytes in mdat must equal audioChunk1 + audioChunk2.
+      final audioStart = outBytes.length - (audioChunk1.length + audioChunk2.length);
+      expect(outBytes.sublist(audioStart), [...audioChunk1, ...audioChunk2]);
     });
 
     test('downloads MP4, MP3, PNG, PDF and verifies bytes + SHA-256 integrity', () async {

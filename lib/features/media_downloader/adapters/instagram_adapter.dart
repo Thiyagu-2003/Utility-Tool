@@ -722,6 +722,24 @@ class InstagramSourceAdapter implements MediaSourceAdapter {
           ),
         );
       }
+      if (videos.isNotEmpty) {
+        options.add(
+          MediaQualityOption(
+            id: 'ig_audio_m4a',
+            label: 'Audio M4A (AAC)',
+            format: 'm4a',
+            resolution: 'Audio Only',
+            codec: 'AAC',
+            downloadUrl: videos.first.url,
+            isOriginal: false,
+            supportsResume: true,
+            mimeType: 'audio/mp4',
+            headers: downloadHeaders,
+            fileName: '$safeBase.m4a',
+            extractAudioOnly: true,
+          ),
+        );
+      }
     }
 
     // 3. Single Photo post (`image_versions2` or `display_url`).
