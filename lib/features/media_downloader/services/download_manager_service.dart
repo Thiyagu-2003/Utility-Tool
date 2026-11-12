@@ -621,17 +621,233 @@ class DownloadManagerService extends ChangeNotifier {
         }
       }
 
-      final requestHeaders = <String, String>{};
-      if (existingBytes > 0) {
-        requestHeaders['Range'] = 'bytes=$existingBytes-';
+      var downloadUri = uriCheck.uri!;
+      final customHeaders =
+          record.selectedQuality?.headers ?? const <String, String>{};
+      final chunkSize = record.selectedQuality?.chunkSizeBytes;
+      final isChunkedRangeMode =
+          chunkSize != null &&
+          chunkSize > 0 &&
+          record.totalBytes != null &&
+          record.totalBytes! > 0;
+
+      if (isChunkedRangeMode) {
+        final expectedTotal = record.totalBytes!;
+        if (existingBytes >= expectedTotal) {
+          await _finalizeCompletedDownload(id, partFile, existingBytes);
+          return;
+        }
+
+        raf = await partFile.open(
+          mode: existingBytes > 0 ? FileMode.writeOnlyAppend : FileMode.writeOnly,
+        );
+
+        var currentBytes = existingBytes;
+        var windowBytes = 0;
+        var windowStart = DateTime.now();
+        var smoothedSpeed = 0.0;
+        var refreshedUrl = false;
+
+        while (currentBytes < expectedTotal &&
+            !control.cancelled &&
+            !control.paused) {
+          final endByte = (currentBytes + chunkSize - 1).clamp(
+            currentBytes,
+            expectedTotal - 1,
+          );
+          final chunkHeaders = <String, String>{...customHeaders};
+          var requestUri = downloadUri;
+          if (downloadUri.host.contains('googlevideo.com') &&
+              downloadUri.queryParameters['c'] != 'ANDROID') {
+            final qp = Map<String, String>.from(downloadUri.queryParameters);
+            qp['range'] = '$currentBytes-$endByte';
+            requestUri = downloadUri.replace(queryParameters: qp);
+          } else {
+            chunkHeaders['Range'] = 'bytes=$currentBytes-$endByte';
+          }
+
+          final safeResp = await UrlSecurityValidator.sendWithSafeRedirects(
+            client: control.client,
+            method: 'GET',
+            uri: requestUri,
+            headers: chunkHeaders,
+          );
+          final response = safeResp.response;
+          final statusCode = response.statusCode;
+
+          if ((statusCode == 403 || statusCode == 410) &&
+              !refreshedUrl &&
+              record.originalUrl != record.downloadUrl) {
+            await response.stream.drain<void>();
+            refreshedUrl = true;
+            final updated = await _tryRefreshSignedUrl(record);
+            if (updated != null) {
+              record = updated;
+              downloadUri = Uri.parse(updated.downloadUrl);
+              continue;
+            }
+          }
+
+          if (statusCode < 200 || statusCode >= 300) {
+            await response.stream.drain<void>();
+            throw HttpException(
+              'Server returned HTTP $statusCode',
+              uri: safeResp.finalUri,
+            );
+          }
+
+          final contentType =
+              (response.headers['content-type'] ?? '')
+                  .toLowerCase()
+                  .split(';')
+                  .first
+                  .trim();
+          if (contentType == 'text/html' ||
+              contentType == 'application/xhtml+xml') {
+            await response.stream.drain<void>();
+            throw const FormatException(
+              'Server returned an HTML web page instead of the requested media/file.',
+            );
+          }
+
+          if (statusCode == 200 && currentBytes > 0) {
+            // Server ignored Range and restarted from byte 0.
+            await response.stream.drain<void>();
+            throw const HttpException(
+              'Server restarted stream instead of serving requested byte range.',
+            );
+          }
+
+          final streamIterator = StreamIterator(
+            response.stream.timeout(_chunkReadTimeout),
+          );
+          try {
+            while (await streamIterator.moveNext()) {
+              if (control.cancelled || control.paused) break;
+              final chunk = streamIterator.current;
+              if (chunk.isEmpty) continue;
+
+              if (currentBytes + chunk.length >
+                  UrlSecurityValidator.maxAllowedFileSizeBytes) {
+                throw const FormatException(
+                  'Download aborted: file exceeded maximum allowed size.',
+                );
+              }
+
+              raf.writeFromSync(chunk);
+              currentBytes += chunk.length;
+              windowBytes += chunk.length;
+
+              final now = DateTime.now();
+              final elapsedMs = now.difference(windowStart).inMilliseconds;
+              if (elapsedMs >= 400) {
+                final instantSpeed = windowBytes / (elapsedMs / 1000.0);
+                smoothedSpeed =
+                    smoothedSpeed == 0
+                        ? instantSpeed
+                        : (smoothedSpeed * 0.65 + instantSpeed * 0.35);
+                windowBytes = 0;
+                windowStart = now;
+              }
+
+              int? eta;
+              if (expectedTotal > currentBytes && smoothedSpeed > 0) {
+                eta = ((expectedTotal - currentBytes) / smoothedSpeed).ceil();
+              }
+
+              _runtimeStats[id] = DownloadRuntimeStats(
+                bytesPerSecond: smoothedSpeed,
+                etaSeconds: eta,
+              );
+              _updateRecordThrottled(
+                id,
+                (r) => r.copyWith(downloadedBytes: currentBytes),
+              );
+            }
+          } finally {
+            await streamIterator.cancel().catchError((_) {});
+          }
+
+          if (statusCode == 200) {
+            break;
+          }
+        }
+
+        await raf.flush();
+        await raf.close();
+        raf = null;
+
+        if (control.cancelled) {
+          await _deleteTempFile(record.tempFilePath);
+          _runtimeStats.remove(id);
+          _updateRecord(
+            id,
+            (r) => r.copyWith(
+              status: DownloadStatus.cancelled,
+              downloadedBytes: 0,
+              errorMessage: 'Cancelled by user.',
+            ),
+          );
+          await _persistRecords();
+          notifyListeners();
+          return;
+        }
+
+        if (control.paused) {
+          _runtimeStats.remove(id);
+          _updateRecord(
+            id,
+            (r) => r.copyWith(
+              status: DownloadStatus.paused,
+              downloadedBytes: currentBytes,
+              clearErrorMessage: true,
+            ),
+          );
+          await _persistRecords();
+          notifyListeners();
+          return;
+        }
+
+        if (currentBytes != expectedTotal) {
+          throw HttpException(
+            'Incomplete transfer: received ${formatBytes(currentBytes)} of '
+            '${formatBytes(expectedTotal)}.',
+          );
+        }
+
+        await _finalizeCompletedDownload(id, partFile, currentBytes);
+        return;
       }
 
-      final safeResp = await UrlSecurityValidator.sendWithSafeRedirects(
-        client: control.client,
-        method: 'GET',
-        uri: uriCheck.uri!,
-        headers: requestHeaders,
-      );
+      var refreshedUrl = false;
+      late SafeHttpResponse safeResp;
+      while (true) {
+        final requestHeaders = <String, String>{...customHeaders};
+        if (existingBytes > 0) {
+          requestHeaders['Range'] = 'bytes=$existingBytes-';
+        }
+
+        safeResp = await UrlSecurityValidator.sendWithSafeRedirects(
+          client: control.client,
+          method: 'GET',
+          uri: downloadUri,
+          headers: requestHeaders,
+        );
+        final status = safeResp.response.statusCode;
+        if ((status == 403 || status == 410) &&
+            !refreshedUrl &&
+            record.originalUrl != record.downloadUrl) {
+          await safeResp.response.stream.drain<void>();
+          refreshedUrl = true;
+          final updated = await _tryRefreshSignedUrl(record);
+          if (updated != null) {
+            record = updated;
+            downloadUri = Uri.parse(updated.downloadUrl);
+            continue;
+          }
+        }
+        break;
+      }
       final response = safeResp.response;
       final statusCode = response.statusCode;
 
@@ -1001,11 +1217,61 @@ class DownloadManagerService extends ChangeNotifier {
     return 'Download failed: $error';
   }
 
+  Future<DownloadRecord?> _tryRefreshSignedUrl(DownloadRecord record) async {
+    try {
+      final fresh = await analyzeUrl(record.originalUrl);
+      if (!fresh.canDownload || fresh.qualityOptions.isEmpty) return null;
+
+      final targetId = record.selectedQuality?.id;
+      MediaQualityOption matched = fresh.qualityOptions.first;
+      if (targetId != null) {
+        for (final opt in fresh.qualityOptions) {
+          if (opt.id == targetId) {
+            matched = opt;
+            break;
+          }
+        }
+      }
+
+      final urlCheck = UrlSecurityValidator.validate(matched.downloadUrl);
+      if (!urlCheck.isValid) return null;
+
+      _updateRecord(
+        record.id,
+        (r) => r.copyWith(
+          downloadUrl: matched.downloadUrl,
+          selectedQuality: matched,
+          availableQualities: fresh.qualityOptions,
+        ),
+      );
+      await _persistRecords();
+      final idx = _indexOf(record.id);
+      return idx != -1 ? _records[idx] : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   String _buildSafeFileName({
     required String preferredName,
     required MediaQualityOption quality,
     required Uri fallbackUri,
   }) {
+    final overrideName = quality.fileName;
+    if (overrideName != null && overrideName.trim().isNotEmpty) {
+      final cleanOverride = FileZipUtils.safeFileName(
+        overrideName,
+        fallback: '',
+      );
+      if (cleanOverride.isNotEmpty) {
+        if (UrlSecurityValidator.extractExtension(cleanOverride).isEmpty &&
+            quality.format.isNotEmpty) {
+          return '$cleanOverride.${quality.format}';
+        }
+        return cleanOverride;
+      }
+    }
+
     var name = FileZipUtils.safeFileName(preferredName, fallback: '');
     if (name.isEmpty) {
       name = UrlSecurityValidator.resolveSafeFileName(
@@ -1013,9 +1279,17 @@ class DownloadManagerService extends ChangeNotifier {
         mimeType: quality.mimeType,
       );
     }
-    if (UrlSecurityValidator.extractExtension(name).isEmpty &&
-        quality.format.isNotEmpty) {
-      name = '$name.${quality.format}';
+    final currentExt = UrlSecurityValidator.extractExtension(name);
+    final desiredExt = quality.format.trim().toLowerCase();
+    if (desiredExt.isNotEmpty) {
+      if (currentExt.isEmpty) {
+        name = '$name.$desiredExt';
+      } else if (currentExt != desiredExt) {
+        final dot = name.lastIndexOf('.');
+        if (dot > 0) {
+          name = '${name.substring(0, dot)}.$desiredExt';
+        }
+      }
     }
     return name;
   }

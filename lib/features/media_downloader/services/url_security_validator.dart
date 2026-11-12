@@ -244,10 +244,13 @@ class UrlSecurityValidator {
         throw const FormatException('Redirect loop detected.');
       }
 
+      final hasUserAgent = headers.keys.any(
+        (k) => k.toLowerCase() == 'user-agent',
+      );
       final request = http.Request(method, currentUri)
         ..followRedirects = false
         ..headers.addAll({
-          'User-Agent': 'ToolBoxPro/1.0 MediaDownloader',
+          if (!hasUserAgent) 'User-Agent': 'ToolBoxPro/1.0 MediaDownloader',
           ...headers,
         });
 

@@ -322,19 +322,111 @@ void main() {
     });
   });
 
-  group('Source Adapters & Social Media Compliance', () {
-    test('YouTube adapter parses oEmbed metadata and reports restriction honestly', () async {
+  group('Source Adapters (YouTube, Instagram, Facebook, X)', () {
+    test('YouTube adapter extracts video IDs and stream options cleanly', () async {
+      expect(
+        YouTubeSourceAdapter.extractVideoId(
+          Uri.parse('https://youtu.be/dQw4w9WgXcQ?si=test'),
+        ),
+        'dQw4w9WgXcQ',
+      );
+      expect(
+        YouTubeSourceAdapter.extractVideoId(
+          Uri.parse('https://www.youtube.com/shorts/abcDEF12345'),
+        ),
+        'abcDEF12345',
+      );
+      expect(
+        YouTubeSourceAdapter.extractVideoId(
+          Uri.parse('https://music.youtube.com/watch?v=xyz12345678'),
+        ),
+        'xyz12345678',
+      );
+
+      final playerPayload = {
+        'playabilityStatus': {'status': 'OK'},
+        'videoDetails': {
+          'videoId': 'dQw4w9WgXcQ',
+          'title': 'Flutter Demo Video',
+          'lengthSeconds': '60',
+          'channelId': 'UC_x5XG1OV2P6uZZ5FSM9Ttw',
+          'author': 'Flutter Dev',
+          'isLiveContent': false,
+          'viewCount': '1000',
+        },
+        'streamingData': {
+          'formats': [
+            {
+              'itag': 18,
+              'url': 'https://rr1---sn.googlevideo.com/videoplayback?c=ANDROID&itag=18',
+              'mimeType': 'video/mp4; codecs="avc1.42001E, mp4a.40.2"',
+              'bitrate': 500000,
+              'width': 640,
+              'height': 360,
+              'contentLength': '1048576',
+              'qualityLabel': '360p',
+            },
+          ],
+          'adaptiveFormats': [
+            {
+              'itag': 140,
+              'url': 'https://rr1---sn.googlevideo.com/videoplayback?c=ANDROID&itag=140',
+              'mimeType': 'audio/mp4; codecs="mp4a.40.2"',
+              'bitrate': 128000,
+              'contentLength': '524288',
+              'qualityLabel': 'tiny',
+            },
+            {
+              'itag': 137,
+              'url': 'https://rr1---sn.googlevideo.com/videoplayback?c=ANDROID&itag=137',
+              'mimeType': 'video/mp4; codecs="avc1.640028"',
+              'bitrate': 2500000,
+              'width': 1920,
+              'height': 1080,
+              'contentLength': '4194304',
+              'qualityLabel': '1080p',
+            },
+          ],
+        },
+      };
+
+      final watchHtml =
+          '<html><head><title>Flutter Demo Video - YouTube</title>'
+          '<meta property="og:url" content="https://www.youtube.com/watch?v=dQw4w9WgXcQ">'
+          '</head>'
+          '<body><div id="player"></div>'
+          '<script>ytcfg.set({"INNERTUBE_API_KEY":"test_key","INNERTUBE_CONTEXT":{"client":{"visitorData":"test_visitor"}}});</script>'
+          '<script>var ytInitialData = {};</script>'
+          '<script>var ytInitialPlayerResponse = ${jsonEncode(playerPayload)};</script>'
+          '</body></html>';
+
       final mockClient = MockClient((request) async {
-        expect(request.url.host, 'www.youtube.com');
-        expect(request.url.path, '/oembed');
-        return http.Response(
-          jsonEncode({
-            'title': 'Flutter Demo Video',
-            'author_name': 'Flutter Dev',
-            'thumbnail_url': 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
-          }),
-          200,
-        );
+        if (request.url.host == 'www.youtube.com' &&
+            request.url.path == '/watch') {
+          return http.Response(
+            watchHtml,
+            200,
+            request: request,
+            headers: {'set-cookie': 'YSC=test123; path=/'},
+          );
+        }
+        if (request.url.path.contains('/youtubei/v1/player')) {
+          return http.Response(
+            jsonEncode(playerPayload),
+            200,
+            request: request,
+          );
+        }
+        if (request.url.host.contains('googlevideo.com') &&
+            request.method == 'HEAD') {
+          return http.Response(
+            '',
+            200,
+            request: request,
+            headers: {'content-length': '1048576', 'accept-ranges': 'bytes'},
+          );
+        }
+        return http.Response('Not found', 404, request: request);
       });
 
       final adapter = YouTubeSourceAdapter();
@@ -343,27 +435,153 @@ void main() {
 
       final result = await adapter.analyze(uri, client: mockClient);
       expect(result.isValidUrl, isTrue);
-      expect(result.isPlatformRestricted, isTrue);
-      expect(result.canDownload, isFalse);
+      expect(result.canDownload, isTrue, reason: result.errorMessage);
+      expect(result.sourceId, 'youtube');
       expect(result.title, 'Flutter Demo Video');
       expect(result.author, 'Flutter Dev');
-      expect(result.thumbnailUrl, isNotNull);
-      expect(result.errorMessage, contains('YouTube'));
+      expect(result.qualityOptions.length, 1);
+      expect(result.qualityOptions.first.format, 'mp4');
+      expect(result.qualityOptions.first.resolution, contains('360p'));
     });
 
-    test('Instagram, Facebook, and X adapters handle URLs independently without scraping', () async {
+    test('YouTube adapter fails clearly when URL has no video ID', () async {
+      final mockClient = MockClient((_) async => http.Response('', 404));
+      final adapter = YouTubeSourceAdapter();
+      final result = await adapter.analyze(
+        Uri.parse('https://www.youtube.com/feed/subscriptions'),
+        client: mockClient,
+      );
+      expect(result.canDownload, isFalse);
+      expect(result.errorMessage, contains('video ID'));
+    });
+
+    test('Instagram adapter extracts Reel MP4, Photo, Carousel, and handles private failures', () async {
+      final reelJson = jsonEncode({
+        'data': {
+          'items': [
+            {
+              'code': 'Dfk9XWWPu7d',
+              'user': {'username': 'toolbox_creator'},
+              'caption': {'text': 'Amazing Reel Caption\n#flutter'},
+              'image_versions2': {
+                'candidates': [
+                  {
+                    'width': 640,
+                    'height': 1136,
+                    'url': 'https://cdn.example.com/thumb.jpg',
+                  },
+                ],
+              },
+              'video_versions': [
+                {
+                  'type': 102,
+                  'width': 720,
+                  'height': 1280,
+                  'url': 'https://cdn.example.com/reel_720.mp4?token=abc',
+                },
+                {
+                  'type': 101,
+                  'width': 1080,
+                  'height': 1920,
+                  'url': 'https://cdn.example.com/reel_1080.mp4?token=xyz',
+                },
+              ],
+            },
+          ],
+        },
+      });
+      final reelHtml =
+          '<html><body><script type="application/json">$reelJson</script></body></html>';
+
+      final mockClient = MockClient((request) async {
+        if (request.url.host == 'www.instagram.com' &&
+            request.url.path == '/reel/Dfk9XWWPu7d/') {
+          return http.Response(reelHtml, 200);
+        }
+        if (request.url.host == 'cdn.example.com' && request.method == 'HEAD') {
+          return http.Response(
+            '',
+            200,
+            headers: {'content-length': '2048000', 'accept-ranges': 'bytes'},
+          );
+        }
+        return http.Response('<html><body>Login required</body></html>', 200);
+      });
+
+      final ig = await SourceAdapterRegistry().analyze(
+        Uri.parse('https://www.instagram.com/reel/Dfk9XWWPu7d/?igsh=123'),
+        client: mockClient,
+      );
+      expect(ig.sourceId, 'instagram');
+      expect(ig.canDownload, isTrue);
+      expect(ig.title, 'Amazing Reel Caption');
+      expect(ig.author, '@toolbox_creator');
+      expect(ig.extension, 'mp4');
+      expect(ig.fileSizeBytes, 2048000);
+      expect(ig.supportsResume, isTrue);
+      expect(ig.qualityOptions.length, 2);
+      expect(ig.qualityOptions.first.downloadUrl, contains('reel_1080.mp4'));
+
+      // Carousel post via embed fallback
+      final carouselJson = jsonEncode({
+        'shortcode_media': {
+          'code': 'Car123',
+          'user': {'username': 'gallery'},
+          'carousel_media': [
+            {
+              'video_versions': [
+                {'width': 1080, 'height': 1080, 'url': 'https://cdn.example.com/s1.mp4'},
+              ],
+            },
+            {
+              'image_versions2': {
+                'candidates': [
+                  {'width': 1080, 'height': 1080, 'url': 'https://cdn.example.com/s2.jpg'},
+                ],
+              },
+            },
+          ],
+        },
+      });
+      final carouselClient = MockClient((request) async {
+        if (request.url.path == '/p/Car123/') {
+          return http.Response('<html><body>No media here</body></html>', 200);
+        }
+        if (request.url.path == '/p/Car123/embed/captioned/') {
+          return http.Response(
+            '<script type="application/json">$carouselJson</script>',
+            200,
+          );
+        }
+        if (request.method == 'HEAD') {
+          return http.Response('', 200, headers: {'content-length': '512000'});
+        }
+        return http.Response('', 404);
+      });
+
+      final carouselRes = await InstagramSourceAdapter().analyze(
+        Uri.parse('https://www.instagram.com/p/Car123/'),
+        client: carouselClient,
+      );
+      expect(carouselRes.canDownload, isTrue);
+      expect(carouselRes.qualityOptions.length, 2);
+      expect(carouselRes.qualityOptions[0].format, 'mp4');
+      expect(carouselRes.qualityOptions[1].format, 'jpg');
+
+      // Private/unavailable post
+      final privateRes = await InstagramSourceAdapter().analyze(
+        Uri.parse('https://www.instagram.com/reel/Private123/'),
+        client: MockClient((_) async => http.Response('<html>Login</html>', 200)),
+      );
+      expect(privateRes.canDownload, isFalse);
+      expect(privateRes.isPlatformRestricted, isTrue);
+    });
+
+    test('Facebook and X adapters handle URLs independently', () async {
       final mockClient = MockClient(
         (_) async => http.Response(jsonEncode({'author_name': '@toolbox'}), 200),
       );
       final registry = SourceAdapterRegistry();
-
-      final ig = await registry.analyze(
-        Uri.parse('https://www.instagram.com/reel/abc123/'),
-        client: mockClient,
-      );
-      expect(ig.sourceId, 'instagram');
-      expect(ig.isPlatformRestricted, isTrue);
-      expect(ig.canDownload, isFalse);
 
       final fb = await registry.analyze(
         Uri.parse('https://www.facebook.com/watch/?v=123456'),
@@ -389,6 +607,81 @@ void main() {
   });
 
   group('Direct Downloads, Resume, Interruption, Storage & Integrity', () {
+    test('supports chunked Range downloads with custom headers and extension switching', () async {
+      final manager = createManager();
+      await manager.init();
+
+      final analysis = UrlAnalysisResult(
+        isValidUrl: true,
+        isSupported: true,
+        canDownload: true,
+        sourceId: 'youtube',
+        sourceName: 'YouTube',
+        originalUrl: 'https://youtu.be/test123',
+        resolvedUrl: '$baseUrl/sample.mp4',
+        title: 'Test Video',
+        fileName: 'Test_Video.mp4',
+        mimeType: 'video/mp4',
+        extension: 'mp4',
+        mediaCategory: MediaLibraryCategory.videos,
+        fileSizeBytes: mp4Bytes.length,
+        supportsResume: true,
+        qualityOptions: [
+          MediaQualityOption(
+            id: 'yt_muxed_18',
+            label: '360p MP4',
+            format: 'mp4',
+            downloadUrl: '$baseUrl/sample.mp4',
+            fileSizeBytes: mp4Bytes.length,
+            supportsResume: true,
+            mimeType: 'video/mp4',
+            headers: const {'User-Agent': 'CustomTestAgent/1.0'},
+            chunkSizeBytes: 8 * 1024,
+          ),
+          MediaQualityOption(
+            id: 'yt_audio_140',
+            label: 'Audio M4A',
+            format: 'm4a',
+            downloadUrl: '$baseUrl/sample.mp3',
+            fileSizeBytes: mp3Bytes.length,
+            supportsResume: true,
+            mimeType: 'audio/mp4',
+            chunkSizeBytes: 4 * 1024,
+          ),
+        ],
+      );
+
+      final videoOutcome = await manager.startDownload(
+        analysis: analysis,
+        quality: analysis.qualityOptions.first,
+      );
+      expect(videoOutcome.status, StartDownloadStatus.started);
+      final videoId = videoOutcome.record!.id;
+
+      await _waitUntil(
+        () => manager.records.firstWhere((r) => r.id == videoId).status ==
+            DownloadStatus.completed,
+      );
+      final doneVideo = manager.records.firstWhere((r) => r.id == videoId);
+      expect(await File(doneVideo.filePath).readAsBytes(), mp4Bytes);
+      expect(doneVideo.sha256, sha256.convert(mp4Bytes).toString());
+
+      // Selecting audio option should switch .mp4 to .m4a automatically.
+      final audioOutcome = await manager.startDownload(
+        analysis: analysis,
+        quality: analysis.qualityOptions[1],
+      );
+      expect(audioOutcome.status, StartDownloadStatus.started);
+      expect(audioOutcome.record!.fileName, 'Test_Video.m4a');
+      final audioId = audioOutcome.record!.id;
+      await _waitUntil(
+        () => manager.records.firstWhere((r) => r.id == audioId).status ==
+            DownloadStatus.completed,
+      );
+      final doneAudio = manager.records.firstWhere((r) => r.id == audioId);
+      expect(await File(doneAudio.filePath).readAsBytes(), mp3Bytes);
+    });
+
     test('downloads MP4, MP3, PNG, PDF and verifies bytes + SHA-256 integrity', () async {
       final manager = createManager();
       await manager.init();

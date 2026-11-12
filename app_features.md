@@ -333,7 +333,7 @@ Here is the comprehensive list of features currently implemented in the app, cat
 
 ## 12. Audio & Video
 - [x] **Media Downloader** (`MediaDownloaderScreen`, `DownloadManagerService`, `DownloadsLibraryView`):
-  - **URL Analysis & Source-Adapter Architecture**: Validates HTTP/HTTPS URLs, blocks embedded credentials & executable files, follows safe redirects, inspects HTTP `HEAD`/`Range` metadata, and routes social media URLs (`YouTube`, `Instagram`, `Facebook`, `X`) through independent compliant adapters (using official oEmbed metadata where permitted and linking to the original source without bypassing DRM or login walls)
+  - **URL Analysis & Source-Adapter Architecture**: Validates HTTP/HTTPS URLs, blocks embedded credentials & executable files, follows safe redirects, inspects HTTP `HEAD`/`Range` metadata, extracts downloadable video/audio/photo streams for `YouTube` (muxed MP4, M4A/WebM audio, and HD video-only options via `youtube_explode_dart`) and `Instagram` (Reels, Posts, Carousels, and share links via multi-strategy extraction), and routes `Facebook` and `X` URLs through independent adapters
   - **Download Manager**: Concurrent download queue (configurable limit 1–5), streaming disk writes with `.part` temp files, HTTP `Range` pause/resume, cancel, retry, duplicate detection, live speed & ETA, pre-flight & runtime storage checks, and SHA-256 integrity hashing
   - **Local Downloads Library**: Organizes completed downloads into `Videos`, `Audio`, `Images`, `Documents`, `Archives`, and `Other files` with search, sort, storage usage breakdown, in-app preview (images, text, PDF metadata), open, share, export copy, rename, and confirmed deletion
 - [x] **Audio & Video Studio** (`MediaToolsScreen`):

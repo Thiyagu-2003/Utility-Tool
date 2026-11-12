@@ -395,7 +395,7 @@ class _MediaDownloaderScreenState extends State<MediaDownloaderScreen> {
             children: [
               ModernTextField(
                 label: 'Media or File URL',
-                hintText: 'https://example.com/video.mp4',
+                hintText: 'YouTube, Instagram, or direct media URL',
                 controller: _urlController,
                 prefixIcon: Icons.link_rounded,
                 keyboardType: TextInputType.url,
@@ -695,25 +695,34 @@ class _MediaDownloaderScreenState extends State<MediaDownloaderScreen> {
                         if (analysis.canDownload) ...[
                           _TagChip(
                             label:
-                                analysis.extension.isNotEmpty
-                                    ? analysis.extension.toUpperCase()
-                                    : analysis.mediaCategory.label,
+                                (_selectedQuality?.format.isNotEmpty ?? false)
+                                    ? _selectedQuality!.format.toUpperCase()
+                                    : (analysis.extension.isNotEmpty
+                                        ? analysis.extension.toUpperCase()
+                                        : analysis.mediaCategory.label),
                             color: analysis.mediaCategory.color,
                           ),
                           _TagChip(
                             label:
-                                analysis.fileSizeBytes != null
-                                    ? formatBytes(analysis.fileSizeBytes!)
+                                (_selectedQuality?.fileSizeBytes ??
+                                            analysis.fileSizeBytes) !=
+                                        null
+                                    ? formatBytes(
+                                      (_selectedQuality?.fileSizeBytes ??
+                                          analysis.fileSizeBytes)!,
+                                    )
                                     : 'Size unknown',
                             color: AppColors.info,
                           ),
                           _TagChip(
                             label:
-                                analysis.supportsResume
+                                (_selectedQuality?.supportsResume ??
+                                        analysis.supportsResume)
                                     ? 'Resumable'
                                     : 'Single stream',
                             color:
-                                analysis.supportsResume
+                                (_selectedQuality?.supportsResume ??
+                                        analysis.supportsResume)
                                     ? AppColors.success
                                     : AppColors.darkTextMuted,
                           ),
@@ -956,7 +965,7 @@ class _EmptyDownloadsState extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Paste a direct media or file URL above and tap Analyze URL to get started.',
+            'Paste a YouTube, Instagram, or direct media URL above and tap Analyze URL to get started.',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 12.5,

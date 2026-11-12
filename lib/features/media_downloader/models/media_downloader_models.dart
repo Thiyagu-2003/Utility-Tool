@@ -189,6 +189,9 @@ class MediaQualityOption {
   final bool isOriginal;
   final bool supportsResume;
   final String mimeType;
+  final Map<String, String> headers;
+  final int? chunkSizeBytes;
+  final String? fileName;
 
   const MediaQualityOption({
     required this.id,
@@ -202,6 +205,9 @@ class MediaQualityOption {
     this.isOriginal = true,
     this.supportsResume = false,
     this.mimeType = 'application/octet-stream',
+    this.headers = const {},
+    this.chunkSizeBytes,
+    this.fileName,
   });
 
   String get subtitleSummary {
@@ -228,23 +234,39 @@ class MediaQualityOption {
     'isOriginal': isOriginal,
     'supportsResume': supportsResume,
     'mimeType': mimeType,
+    if (headers.isNotEmpty) 'headers': headers,
+    if (chunkSizeBytes != null) 'chunkSizeBytes': chunkSizeBytes,
+    if (fileName != null) 'fileName': fileName,
   };
 
-  factory MediaQualityOption.fromJson(Map<String, dynamic> json) =>
-      MediaQualityOption(
-        id: json['id'] as String? ?? 'original',
-        label: json['label'] as String? ?? 'Original',
-        format: json['format'] as String? ?? '',
-        resolution: json['resolution'] as String?,
-        codec: json['codec'] as String?,
-        bitrateKbps: json['bitrateKbps'] as int?,
-        fileSizeBytes: json['fileSizeBytes'] as int?,
-        downloadUrl: json['downloadUrl'] as String? ?? '',
-        isOriginal: json['isOriginal'] as bool? ?? true,
-        supportsResume: json['supportsResume'] as bool? ?? false,
-        mimeType:
-            json['mimeType'] as String? ?? 'application/octet-stream',
-      );
+  factory MediaQualityOption.fromJson(Map<String, dynamic> json) {
+    final rawHeaders = json['headers'];
+    final headers = <String, String>{};
+    if (rawHeaders is Map) {
+      for (final entry in rawHeaders.entries) {
+        if (entry.key is String && entry.value is String) {
+          headers[entry.key as String] = entry.value as String;
+        }
+      }
+    }
+    return MediaQualityOption(
+      id: json['id'] as String? ?? 'original',
+      label: json['label'] as String? ?? 'Original',
+      format: json['format'] as String? ?? '',
+      resolution: json['resolution'] as String?,
+      codec: json['codec'] as String?,
+      bitrateKbps: json['bitrateKbps'] as int?,
+      fileSizeBytes: json['fileSizeBytes'] as int?,
+      downloadUrl: json['downloadUrl'] as String? ?? '',
+      isOriginal: json['isOriginal'] as bool? ?? true,
+      supportsResume: json['supportsResume'] as bool? ?? false,
+      mimeType:
+          json['mimeType'] as String? ?? 'application/octet-stream',
+      headers: headers,
+      chunkSizeBytes: json['chunkSizeBytes'] as int?,
+      fileName: json['fileName'] as String?,
+    );
+  }
 }
 
 /// Result returned by a source adapter after analyzing a user-supplied URL.
