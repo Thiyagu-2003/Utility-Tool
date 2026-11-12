@@ -152,7 +152,7 @@ class _RandomUtilitiesScreenState extends State<RandomUtilitiesScreen>
     return ToolScaffold(
       title: 'Random & Decision',
       subtitle: _activeTab.label,
-      category: ToolCategory.moreTools,
+      category: ToolCategory.randomDecision,
       toolId: 'random_utilities',
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

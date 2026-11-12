@@ -34,6 +34,7 @@ import '../../features/text_tools/text_diff_cleaner_screen.dart';
 import '../../features/text_tools/markdown_editor_screen.dart';
 import '../../features/dev_tools/xml_yaml_formatter_screen.dart';
 import '../../features/file_tools/media_tools_screen.dart';
+import '../../features/media_downloader/ui/media_downloader_screen.dart';
 import '../../features/device_tools/device_hardware_toolkit_screen.dart';
 import '../../features/device_tools/battery_display_info_screen.dart';
 import '../../features/device_tools/mic_speaker_tester_screen.dart';
@@ -56,7 +57,7 @@ class ToolRegistry {
       id: 'slate',
       title: 'Slate',
       description: 'Draw, write & sketch on a full-screen canvas',
-      category: ToolCategory.moreTools,
+      category: ToolCategory.productivity,
       icon: Icons.edit_outlined,
       keywords: ['slate', 'draw', 'sketch', 'paint', 'canvas', 'write', 'whiteboard', 'doodle', 'drawing'],
       builder: (_) => const SlateScreen(),
@@ -125,7 +126,7 @@ class ToolRegistry {
       id: 'personal_planner',
       title: 'Notes, Calendar & Personal Planner',
       description: 'Daily agenda dashboard, rich notes with folders & markdown, 3-view calendar, and task reminders',
-      category: ToolCategory.dateTime,
+      category: ToolCategory.productivity,
       icon: Icons.event_note_rounded,
       keywords: ['planner', 'notes', 'calendar', 'agenda', 'todo', 'tasks', 'events', 'reminders', 'checklist', 'productivity'],
       builder: (_) => const ProductivityToolkitScreen(initialTab: ProductivityTab.dashboard),
@@ -134,7 +135,7 @@ class ToolRegistry {
       id: 'productivity_toolkit',
       title: 'Productivity & Organization Suite',
       description: 'Notes, 3-view calendar, to-do checklists, planner dashboard, reminders, subscriptions, bills & work hours',
-      category: ToolCategory.dateTime,
+      category: ToolCategory.productivity,
       icon: Icons.task_alt_rounded,
       keywords: ['productivity', 'notes', 'calendar', 'events', 'reminders', 'subscription', 'bill', 'due date', 'work hours', 'timesheet', 'todo', 'checklist', 'tasks', 'organization', 'planner', 'agenda', 'dashboard'],
       builder: (_) => const ProductivityToolkitScreen(),
@@ -342,7 +343,7 @@ class ToolRegistry {
       id: 'ocr_toolkit',
       title: 'OCR & Voice Studio',
       description: 'Extract photo & document text, image tables to CSV, contact extractor & PDF export',
-      category: ToolCategory.pdfDocuments,
+      category: ToolCategory.textTools,
       icon: Icons.document_scanner_rounded,
       keywords: ['ocr', 'text', 'photo', 'scanner', 'table', 'csv', 'email', 'phone', 'tts', 'speech', 'voice', 'dictation', 'pdf', 'document'],
       builder: (_) => const OcrToolkitScreen(),
@@ -366,6 +367,35 @@ class ToolRegistry {
       builder: (_) => const MarkdownEditorScreen(),
     ),
     ToolItem(
+      id: 'media_downloader',
+      title: 'Media Downloader',
+      description: 'Analyze URLs, download media & files with pause/resume, and manage your local downloads library',
+      category: ToolCategory.media,
+      icon: Icons.download_for_offline_rounded,
+      keywords: [
+        'download',
+        'downloader',
+        'media downloader',
+        'url',
+        'mp4',
+        'mp3',
+        'pdf',
+        'zip',
+        'image',
+        'video',
+        'audio',
+        'file',
+        'youtube',
+        'instagram',
+        'facebook',
+        'twitter',
+        'x',
+        'resume',
+        'library',
+      ],
+      builder: (_) => const MediaDownloaderScreen(),
+    ),
+    ToolItem(
       id: 'media_tools',
       title: 'Audio & Video Studio',
       description: 'Audio trimmer, visual waveform cutter, video compressor & trimmer',
@@ -381,7 +411,12 @@ class ToolRegistry {
       category: ToolCategory.media,
       icon: Icons.record_voice_over_rounded,
       keywords: ['voice', 'speech', 'tts', 'text to speech', 'dictation', 'speech to text', 'audio', 'mic', 'recording', 'media'],
-      builder: (_) => const OcrToolkitScreen(initialTab: OcrTab.textToSpeech),
+      builder: (_) => const OcrToolkitScreen(
+        initialTab: OcrTab.textToSpeech,
+        category: ToolCategory.media,
+        toolId: 'voice_studio',
+        title: 'Voice Studio',
+      ),
     ),
     ToolItem(
       id: 'document_scanner',
@@ -481,12 +516,12 @@ class ToolRegistry {
       builder: (_) => const KitchenConverterScreen(),
     ),
 
-    // 12. More Tools
+    // 12. Random & Decision
     ToolItem(
       id: 'random_utilities',
       title: 'Random & Decision',
       description: 'Random numbers, dice roller & fair coin toss',
-      category: ToolCategory.moreTools,
+      category: ToolCategory.randomDecision,
       icon: Icons.casino_rounded,
       customColor: const Color(0xFFF97316),
       keywords: ['random', 'dice', 'coin', 'flip', 'toss', 'roll', 'decision', 'utilities', 'number'],
@@ -576,7 +611,7 @@ class ToolRegistry {
       id: 'entertainment_tracker',
       title: 'Entertainment Notes & Tracker',
       description: 'Organize, track progress and write notes for Anime, Drama, Movies & TV Series',
-      category: ToolCategory.everyday,
+      category: ToolCategory.entertainment,
       icon: Icons.movie_filter_rounded,
       customColor: const Color(0xFFE11D48),
       keywords: [
@@ -609,7 +644,10 @@ class ToolRegistry {
 
   static List<ToolItem> getByCategory(ToolCategory category) {
     if (category == ToolCategory.all) return allTools;
-    return allTools.where((t) => t.category == category).toList();
+    // Slate already renders as its own standalone card on the Home hub.
+    return allTools
+        .where((t) => t.category == category && t.id != 'slate')
+        .toList();
   }
 
   static List<ToolItem> searchTools(String query) {

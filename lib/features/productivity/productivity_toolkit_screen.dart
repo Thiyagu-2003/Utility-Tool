@@ -149,7 +149,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
 
     return ToolScaffold(
       title: 'Personal Planner & Suite',
-      category: ToolCategory.dateTime,
+      category: ToolCategory.productivity,
       toolId: 'productivity_toolkit',
       actions: [
         if (_activeTab == ProductivityTab.notes)

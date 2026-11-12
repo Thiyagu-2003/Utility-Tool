@@ -86,7 +86,17 @@ String textToCsv(String text) {
 
 class OcrToolkitScreen extends StatefulWidget {
   final OcrTab initialTab;
-  const OcrToolkitScreen({super.key, this.initialTab = OcrTab.extractPhoto});
+  final ToolCategory category;
+  final String toolId;
+  final String title;
+
+  const OcrToolkitScreen({
+    super.key,
+    this.initialTab = OcrTab.extractPhoto,
+    this.category = ToolCategory.textTools,
+    this.toolId = 'ocr_toolkit',
+    this.title = 'OCR & Voice Studio',
+  });
 
   @override
   State<OcrToolkitScreen> createState() => _OcrToolkitScreenState();
@@ -341,9 +351,9 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
     final charsCount = _textEditorController.text.length;
 
     return ToolScaffold(
-      title: 'OCR & Voice Studio',
-      category: ToolCategory.textTools,
-      toolId: 'ocr_toolkit',
+      title: widget.title,
+      category: widget.category,
+      toolId: widget.toolId,
       onReset: () {
         _flutterTts.stop();
         _speechToText.cancel();

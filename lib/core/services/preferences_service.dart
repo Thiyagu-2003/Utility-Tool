@@ -85,6 +85,7 @@ class PreferencesService extends ChangeNotifier {
     ToolCategory.calculate,
     ToolCategory.convert,
     ToolCategory.dateTime,
+    ToolCategory.productivity,
     ToolCategory.finance,
     ToolCategory.health,
     ToolCategory.education,
@@ -99,7 +100,8 @@ class PreferencesService extends ChangeNotifier {
     ToolCategory.deviceTests,
     ToolCategory.security,
     ToolCategory.kitchen,
-    ToolCategory.moreTools,
+    ToolCategory.randomDecision,
+    ToolCategory.entertainment,
   ];
 
   /// Language codes the app ships translations for (see AppLocalizations).

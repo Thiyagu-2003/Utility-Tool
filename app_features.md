@@ -2,32 +2,34 @@
 
 > **Release Version**: `1.0.90` (Build `#90`)  
 > **Status**: Production Ready & Fully Tested (Pure Offline Client)  
-> **Total Built-in Tools**: 52 Registered Offline Tools  
+> **Total Built-in Tools**: 53 Registered Tools  
 > **Architecture**: Pure Offline Flutter Client with Dynamic Scaling & Multi-Language Support (English, தமிழ், हिंदी, Español)
 
 Here is the comprehensive list of features currently implemented in the app, categorized by domain and screen toolkit:
 
-### Tool Categories (18, in default home order — `ToolCategory` enum)
+### Tool Categories (20, in default home order — `ToolCategory` enum)
 | Category | Registered tools |
 |---|---|
-| Percentage Calculation | Percentage Calculator (Scientific Calculator is its own bottom tab) |
+| Percentage Calculation | Advanced Math Suite, Percentage Calculator (Scientific Calculator is its own bottom tab) |
 | Convert | Unit Converter |
-| Date & Time | Age, Date Difference, Duration Converter, Productivity & Organization Suite, Notes, Calendar & Personal Planner |
-| Finance | GST, Loan EMI, Discount, Currency, Interest, Tip & Split Bill |
+| Date & Time | Age, Date Difference, Duration Converter |
+| Productivity & Notes | Productivity & Organization Suite, Notes, Calendar & Personal Planner (plus standalone Slate card) |
+| Finance | GST, Loan EMI, Discount, Currency, Interest, Tip & Expense Splitter, Electricity Bill, Subscriptions & Recurring Bills |
 | Health | Health & Fitness Suite, Health & Fitness Calculator |
 | Education | Academic & Education Suite, GPA & CGPA Calculator |
-| Home & Travel | Home, Construction & Travel Suite, Electricity Bill |
+| Home & Travel | Home, Construction & Travel Suite |
 | PDF & Documents | Advanced PDF Toolkit, Photo to PDF, Office & Advanced PDF Suite, Document Scanner |
 | Image & Photo | Image Toolkit, Photo Studio & Editor, Image Collage Maker |
 | Compression & Archives | File & ZIP Suite, Archive, Diff & Preview Studio |
 | Text & Writing | Text & Words Analyzer, Text Diff & Cleaner, Markdown Editor & Preview, OCR & Voice Studio |
-| Audio & Video | Audio & Video Studio |
+| Media & Downloads | Media Downloader, Audio & Video Studio, Voice Studio (TTS & Speech-to-Text) |
 | QR & Barcode | QR & Barcode Suite, QR Contact & vCard Share |
 | Developer | Developer Suite, XML & YAML Formatter |
 | Device & Hardware | Device & Hardware Studio, Compass & Spirit Level, Sensor Tester, Battery Status, Mic & Speaker Tester, Touchscreen Digitizer Test, Screen Color & Pixel Test, Vibration & Haptics Tester, Screen Refresh Rate & Specs, Sound-Level (dB) Estimator |
 | Security | Password & Security Generator |
 | Kitchen | Kitchen & Recipe Tools |
-| Everyday Tools / More Tools | Entertainment Notes & Tracker, Slate, Randomizer & Dice Roll |
+| Random & Decision | Random & Decision |
+| Entertainment Tracker | Entertainment Notes & Tracker |
 
 ---
 
@@ -330,6 +332,10 @@ Here is the comprehensive list of features currently implemented in the app, cat
 ---
 
 ## 12. Audio & Video
+- [x] **Media Downloader** (`MediaDownloaderScreen`, `DownloadManagerService`, `DownloadsLibraryView`):
+  - **URL Analysis & Source-Adapter Architecture**: Validates HTTP/HTTPS URLs, blocks embedded credentials & executable files, follows safe redirects, inspects HTTP `HEAD`/`Range` metadata, and routes social media URLs (`YouTube`, `Instagram`, `Facebook`, `X`) through independent compliant adapters (using official oEmbed metadata where permitted and linking to the original source without bypassing DRM or login walls)
+  - **Download Manager**: Concurrent download queue (configurable limit 1–5), streaming disk writes with `.part` temp files, HTTP `Range` pause/resume, cancel, retry, duplicate detection, live speed & ETA, pre-flight & runtime storage checks, and SHA-256 integrity hashing
+  - **Local Downloads Library**: Organizes completed downloads into `Videos`, `Audio`, `Images`, `Documents`, `Archives`, and `Other files` with search, sort, storage usage breakdown, in-app preview (images, text, PDF metadata), open, share, export copy, rename, and confirmed deletion
 - [x] **Audio & Video Studio** (`MediaToolsScreen`):
   - **WAV Audio Trimmer**: Real trimming of uncompressed (PCM) `.wav` files in pure Dart: reads the true duration, sample rate and channels from the file header, draws a waveform from the actual samples, and writes a new, valid `.wav` for the chosen start/end. MP3, AAC, M4A and other compressed formats are not supported (cutting them needs an audio codec), and there is no playback
   - **Video Size Planner** (planner only, never re-encodes): reads the real file size of the picked video; you enter its length (mm:ss) because the app cannot read it; choose a resolution preset and bitrate and a part to keep, and it estimates the resulting size (video bitrate plus 128 kbps audio) and the video's current average bitrate, and exports that plan as a `.txt` for use in a video editor or converter

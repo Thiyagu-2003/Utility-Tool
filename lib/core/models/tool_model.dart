@@ -25,6 +25,12 @@ enum ToolCategory {
     Color(0xFF7C3AED),
     'Age, date difference & duration',
   ),
+  productivity(
+    'Productivity & Notes',
+    Icons.task_alt_rounded,
+    Color(0xFF0EA5E9),
+    'Notes, calendar, planner, to-dos & reminders',
+  ),
   finance(
     'Finance',
     Icons.account_balance_wallet_outlined,
@@ -74,10 +80,10 @@ enum ToolCategory {
     'Text analyzer, diff, markdown & OCR',
   ),
   media(
-    'Audio & Video',
+    'Media & Downloads',
     Icons.perm_media_outlined,
     Color(0xFF9333EA),
-    'Audio & video conversion and editing',
+    'Media downloader, audio, video & voice tools',
   ),
   qrBarcode(
     'QR & Barcode',
@@ -109,11 +115,17 @@ enum ToolCategory {
     Color(0xFF92400E),
     'Cooking conversions & recipes',
   ),
-  moreTools(
-    'More Tools',
-    Icons.tune_rounded,
-    Color(0xFF475569),
-    'Slate, randomizer & everyday extras',
+  randomDecision(
+    'Random & Decision',
+    Icons.casino_rounded,
+    Color(0xFFF97316),
+    'Random numbers, dice roller & fair coin toss',
+  ),
+  entertainment(
+    'Entertainment Tracker',
+    Icons.movie_filter_rounded,
+    Color(0xFFE11D48),
+    'Anime, Drama, Movies & TV Series watchlist & notes',
   );
 
   final String label;
@@ -130,7 +142,7 @@ enum ToolCategory {
   static const ToolCategory timeDuration = dateTime;
   static const ToolCategory text = textTools;
   static const ToolCategory documents = pdfDocuments;
-  static const ToolCategory everyday = moreTools;
+  static const ToolCategory everyday = entertainment;
 }
 
 class ToolItem {

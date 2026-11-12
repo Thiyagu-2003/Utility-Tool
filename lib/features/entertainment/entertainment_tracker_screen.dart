@@ -107,7 +107,7 @@ class _EntertainmentTrackerScreenState extends State<EntertainmentTrackerScreen>
     return ToolScaffold(
       title: 'Entertainment Notes & Tracker',
       subtitle: 'Anime, Drama, Movies & TV Series',
-      category: ToolCategory.everyday,
+      category: ToolCategory.entertainment,
       toolId: 'entertainment_tracker',
       isScrollable: false,
       actions: [

@@ -273,7 +273,7 @@ void _layoutTests() {
       expect(find.byType(ListTile), findsWidgets);
     });
 
-    testWidgets('edit mode lists all 18 categories with their reorder handles', (tester) async {
+    testWidgets('edit mode lists all 20 categories with their reorder handles', (tester) async {
       await pumpHub(tester, mode: ThemeMode.light);
       await tester.tap(find.text('Edit'));
       await tester.pumpAndSettle();

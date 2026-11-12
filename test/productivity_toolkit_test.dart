@@ -379,7 +379,7 @@ void main() {
       );
 
       expect(tool.title, 'Productivity & Organization Suite');
-      expect(tool.category, ToolCategory.dateTime);
+      expect(tool.category, ToolCategory.productivity);
       expect(tool.keywords.contains('notes'), isTrue);
       expect(tool.keywords.contains('calendar'), isTrue);
       expect(tool.keywords.contains('subscription'), isTrue);
@@ -814,7 +814,7 @@ void main() {
       );
 
       expect(tool.title, 'Notes, Calendar & Personal Planner');
-      expect(tool.category, ToolCategory.dateTime);
+      expect(tool.category, ToolCategory.productivity);
       expect(tool.keywords, contains('planner'));
       expect(tool.keywords, contains('notes'));
       expect(tool.keywords, contains('calendar'));

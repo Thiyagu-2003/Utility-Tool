@@ -26,7 +26,7 @@ void main() {
   });
 
   group('Category order', () {
-    test('saved order with removed filesText still yields all 18 home categories', () {
+    test('saved order with removed filesText still yields all 20 home categories', () {
       final order = PreferencesService().categoryOrder;
       expect(order.first, ToolCategory.kitchen);
       expect(order[1], ToolCategory.calculate);
@@ -39,7 +39,7 @@ void main() {
     test('defaultCategories covers every real category exactly once', () {
       final real = ToolCategory.values.where((c) => c != ToolCategory.all).toSet();
       expect(PreferencesService.defaultCategories.toSet(), real);
-      expect(PreferencesService.defaultCategories.length, 18);
+      expect(PreferencesService.defaultCategories.length, 20);
     });
 
     test('restoring a backup order drops all/unknown/duplicate names', () async {
@@ -50,8 +50,8 @@ void main() {
       final order = prefs.categoryOrder;
       expect(order.take(2), [ToolCategory.finance, ToolCategory.kitchen]);
       expect(order, isNot(contains(ToolCategory.all)));
-      expect(order.length, 18);
-      expect(order.toSet().length, 18);
+      expect(order.length, 20);
+      expect(order.toSet().length, 20);
     });
   });
 
