@@ -52,6 +52,49 @@ class _MediaDownloaderScreenState extends State<MediaDownloaderScreen> {
     _manager = widget.manager ?? DownloadManagerService();
     _activeTab = widget.initialTab;
     _manager.init();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkClipboardForMediaUrl();
+    });
+  }
+
+  Future<void> _checkClipboardForMediaUrl() async {
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final text = data?.text?.trim() ?? '';
+      if (text.isEmpty || _urlController.text.trim().isNotEmpty) return;
+      final uri = Uri.tryParse(text);
+      if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https') && uri.hasAuthority) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.link_rounded, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Link in clipboard (${uri.host})',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            action: SnackBarAction(
+              label: 'Paste & Analyze',
+              textColor: Colors.amberAccent,
+              onPressed: () {
+                _urlController.text = text;
+                _urlController.selection = TextSelection.collapsed(offset: text.length);
+                _analyzeUrl();
+              },
+            ),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (_) {}
   }
 
   @override

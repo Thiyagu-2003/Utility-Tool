@@ -298,4 +298,38 @@ class NotificationService {
       debugPrint('NotificationService: rescheduleAll error: $e');
     }
   }
+
+  /// Displays an instant high-priority notification (e.g. for completed downloads).
+  Future<void> showInstantNotification({
+    required String title,
+    required String body,
+    String? payload,
+    int? notificationId,
+  }) async {
+    try {
+      if (!_isInitialized) await init();
+      const androidDetails = AndroidNotificationDetails(
+        'media_downloads',
+        'Media Downloads',
+        channelDescription: 'Notifications for completed media downloads and extractions',
+        importance: Importance.high,
+        priority: Priority.high,
+      );
+      const details = NotificationDetails(
+        android: androidDetails,
+        iOS: DarwinNotificationDetails(),
+        macOS: DarwinNotificationDetails(),
+      );
+      final id = notificationId ?? (DateTime.now().millisecondsSinceEpoch ~/ 1000).abs();
+      await _notificationsPlugin.show(
+        id: id,
+        title: title,
+        body: body,
+        notificationDetails: details,
+        payload: payload,
+      );
+    } catch (e) {
+      debugPrint('NotificationService: showInstantNotification note: $e');
+    }
+  }
 }

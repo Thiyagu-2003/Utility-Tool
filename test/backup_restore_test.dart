@@ -6,6 +6,7 @@ import 'package:utility_tool/core/services/backup_service.dart';
 void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    PreferencesService().resetForTesting();
     await PreferencesService().init();
   });
 
@@ -60,6 +61,33 @@ void main() {
       expect(prefs.appLanguage, 'ta');
       expect(prefs.fontScale, 1.15);
       expect(prefs.showRecents, isFalse);
+    });
+
+    test('Universal backup exports and imports entertainment watchlist and productivity data', () async {
+      final prefs = PreferencesService();
+      final sp = await SharedPreferences.getInstance();
+
+      // Seed entertainment item into shared preferences
+      await sp.setString(
+        'entertainment_tracker_items_v1',
+        '[{"id":"test_1","title":"Chainsaw Man","category":"anime","status":"completed","personalRating":9.0}]',
+      );
+
+      final exported = BackupService.exportBackupJson(prefs);
+      expect(exported, contains('"Chainsaw Man"'));
+      expect(exported, contains('"entertainment_tracker_items_v1"'));
+
+      // Clear shared preferences
+      await sp.clear();
+      await prefs.init();
+
+      // Restore from universal backup
+      final success = await BackupService.importBackupJson(exported, prefs);
+      expect(success, isTrue);
+
+      final restoredEntertainment = sp.getString('entertainment_tracker_items_v1');
+      expect(restoredEntertainment, isNotNull);
+      expect(restoredEntertainment, contains('Chainsaw Man'));
     });
   });
 }

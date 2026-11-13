@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../file_tools/file_zip_utils.dart';
 import '../adapters/media_source_adapter.dart';
 import '../models/media_downloader_models.dart';
+import '../../../core/services/notification_service.dart';
 import 'mp4_audio_extractor.dart';
 import 'platform_storage_service.dart';
 import 'url_security_validator.dart';
@@ -1208,6 +1209,14 @@ class DownloadManagerService extends ChangeNotifier {
     );
     await _persistRecords();
     notifyListeners();
+
+    try {
+      NotificationService().showInstantNotification(
+        title: 'Download Complete',
+        body: '$destName (${formatBytes(finalBytes)}) is ready',
+        payload: destPath,
+      );
+    } catch (_) {}
   }
 
   static int? _parseTotalFromContentRange(String? header) {

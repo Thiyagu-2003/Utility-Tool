@@ -128,6 +128,16 @@ class PreferencesService extends ChangeNotifier {
   bool get showFavorites => _showFavorites;
   bool get showRecents => _showRecents;
   bool get hasSeenOnboarding => _hasSeenOnboarding;
+  SharedPreferences get rawPrefs => _prefs;
+
+  @visibleForTesting
+  void resetForTesting() {
+    _initialized = false;
+    _favoriteToolIds.clear();
+    _recentToolIds.clear();
+    _calculationHistory.clear();
+    _qrScanHistory.clear();
+  }
 
   Future<void> init() async {
     if (_initialized) return;

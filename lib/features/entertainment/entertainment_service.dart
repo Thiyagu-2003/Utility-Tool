@@ -12,6 +12,7 @@ class EntertainmentStats {
   final int droppedCount;
   final int totalEpisodesWatched;
   final int totalNotes;
+  final double estimatedHoursWatched;
 
   const EntertainmentStats({
     this.totalTitles = 0,
@@ -22,7 +23,20 @@ class EntertainmentStats {
     this.droppedCount = 0,
     this.totalEpisodesWatched = 0,
     this.totalNotes = 0,
+    this.estimatedHoursWatched = 0.0,
   });
+
+  double get estimatedDaysWatched => estimatedHoursWatched / 24.0;
+
+  String get formattedWatchTime {
+    if (estimatedHoursWatched <= 0.0) return '0 hrs';
+    if (estimatedHoursWatched < 24.0) {
+      return '${estimatedHoursWatched.toStringAsFixed(1)} hrs';
+    }
+    final days = estimatedDaysWatched.toStringAsFixed(1);
+    final hours = estimatedHoursWatched.round();
+    return '$days days (${hours}h)';
+  }
 }
 
 /// Offline-first service for managing entertainment watchlist and notes
@@ -43,6 +57,36 @@ class EntertainmentService extends ChangeNotifier {
   void clearForTesting() {
     _items.clear();
     _initialized = false;
+  }
+
+  Future<void> reload() async {
+    _initialized = false;
+    await init();
+  }
+
+  /// Bulk imports items into the watchlist.
+  /// If [replace] is true, existing items are cleared and replaced.
+  /// If [replace] is false, items are merged (existing matches updated, new items inserted).
+  Future<int> importItems(List<EntertainmentItem> newItems, {bool replace = false}) async {
+    if (replace) {
+      _items.clear();
+      _items.addAll(newItems);
+    } else {
+      for (final newItem in newItems) {
+        final existingIdx = _items.indexWhere((e) =>
+            e.id == newItem.id ||
+            (e.title.toLowerCase().trim() == newItem.title.toLowerCase().trim() &&
+                e.category == newItem.category));
+        if (existingIdx != -1) {
+          _items[existingIdx] = newItem;
+        } else {
+          _items.insert(0, newItem);
+        }
+      }
+    }
+    await _persist();
+    notifyListeners();
+    return newItems.length;
   }
 
   Future<void> init() async {
@@ -367,6 +411,7 @@ class EntertainmentService extends ChangeNotifier {
     int dropped = 0;
     int totalEp = 0;
     int totalNotes = 0;
+    double totalHours = 0.0;
 
     for (final item in _items) {
       switch (item.status) {
@@ -388,6 +433,17 @@ class EntertainmentService extends ChangeNotifier {
       }
       totalEp += item.currentEpisode;
       totalNotes += item.notes.length;
+
+      // Watch time estimation:
+      if (item.isMovie) {
+        if (item.status == WatchingStatus.completed) {
+          totalHours += 2.0; // ~2 hours per movie
+        }
+      } else {
+        // ~24 mins (0.4h) per anime episode, ~45 mins (0.75h) per drama/tv episode
+        final minsPerEp = item.category == EntertainmentCategory.anime ? 24 : 45;
+        totalHours += item.currentEpisode * (minsPerEp / 60.0);
+      }
     }
 
     return EntertainmentStats(
@@ -399,6 +455,7 @@ class EntertainmentService extends ChangeNotifier {
       droppedCount: dropped,
       totalEpisodesWatched: totalEp,
       totalNotes: totalNotes,
+      estimatedHoursWatched: totalHours,
     );
   }
 

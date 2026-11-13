@@ -484,7 +484,7 @@ class SettingsScreen extends StatelessWidget {
                     ListTile(
                       leading: const Icon(Icons.file_upload_outlined, color: AppColors.catFinance),
                       title: Text(loc.tr('export_backup'), style: const TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: const Text('Share a backup file of preferences, favorites and history'),
+                      subtitle: const Text('Share a universal backup of watchlist, notes, to-dos, drawings and preferences'),
                       trailing: const Icon(Icons.ios_share_rounded, size: 20),
                       onTap: () async {
                         final messenger = ScaffoldMessenger.of(context);

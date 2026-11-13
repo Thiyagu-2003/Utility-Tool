@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/models/tool_model.dart';
@@ -122,6 +123,11 @@ class _EntertainmentTrackerScreenState extends State<EntertainmentTrackerScreen>
           ),
         ),
         IconButton(
+          tooltip: 'Import Watchlist',
+          icon: const Icon(Icons.file_download_outlined),
+          onPressed: () => _openImportWatchlistDialog(),
+        ),
+        IconButton(
           tooltip: 'Add Title',
           icon: const Icon(Icons.add_rounded),
           onPressed: () => _openAddEditItemDialog(),
@@ -226,6 +232,14 @@ class _EntertainmentTrackerScreenState extends State<EntertainmentTrackerScreen>
                     child: _buildStatTile('Episodes Watched', '${stats.totalEpisodesWatched}', Icons.playlist_add_check_rounded, Colors.deepPurple),
                   ),
                   const SizedBox(width: 8),
+                  Expanded(
+                    child: _buildStatTile('Watch Time', stats.formattedWatchTime, Icons.access_time_filled_rounded, Colors.pink),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
                   Expanded(
                     child: _buildStatTile('Notes & Highlights', '${stats.totalNotes}', Icons.edit_note_rounded, Colors.orange),
                   ),
@@ -871,6 +885,22 @@ class _EntertainmentTrackerScreenState extends State<EntertainmentTrackerScreen>
                         ],
                       ),
                     ],
+                    if (item.isMovie && item.status != WatchingStatus.completed) ...[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            ),
+                            icon: const Icon(Icons.check_circle_outline_rounded, size: 16, color: Colors.green),
+                            label: const Text('Mark Watched', style: TextStyle(fontSize: 11, color: Colors.green)),
+                            onPressed: () => _service.updateStatus(item.id, WatchingStatus.completed),
+                          ),
+                        ],
+                      ),
+                    ],
 
                     // Genres & Notes count
                     const SizedBox(height: 4),
@@ -1119,6 +1149,125 @@ class _EntertainmentTrackerScreenState extends State<EntertainmentTrackerScreen>
         initialCategory: initialCategory,
         initialStatus: initialStatus,
         initialFavorites: initialFavorites,
+        onImportRequested: () {
+          Navigator.pop(context);
+          _openImportWatchlistDialog();
+        },
+      ),
+    );
+  }
+
+  void _openImportWatchlistDialog() {
+    final textCtrl = TextEditingController();
+    bool replaceExisting = false;
+    final messenger = ScaffoldMessenger.of(context);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) {
+          return AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.file_download_outlined, color: AppColors.catEveryday),
+                SizedBox(width: 8),
+                Text('Import Watchlist'),
+              ],
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Paste JSON / CSV data, MyAnimeList / AniList export, or choose a file (.json / .csv):',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.paste_rounded, size: 16),
+                          label: const Text('Paste'),
+                          onPressed: () async {
+                            final data = await Clipboard.getData(Clipboard.kTextPlain);
+                            if (data?.text != null) {
+                              textCtrl.text = data!.text!;
+                              setDlgState(() {});
+                            }
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.folder_open_rounded, size: 16),
+                          label: const Text('Pick File'),
+                          onPressed: () async {
+                            final picked = await FilePicker.pickFile(
+                              type: FileType.custom,
+                              allowedExtensions: ['json', 'csv', 'txt'],
+                            );
+                            if (picked != null && picked.path != null) {
+                              final content = await File(picked.path!).readAsString();
+                              textCtrl.text = content;
+                              setDlgState(() {});
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: textCtrl,
+                      maxLines: 6,
+                      decoration: const InputDecoration(
+                        hintText: 'Paste JSON or CSV watchlist content here...',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (_) => setDlgState(() {}),
+                    ),
+                    const SizedBox(height: 12),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Replace existing watchlist', style: TextStyle(fontSize: 13)),
+                      subtitle: const Text('If unchecked, new items will be merged with your current list', style: TextStyle(fontSize: 11)),
+                      value: replaceExisting,
+                      onChanged: (val) => setDlgState(() => replaceExisting = val ?? false),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.check_rounded, size: 18),
+                label: const Text('Import'),
+                onPressed: textCtrl.text.trim().isEmpty
+                    ? null
+                    : () async {
+                        final items = EntertainmentShareService.parseImportData(textCtrl.text.trim());
+                        if (items.isEmpty) {
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text('No valid entertainment titles found in the provided data.')),
+                          );
+                          return;
+                        }
+                        Navigator.pop(ctx);
+                        final count = await _service.importItems(items, replace: replaceExisting);
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text('Successfully imported $count titles into your watchlist!'),
+                            backgroundColor: AppColors.success,
+                          ),
+                        );
+                      },
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -2021,12 +2170,14 @@ class _EntertainmentShareSheet extends StatefulWidget {
   final EntertainmentCategory? initialCategory;
   final WatchingStatus? initialStatus;
   final bool initialFavorites;
+  final VoidCallback? onImportRequested;
 
   const _EntertainmentShareSheet({
     required this.service,
     this.initialCategory,
     this.initialStatus,
     this.initialFavorites = false,
+    this.onImportRequested,
   });
 
   @override
@@ -2163,6 +2314,12 @@ class _EntertainmentShareSheetState extends State<_EntertainmentShareSheet> {
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     ),
                   ),
+                  if (widget.onImportRequested != null)
+                    IconButton(
+                      icon: const Icon(Icons.file_download_outlined),
+                      tooltip: 'Import Watchlist',
+                      onPressed: widget.onImportRequested,
+                    ),
                   IconButton(
                     icon: const Icon(Icons.close_rounded),
                     onPressed: () => Navigator.pop(context),
