@@ -28,10 +28,12 @@ class _TouchscreenTestScreenState extends State<TouchscreenTestScreen> {
   final Map<int, List<Offset>> _trailByPointer = {};
 
   void _markCellAt(Offset localPos, Size size) {
+    if (!localPos.dx.isFinite || !localPos.dy.isFinite || size.width <= 0 || size.height <= 0) return;
     // Dragging past the grid edge must not light up the border cells.
     if (!(Offset.zero & size).contains(localPos)) return;
     final cellWidth = size.width / _cols;
     final cellHeight = size.height / _rows;
+    if (cellWidth <= 0 || cellHeight <= 0) return;
 
     final col = (localPos.dx / cellWidth).floor().clamp(0, _cols - 1);
     final row = (localPos.dy / cellHeight).floor().clamp(0, _rows - 1);
@@ -195,15 +197,20 @@ class _TouchscreenTestScreenState extends State<TouchscreenTestScreen> {
   Widget _buildMultiTouchTracer(bool isDark) {
     return Listener(
       onPointerDown: (event) {
+        if (!event.localPosition.dx.isFinite || !event.localPosition.dy.isFinite) return;
         setState(() {
           _activePointers[event.pointer] = event.localPosition;
           final trail = [event.localPosition];
           _trailByPointer[event.pointer] = trail;
+          if (_drawnTrails.length >= 100) {
+            _drawnTrails.removeAt(0);
+          }
           _drawnTrails.add(trail);
         });
         PreferencesService().triggerSelectionHaptic();
       },
       onPointerMove: (event) {
+        if (!event.localPosition.dx.isFinite || !event.localPosition.dy.isFinite) return;
         setState(() {
           _activePointers[event.pointer] = event.localPosition;
           _trailByPointer[event.pointer]?.add(event.localPosition);

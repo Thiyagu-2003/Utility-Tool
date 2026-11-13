@@ -10,6 +10,7 @@ import '../../shared/widgets/feature_tab_selector.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 import 'entertainment_models.dart';
 import 'entertainment_service.dart';
+import 'entertainment_share_service.dart';
 
 enum EntertainmentViewTab {
   dashboard('Dashboard', Icons.dashboard_rounded),
@@ -111,6 +112,15 @@ class _EntertainmentTrackerScreenState extends State<EntertainmentTrackerScreen>
       toolId: 'entertainment_tracker',
       isScrollable: false,
       actions: [
+        IconButton(
+          tooltip: 'Share Watchlist',
+          icon: const Icon(Icons.share_rounded),
+          onPressed: () => _openShareBottomSheet(
+            initialCategory: _currentTab.category,
+            initialStatus: _selectedStatusFilter,
+            initialFavorites: _favoritesOnly,
+          ),
+        ),
         IconButton(
           tooltip: 'Add Title',
           icon: const Icon(Icons.add_rounded),
@@ -511,6 +521,15 @@ class _EntertainmentTrackerScreenState extends State<EntertainmentTrackerScreen>
                       icon: const Icon(Icons.sort_rounded, size: 20),
                       tooltip: 'Sort by',
                       onPressed: _showSortBottomSheet,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.share_rounded, size: 20),
+                      tooltip: 'Share this list',
+                      onPressed: () => _openShareBottomSheet(
+                        initialCategory: cat,
+                        initialStatus: _selectedStatusFilter,
+                        initialFavorites: _favoritesOnly,
+                      ),
                     ),
                   ],
                 ),
@@ -1086,6 +1105,24 @@ class _EntertainmentTrackerScreenState extends State<EntertainmentTrackerScreen>
     );
   }
 
+  void _openShareBottomSheet({
+    EntertainmentCategory? initialCategory,
+    WatchingStatus? initialStatus,
+    bool initialFavorites = false,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _EntertainmentShareSheet(
+        service: _service,
+        initialCategory: initialCategory,
+        initialStatus: initialStatus,
+        initialFavorites: initialFavorites,
+      ),
+    );
+  }
+
   // ==========================================
   // ENTRY DETAIL & NOTES SCREEN
   // ==========================================
@@ -1163,6 +1200,7 @@ class _EntertainmentTrackerScreenState extends State<EntertainmentTrackerScreen>
                                   onPressed: () async {
                                     try {
                                       final picked = await FilePicker.pickFile(type: FileType.image);
+                                      if (!dialogCtx.mounted) return;
                                       if (picked != null && picked.path != null) {
                                         setDialogState(() {
                                           posterPath = picked.path;
@@ -1477,6 +1515,17 @@ class _EntertainmentDetailScreenState extends State<_EntertainmentDetailScreen> 
                 ),
                 tooltip: 'Toggle Favourite',
                 onPressed: () => widget.service.toggleFavorite(item.id),
+              ),
+              IconButton(
+                icon: const Icon(Icons.share_rounded),
+                tooltip: 'Share Recommendation',
+                onPressed: () {
+                  final text = EntertainmentShareService.generateSingleItemText(item);
+                  EntertainmentShareService.shareText(
+                    text,
+                    subject: 'Recommendation: ${item.title}',
+                  );
+                },
               ),
               IconButton(
                 icon: const Icon(Icons.edit_rounded),
@@ -1962,3 +2011,491 @@ class _EntertainmentDetailScreenState extends State<_EntertainmentDetailScreen> 
     );
   }
 }
+
+// ==========================================
+// SHARE WATCHLIST MODAL BOTTOM SHEET
+// ==========================================
+
+class _EntertainmentShareSheet extends StatefulWidget {
+  final EntertainmentService service;
+  final EntertainmentCategory? initialCategory;
+  final WatchingStatus? initialStatus;
+  final bool initialFavorites;
+
+  const _EntertainmentShareSheet({
+    required this.service,
+    this.initialCategory,
+    this.initialStatus,
+    this.initialFavorites = false,
+  });
+
+  @override
+  State<_EntertainmentShareSheet> createState() => _EntertainmentShareSheetState();
+}
+
+class _EntertainmentShareSheetState extends State<_EntertainmentShareSheet> {
+  late EntertainmentCategory? _category;
+  late WatchingStatus? _status;
+  late bool _favoritesOnly;
+  bool _includeNotes = true;
+  String _format = 'text'; // 'text', 'csv', 'json'
+  bool _isSharing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _category = widget.initialCategory;
+    _status = widget.initialStatus;
+    _favoritesOnly = widget.initialFavorites;
+  }
+
+  List<EntertainmentItem> _getMatchingItems() {
+    return widget.service.filterItems(
+      category: _category,
+      status: _status,
+      favoritesOnly: _favoritesOnly,
+      sortBy: 'rating',
+    );
+  }
+
+  String _generateContent(List<EntertainmentItem> items) {
+    if (_format == 'csv') {
+      return EntertainmentShareService.generateCsvExport(items);
+    } else if (_format == 'json') {
+      return EntertainmentShareService.generateJsonExport(items);
+    } else {
+      return EntertainmentShareService.generateTextSummary(
+        items: items,
+        category: _category,
+        status: _status,
+        favoritesOnly: _favoritesOnly,
+        includeNotes: _includeNotes,
+      );
+    }
+  }
+
+  Future<void> _share(List<EntertainmentItem> items) async {
+    if (_isSharing) return;
+    setState(() => _isSharing = true);
+    try {
+      final content = _generateContent(items);
+      final catId = _category?.id ?? 'watchlist';
+      if (_format == 'csv') {
+        await EntertainmentShareService.shareExportFile(
+          content: content,
+          filename: '${catId}_export.csv',
+        );
+      } else if (_format == 'json') {
+        await EntertainmentShareService.shareExportFile(
+          content: content,
+          filename: '${catId}_export.json',
+        );
+      } else {
+        final catLabel = _category?.label ?? 'Entertainment';
+        final statusLabel = _status?.label ?? 'Watchlist';
+        await EntertainmentShareService.shareText(
+          content,
+          subject: 'My $catLabel $statusLabel',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not share: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSharing = false);
+    }
+  }
+
+  void _copy(List<EntertainmentItem> items) {
+    final content = _generateContent(items);
+    EntertainmentShareService.copyToClipboard(
+      context,
+      content,
+      successMessage: 'Watchlist copied to clipboard!',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final items = _getMatchingItems();
+    final content = _generateContent(items);
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.88,
+      ),
+      decoration: BoxDecoration(
+        color: theme.scaffoldBackgroundColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Grab handle & Header
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 4),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.share_rounded, color: AppColors.catEveryday, size: 22),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Share Watchlist',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+
+            // Scrollable Settings & Preview
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  // Quick Presets
+                  const Text(
+                    'QUICK PRESETS',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 8),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _buildPresetChip(
+                          label: '🍿 Watched Anime',
+                          isSelected: _category == EntertainmentCategory.anime && _status == WatchingStatus.completed,
+                          onTap: () {
+                            setState(() {
+                              _category = EntertainmentCategory.anime;
+                              _status = WatchingStatus.completed;
+                              _favoritesOnly = false;
+                            });
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        _buildPresetChip(
+                          label: '🎬 Watched Movies',
+                          isSelected: _category == EntertainmentCategory.movies && _status == WatchingStatus.completed,
+                          onTap: () {
+                            setState(() {
+                              _category = EntertainmentCategory.movies;
+                              _status = WatchingStatus.completed;
+                              _favoritesOnly = false;
+                            });
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        _buildPresetChip(
+                          label: '📺 Currently Watching',
+                          isSelected: _status == WatchingStatus.watching && _category == null,
+                          onTap: () {
+                            setState(() {
+                              _category = null;
+                              _status = WatchingStatus.watching;
+                              _favoritesOnly = false;
+                            });
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        _buildPresetChip(
+                          label: '❤️ My Favourites',
+                          isSelected: _favoritesOnly && _category == null && _status == null,
+                          onTap: () {
+                            setState(() {
+                              _category = null;
+                              _status = null;
+                              _favoritesOnly = true;
+                            });
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        _buildPresetChip(
+                          label: '🌐 Full List',
+                          isSelected: _category == null && _status == null && !_favoritesOnly,
+                          onTap: () {
+                            setState(() {
+                              _category = null;
+                              _status = null;
+                              _favoritesOnly = false;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Category Filter
+                  const Text(
+                    'CATEGORY',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 6),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        ChoiceChip(
+                          label: const Text('All'),
+                          selected: _category == null,
+                          onSelected: (val) => setState(() => _category = null),
+                        ),
+                        const SizedBox(width: 6),
+                        ...EntertainmentCategory.values.map((cat) {
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: ChoiceChip(
+                              label: Text(cat.label),
+                              selected: _category == cat,
+                              onSelected: (val) => setState(() => _category = val ? cat : null),
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Status Filter
+                  const Text(
+                    'WATCHING STATUS',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 6),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        ChoiceChip(
+                          label: const Text('All'),
+                          selected: _status == null,
+                          onSelected: (val) => setState(() => _status = null),
+                        ),
+                        const SizedBox(width: 6),
+                        ...WatchingStatus.values.map((st) {
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: ChoiceChip(
+                              label: Text(st.label),
+                              selected: _status == st,
+                              onSelected: (val) => setState(() => _status = val ? st : null),
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Options Row
+                  Row(
+                    children: [
+                      FilterChip(
+                        label: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _favoritesOnly ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                              size: 16,
+                              color: _favoritesOnly ? Colors.red : null,
+                            ),
+                            const SizedBox(width: 4),
+                            const Text('Favourites Only'),
+                          ],
+                        ),
+                        selected: _favoritesOnly,
+                        onSelected: (val) => setState(() => _favoritesOnly = val),
+                      ),
+                      const SizedBox(width: 8),
+                      if (_format == 'text')
+                        FilterChip(
+                          label: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.notes_rounded, size: 16),
+                              const SizedBox(width: 4),
+                              const Text('Include Notes'),
+                            ],
+                          ),
+                          selected: _includeNotes,
+                          onSelected: (val) => setState(() => _includeNotes = val),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Format Selection
+                  const Text(
+                    'SHARE FORMAT',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 6),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        ChoiceChip(
+                          avatar: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
+                          label: const Text('Chat / Message'),
+                          selected: _format == 'text',
+                          onSelected: (val) => setState(() => _format = 'text'),
+                        ),
+                        const SizedBox(width: 6),
+                        ChoiceChip(
+                          avatar: const Icon(Icons.table_chart_outlined, size: 16),
+                          label: const Text('CSV (Excel)'),
+                          selected: _format == 'csv',
+                          onSelected: (val) => setState(() => _format = 'csv'),
+                        ),
+                        const SizedBox(width: 6),
+                        ChoiceChip(
+                          avatar: const Icon(Icons.code_rounded, size: 16),
+                          label: const Text('JSON Backup'),
+                          selected: _format == 'json',
+                          onSelected: (val) => setState(() => _format = 'json'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Preview Box Header
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'PREVIEW (${items.length} ${items.length == 1 ? "title" : "titles"})',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: Colors.grey),
+                      ),
+                      TextButton.icon(
+                        icon: const Icon(Icons.copy_rounded, size: 15),
+                        label: const Text('Copy', style: TextStyle(fontSize: 12)),
+                        onPressed: items.isEmpty ? null : () => _copy(items),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+
+                  // Live Preview Box
+                  Container(
+                    height: 140,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isDark ? AppColors.darkSurface : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isDark ? AppColors.darkBorder : Colors.grey.shade300,
+                      ),
+                    ),
+                    child: items.isEmpty
+                        ? const Center(
+                            child: Text(
+                              'No titles match the selected filters.',
+                              style: TextStyle(color: Colors.grey),
+                            ),
+                          )
+                        : SingleChildScrollView(
+                            child: SelectableText(
+                              content,
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 11,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Bottom Action Buttons
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Row(
+                children: [
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.copy_rounded, size: 18),
+                    label: const Text('Copy'),
+                    onPressed: items.isEmpty ? null : () => _copy(items),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.catEveryday,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      icon: _isSharing
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : Icon(_format == 'text' ? Icons.share_rounded : Icons.file_upload_outlined, size: 20),
+                      label: Text(
+                        _format == 'text'
+                            ? 'Share via Apps'
+                            : (_format == 'csv' ? 'Export CSV File' : 'Export JSON File'),
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      onPressed: items.isEmpty || _isSharing ? null : () => _share(items),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPresetChip({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return ActionChip(
+      label: Text(
+        label,
+        style: TextStyle(
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          color: isSelected ? Colors.white : null,
+          fontSize: 12,
+        ),
+      ),
+      backgroundColor: isSelected ? AppColors.catEveryday : null,
+      onPressed: onTap,
+    );
+  }
+}
+

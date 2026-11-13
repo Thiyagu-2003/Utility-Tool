@@ -49,12 +49,16 @@ class _PercentageCalculatorScreenState extends State<PercentageCalculatorScreen>
       case PercentMode.percentOf:
         // What is v1% of v2?
         final res = (v1 / 100) * v2;
-        primary = _fmt.format(res);
+        primary = res.isFinite ? _fmt.format(res) : 'Overflow';
         subtitle = '${_fmt.format(v1)}% of ${_fmt.format(v2)} is $primary';
+        final remaining = v2 - res;
         items = [
           BreakdownItem(label: 'Percentage', value: '${_fmt.format(v1)}%'),
           BreakdownItem(label: 'Base Number', value: _fmt.format(v2)),
-          BreakdownItem(label: 'Remaining (${(100 - v1).toStringAsFixed(1)}%)', value: _fmt.format(v2 - res)),
+          BreakdownItem(
+            label: 'Remaining (${(100 - v1).toStringAsFixed(1)}%)',
+            value: remaining.isFinite ? _fmt.format(remaining) : '0',
+          ),
         ];
         break;
 
@@ -63,14 +67,22 @@ class _PercentageCalculatorScreenState extends State<PercentageCalculatorScreen>
         if (v2 == 0) {
           primary = 'Undefined (div by 0)';
           subtitle = 'Cannot divide by zero';
+          items = [
+            BreakdownItem(label: 'Part (X)', value: _fmt.format(v1)),
+            const BreakdownItem(label: 'Total (Y)', value: '0'),
+            const BreakdownItem(label: 'Status', value: 'Division by zero'),
+          ];
         } else {
           final res = (v1 / v2) * 100;
-          primary = '${_fmt.format(res)}%';
+          primary = res.isFinite ? '${_fmt.format(res)}%' : 'Overflow';
           subtitle = '${_fmt.format(v1)} is $primary of ${_fmt.format(v2)}';
           items = [
             BreakdownItem(label: 'Part (X)', value: _fmt.format(v1)),
             BreakdownItem(label: 'Total (Y)', value: _fmt.format(v2)),
-            BreakdownItem(label: 'Ratio', value: v1 == 0 ? '—' : '1 : ${_fmt.format(v2 / v1)}'),
+            BreakdownItem(
+              label: 'Ratio',
+              value: (v1 == 0 || !(v2 / v1).isFinite) ? '—' : '1 : ${_fmt.format(v2 / v1)}',
+            ),
           ];
         }
         break;
@@ -80,16 +92,29 @@ class _PercentageCalculatorScreenState extends State<PercentageCalculatorScreen>
         if (v1 == 0) {
           primary = 'Undefined';
           subtitle = 'Initial value cannot be zero';
+          items = [
+            const BreakdownItem(label: 'Initial (X)', value: '0'),
+            BreakdownItem(label: 'Final (Y)', value: _fmt.format(v2)),
+            const BreakdownItem(label: 'Status', value: 'Base cannot be 0'),
+          ];
         } else {
           final diff = v2 - v1;
           final pct = (diff / v1.abs()) * 100; // |X| keeps the sign right for negative starting values
-          final isIncrease = diff >= 0;
-          primary = '${isIncrease ? '+' : ''}${_fmt.format(pct)}%';
-          subtitle = '${isIncrease ? 'Increase' : 'Decrease'} of ${_fmt.format(diff.abs())}';
+          if (!pct.isFinite) {
+            primary = 'Overflow';
+            subtitle = 'Difference too large to calculate';
+          } else if (diff == 0) {
+            primary = '0%';
+            subtitle = 'No change between X and Y';
+          } else {
+            final isIncrease = diff > 0;
+            primary = '${isIncrease ? '+' : ''}${_fmt.format(pct)}%';
+            subtitle = '${isIncrease ? 'Increase' : 'Decrease'} of ${_fmt.format(diff.abs())}';
+          }
           items = [
             BreakdownItem(label: 'Initial (X)', value: _fmt.format(v1)),
             BreakdownItem(label: 'Final (Y)', value: _fmt.format(v2)),
-            BreakdownItem(label: 'Absolute Difference', value: _fmt.format(diff)),
+            BreakdownItem(label: 'Absolute Difference', value: _fmt.format(diff.abs())),
           ];
         }
         break;

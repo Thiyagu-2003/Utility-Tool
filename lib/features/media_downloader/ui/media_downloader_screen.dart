@@ -143,6 +143,7 @@ class _MediaDownloaderScreenState extends State<MediaDownloaderScreen> {
                 ],
               ),
         );
+        if (!mounted) return;
         if (downloadAgain == true) {
           await _startDownload(allowDuplicate: true);
         }

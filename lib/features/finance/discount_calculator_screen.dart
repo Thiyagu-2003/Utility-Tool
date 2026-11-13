@@ -30,29 +30,30 @@ class _DiscountCalculatorScreenState extends State<DiscountCalculatorScreen> {
   }
 
   Map<String, double> _calculateDiscount() {
-    final originalPrice = _num(_priceController);
+    // Prices cannot be negative; clamp to >= 0.
+    final originalPrice = _num(_priceController).clamp(0.0, double.infinity);
     // Discounts are clamped to 0-100% so the price can't go negative.
     final discountPercent = _num(_discountController).clamp(0.0, 100.0);
     final extraDiscountPercent = _enableExtraDiscount ? _num(_extraDiscountController).clamp(0.0, 100.0) : 0.0;
     final taxPercent = _num(_taxController).clamp(0.0, 100.0);
 
     final firstDiscountAmount = originalPrice * (discountPercent / 100);
-    final priceAfterFirst = originalPrice - firstDiscountAmount;
+    final priceAfterFirst = (originalPrice - firstDiscountAmount).clamp(0.0, double.infinity);
 
     final extraDiscountAmount = priceAfterFirst * (extraDiscountPercent / 100);
-    final discountedPrice = priceAfterFirst - extraDiscountAmount;
+    final discountedPrice = (priceAfterFirst - extraDiscountAmount).clamp(0.0, double.infinity);
     // Sales tax applies to the discounted price; savings are discount-only.
     final taxAmount = discountedPrice * (taxPercent / 100);
     final finalPrice = discountedPrice + taxAmount;
-    final totalSavings = originalPrice - discountedPrice;
+    final totalSavings = (originalPrice - discountedPrice).clamp(0.0, double.infinity);
     final effectiveDiscountPercent = originalPrice > 0 ? (totalSavings / originalPrice) * 100 : 0.0;
 
     return {
-      'taxAmount': taxAmount,
-      'finalPrice': finalPrice,
-      'totalSavings': totalSavings,
-      'effectivePercent': effectiveDiscountPercent,
-      'originalPrice': originalPrice,
+      'taxAmount': taxAmount.isFinite ? taxAmount : 0.0,
+      'finalPrice': finalPrice.isFinite ? finalPrice : 0.0,
+      'totalSavings': totalSavings.isFinite ? totalSavings : 0.0,
+      'effectivePercent': effectiveDiscountPercent.isFinite ? effectiveDiscountPercent : 0.0,
+      'originalPrice': originalPrice.isFinite ? originalPrice : 0.0,
     };
   }
 

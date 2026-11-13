@@ -5,6 +5,7 @@ import 'package:utility_tool/core/models/tool_model.dart';
 import 'package:utility_tool/core/registry/tool_registry.dart';
 import 'package:utility_tool/features/entertainment/entertainment_models.dart';
 import 'package:utility_tool/features/entertainment/entertainment_service.dart';
+import 'package:utility_tool/features/entertainment/entertainment_share_service.dart';
 import 'package:utility_tool/features/entertainment/entertainment_tracker_screen.dart';
 
 void main() {
@@ -264,6 +265,164 @@ void main() {
       // Check search bar and filter chips
       expect(find.byType(TextField), findsOneWidget);
       expect(find.text('Favourites'), findsOneWidget);
+    });
+
+    testWidgets('Tapping share action opens Share Watchlist sheet with presets and preview', (tester) async {
+      tester.view.physicalSize = const Size(800 * 2.0, 1200 * 2.0);
+      tester.view.devicePixelRatio = 2.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: EntertainmentTrackerScreen(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Tap share button in top app bar
+      final shareBtn = find.byTooltip('Share Watchlist');
+      expect(shareBtn, findsOneWidget);
+      await tester.tap(shareBtn);
+      await tester.pumpAndSettle();
+
+      // Verify share sheet opened
+      expect(find.text('Share Watchlist'), findsOneWidget);
+      expect(find.text('QUICK PRESETS'), findsOneWidget);
+      expect(find.text('🍿 Watched Anime'), findsOneWidget);
+      expect(find.text('🎬 Watched Movies'), findsOneWidget);
+      expect(find.text('SHARE FORMAT'), findsOneWidget);
+
+      // Tap '🍿 Watched Anime' preset
+      await tester.tap(find.text('🍿 Watched Anime'));
+      await tester.pumpAndSettle();
+
+      // Check format toggle to CSV
+      await tester.tap(find.text('CSV (Excel)'));
+      await tester.pumpAndSettle();
+
+      // Check format toggle back to Chat
+      await tester.tap(find.text('Chat / Message'));
+      await tester.pumpAndSettle();
+
+      // Verify Copy button is present
+      expect(find.text('Copy'), findsAtLeastNWidgets(1));
+    });
+  });
+
+  group('EntertainmentShareService Unit Tests', () {
+    test('generateTextSummary formats watched anime correctly', () {
+      final items = [
+        EntertainmentItem(
+          id: 'anime_1',
+          title: 'Frieren: Beyond Journey\'s End',
+          category: EntertainmentCategory.anime,
+          releaseYear: 2023,
+          genres: ['Fantasy', 'Adventure'],
+          personalRating: 9.5,
+          status: WatchingStatus.completed,
+          totalEpisodes: 28,
+          currentEpisode: 28,
+          notes: [
+            EntertainmentNote(
+              id: 'n1',
+              title: 'Himmel',
+              content: 'The journey itself was the treasure.',
+            ),
+          ],
+        ),
+        EntertainmentItem(
+          id: 'anime_2',
+          title: 'Attack on Titan',
+          category: EntertainmentCategory.anime,
+          releaseYear: 2013,
+          genres: ['Action', 'Drama'],
+          personalRating: 9.8,
+          status: WatchingStatus.completed,
+          totalEpisodes: 87,
+          currentEpisode: 87,
+        ),
+        EntertainmentItem(
+          id: 'movie_1',
+          title: 'Interstellar',
+          category: EntertainmentCategory.movies,
+          releaseYear: 2014,
+          personalRating: 10.0,
+          status: WatchingStatus.completed,
+        ),
+      ];
+
+      // Specifically filter to watched anime
+      final summary = EntertainmentShareService.generateTextSummary(
+        items: items,
+        category: EntertainmentCategory.anime,
+        status: WatchingStatus.completed,
+      );
+
+      expect(summary, contains('🍿 My Anime Completed (2 titles)'));
+      expect(summary, contains('1. Attack on Titan (2013)')); // Higher rating first
+      expect(summary, contains('⭐ 9.8/10'));
+      expect(summary, contains('2. Frieren: Beyond Journey\'s End (2023)'));
+      expect(summary, contains('⭐ 9.5/10'));
+      expect(summary, contains('💭 "Himmel: The journey itself was the treasure."'));
+      expect(summary, contains('📊 Summary: 2 titles • 115 eps watched'));
+      // Movie shouldn't be in the anime list
+      expect(summary.contains('Interstellar'), false);
+    });
+
+    test('generateSingleItemText formats single title recommendation', () {
+      final item = EntertainmentItem(
+        id: 'single_1',
+        title: 'Cyberpunk: Edgerunners',
+        category: EntertainmentCategory.anime,
+        releaseYear: 2022,
+        genres: ['Action', 'Sci-Fi'],
+        personalRating: 9.0,
+        status: WatchingStatus.completed,
+        totalEpisodes: 10,
+        currentEpisode: 10,
+        description: 'A street kid trying to survive in a technology and body modification-obsessed city.',
+      );
+
+      final rec = EntertainmentShareService.generateSingleItemText(item);
+      expect(rec, contains('🍿 Recommendation: Cyberpunk: Edgerunners (2022)'));
+      expect(rec, contains('Category: Anime • Status: Completed'));
+      expect(rec, contains('⭐ Personal Rating: 9.0/10'));
+      expect(rec, contains('A street kid trying to survive'));
+      expect(rec, contains('Shared from Utility Tool'));
+    });
+
+    test('generateJsonExport produces valid JSON', () {
+      final items = [
+        EntertainmentItem(
+          id: 'test_json',
+          title: 'Test Show',
+          category: EntertainmentCategory.anime,
+          status: WatchingStatus.watching,
+        ),
+      ];
+
+      final jsonStr = EntertainmentShareService.generateJsonExport(items);
+      expect(jsonStr, contains('"exportType": "entertainment_watchlist"'));
+      expect(jsonStr, contains('"Test Show"'));
+    });
+
+    test('generateCsvExport produces valid CSV rows', () {
+      final items = [
+        EntertainmentItem(
+          id: 'test_csv',
+          title: 'Steins;Gate',
+          category: EntertainmentCategory.anime,
+          personalRating: 9.3,
+          status: WatchingStatus.completed,
+          totalEpisodes: 24,
+          currentEpisode: 24,
+          genres: ['Sci-Fi', 'Thriller'],
+        ),
+      ];
+
+      final csvStr = EntertainmentShareService.generateCsvExport(items);
+      expect(csvStr, contains('"Title","Category","Status"'));
+      expect(csvStr, contains('"Steins;Gate","Anime","Completed"'));
     });
   });
 }

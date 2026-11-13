@@ -81,7 +81,7 @@ class PhotoEditorService {
     } catch (_) {
       return null;
     }
-    if (raw == null) return null;
+    if (raw == null || raw.width <= 0 || raw.height <= 0) return null;
     var image = toRgba8(raw);
     final originalWidth = image.width;
     final originalHeight = image.height;

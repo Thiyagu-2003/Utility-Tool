@@ -130,7 +130,7 @@ class ImageCompressionService {
     if (bytes.length < 8) return null;
 
     final decoded = img.decodeImage(bytes);
-    if (decoded == null) return null;
+    if (decoded == null || decoded.width <= 0 || decoded.height <= 0) return null;
 
     final origW = decoded.width;
     final origH = decoded.height;
@@ -148,7 +148,7 @@ class ImageCompressionService {
       int targetW = config.customWidth ?? origW;
       int targetH = config.customHeight ?? origH;
 
-      if (config.maintainAspectRatio) {
+      if (config.maintainAspectRatio && origW > 0 && origH > 0) {
         if (config.customWidth != null && config.customHeight == null) {
           targetH = (origH * targetW / origW).round();
         } else if (config.customHeight != null && config.customWidth == null) {

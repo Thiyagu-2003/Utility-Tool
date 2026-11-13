@@ -43,9 +43,11 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
   }
 
   Future<void> _initTts() async {
-    await _tts.setLanguage('en-US');
-    await _tts.setSpeechRate(0.45);
-    await _tts.setVolume(1.0);
+    try {
+      await _tts.setLanguage('en-US');
+      await _tts.setSpeechRate(0.45);
+      await _tts.setVolume(1.0);
+    } catch (_) {}
 
     _tts.setCompletionHandler(() {
       if (mounted) {
@@ -109,8 +111,17 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
       _isPlayingAudio = true;
       _speakerTestStatus = 'Playing $label...';
     });
-    await _tts.setPitch(1.0);
-    await _tts.speak(phrase);
+    try {
+      await _tts.setPitch(1.0);
+      await _tts.speak(phrase);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isPlayingAudio = false;
+          _speakerTestStatus = 'Speaker test failed: $e';
+        });
+      }
+    }
   }
 
   Future<void> _testPitch(double pitch, String label) async {
@@ -118,8 +129,17 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
       _isPlayingAudio = true;
       _speakerTestStatus = 'Playing $label voice...';
     });
-    await _tts.setPitch(pitch);
-    await _tts.speak('This is a $label voice clarity test. Checking phone speaker output.');
+    try {
+      await _tts.setPitch(pitch);
+      await _tts.speak('This is a $label voice clarity test. Checking phone speaker output.');
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isPlayingAudio = false;
+          _speakerTestStatus = 'Speaker test failed: $e';
+        });
+      }
+    }
   }
 
   Future<bool> _showMicPermissionDialog() async {
@@ -207,7 +227,7 @@ class _MicSpeakerTesterScreenState extends State<MicSpeakerTesterScreen> {
       onSoundLevelChange: (level) {
         if (mounted) {
           setState(() {
-            _soundLevel = level;
+            _soundLevel = level.isFinite ? level : 0.0;
           });
         }
       },

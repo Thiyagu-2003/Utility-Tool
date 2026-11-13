@@ -697,6 +697,12 @@ Here is the comprehensive list of features currently implemented in the app, cat
     - **Episode & Season Tracking**: Tracks current and total seasons/episodes with progress indicators and 1-tap `+1 Ep` quick log. Movies supported without episode tracking.
     - **Personal Notes & Highlights**: Multi-note support per title for Favourite Characters, Memorable Scenes, Memorable Quotes, and Personal Reviews with timestamps and filtering.
     - **Tracker Dashboard**: Overview statistics (total titles, watching, completed, episodes watched, notes count), horizontal Currently Watching carousel, and Recently Updated log.
+    - **Watchlist Sharing & Export (`EntertainmentShareService`)**:
+      - 1-tap sharing to WhatsApp, Telegram, Discord, Email, SMS, or Clipboard.
+      - **Quick Presets**: 🍿 Watched Anime, 🎬 Watched Movies, 📺 Currently Watching, ❤️ My Favourites, and 🌐 Full List.
+      - **Custom Filters**: Filter by category (Anime, Drama, Movies, TV), watching status (Completed, Watching, Plan to Watch, On Hold, Dropped), favorites only, and toggle personal notes.
+      - **Multiple Export Formats**: Human-readable chat message with titles, ratings, episode progress and notes; CSV spreadsheet for Excel/Google Sheets; and JSON data backup.
+      - **Single Title Sharing**: Share individual recommendations with synopsis, rating, progress, and highlights directly from the detail screen.
 - **Audit & Bug Fixes (Release 89 - Full Audit, Smart Scanner, Package Upgrades)**:
   - **Categories**: "Files & Text" split into PDF & Documents, Image & Photo, Compression & Archives, Text & Writing, Audio & Video, QR & Barcode, and Device & Hardware (18 categories); "Calculate" renamed Percentage Calculation. Category names and descriptions follow the app language (en, ta, hi, es).
   - **Document Scanner & Photo to PDF**: ML Kit auto-crop scanner (edge detection, perspective fix, filters, gallery import), page grid with reorder/rotate/retake, export options (size, margins, quality, OCR text layer, password). Photo to PDF auto-crops by default.

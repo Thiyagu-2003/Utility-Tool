@@ -464,7 +464,7 @@ class _FileZipToolkitScreenState extends State<FileZipToolkitScreen> {
                         tooltip: 'Share Extracted File',
                         onPressed: () {
                           try {
-                            _shareBytes(file.content as List<int>, file.name);
+                            _shareBytes(file.content, file.name);
                           } catch (e) {
                             _showToast(
                                 'Cannot read entry (encrypted or corrupt?): $e');

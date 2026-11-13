@@ -112,7 +112,8 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
       if (diff >= 500) {
         if (mounted) {
           setState(() {
-            _liveFps = (_frameCount * 1000.0) / diff;
+            _liveFps = diff > 0 ? (_frameCount * 1000.0) / diff : 60.0;
+            if (!_liveFps.isFinite || _liveFps <= 0) _liveFps = 60.0;
           });
         }
         _frameCount = 0;
@@ -152,7 +153,7 @@ class _BatteryDisplayInfoScreenState extends State<BatteryDisplayInfoScreen> wit
     final views = WidgetsBinding.instance.platformDispatcher.views;
     if (views.isNotEmpty) {
       _refreshRate = views.first.display.refreshRate;
-      if (_refreshRate <= 0) _refreshRate = 60.0;
+      if (_refreshRate <= 0 || !_refreshRate.isFinite) _refreshRate = 60.0;
     }
 
     return ToolScaffold(

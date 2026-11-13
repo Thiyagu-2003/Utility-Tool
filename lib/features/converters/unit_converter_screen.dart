@@ -29,8 +29,9 @@ final _plainFormat = NumberFormat('#,##0.######');
 String formatUnitValue(double v) {
   if (v.isNaN) return 'NaN';
   if (v.isInfinite) return v.isNegative ? '-∞' : '∞';
+  if (v == 0.0 || v.abs() == 0.0) return '0';
   final a = v.abs();
-  if (a != 0 && (a < 1e-6 || a >= 1e15)) {
+  if (a < 1e-6 || a >= 1e15) {
     return v.toStringAsExponential(6).replaceFirst(RegExp(r'\.?0+e'), 'e').replaceFirst('e+', 'e');
   }
   return _plainFormat.format(v);
@@ -133,6 +134,7 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
   }
 
   double _convertValue(double inputVal, UnitDefinition from, UnitDefinition to) {
+    if (!inputVal.isFinite) return 0.0;
     if (_currentType == UnitType.temperature) {
       if (from.name == to.name) return inputVal;
       // Convert from to Celsius first
@@ -144,14 +146,17 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
       }
 
       // Convert Celsius to toUnit
-      if (to.name == 'Celsius') return celsius;
-      if (to.name == 'Fahrenheit') return (celsius * 9 / 5) + 32;
-      if (to.name == 'Kelvin') return celsius + 273.15;
-      return celsius;
+      double res = celsius;
+      if (to.name == 'Celsius') res = celsius;
+      if (to.name == 'Fahrenheit') res = (celsius * 9 / 5) + 32;
+      if (to.name == 'Kelvin') res = celsius + 273.15;
+      return res.isFinite ? res : 0.0;
     }
 
+    if (to.toBaseFactor == 0 || !to.toBaseFactor.isFinite) return 0.0;
     final baseVal = inputVal * from.toBaseFactor;
-    return baseVal / to.toBaseFactor;
+    final res = baseVal / to.toBaseFactor;
+    return res.isFinite ? res : 0.0;
   }
 
   void _swapUnits() {
@@ -174,9 +179,11 @@ class _UnitConverterScreenState extends State<UnitConverterScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final currentList = _units[_currentType]!;
 
-    // Non-finite input ("1e999") is treated like empty input instead of showing Infinity/NaN.
+    // Negative dimensions are invalid for physical units (length, mass, area, volume, data)
+    final isNegativeDisallowed = _currentType != UnitType.temperature && _currentType != UnitType.speed;
     final parsed = double.tryParse(_inputController.text.trim());
-    final inputVal = parsed != null && parsed.isFinite ? parsed : 0.0;
+    final rawVal = parsed != null && parsed.isFinite ? parsed : 0.0;
+    final inputVal = (isNegativeDisallowed && rawVal < 0) ? 0.0 : rawVal;
     final resultVal = _convertValue(inputVal, _fromUnit, _toUnit);
 
     final formattedResult = '${formatUnitValue(resultVal)} ${_toUnit.symbol}';

@@ -117,17 +117,22 @@ class SlateService {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
 
-    final width = size.width * pixelRatio;
-    final height = size.height * pixelRatio;
+    final safeW = (size.width > 0 && size.width.isFinite) ? size.width : 360.0;
+    final safeH = (size.height > 0 && size.height.isFinite) ? size.height : 640.0;
+    final safeRatio = (pixelRatio > 0 && pixelRatio.isFinite) ? pixelRatio : 2.0;
+
+    final width = safeW * safeRatio;
+    final height = safeH * safeRatio;
+    final safeSize = Size(safeW, safeH);
 
     // Scale canvas to match target high-res pixel ratio
-    canvas.scale(pixelRatio, pixelRatio);
+    canvas.scale(safeRatio, safeRatio);
 
     // 1. Draw Paper Background
-    drawPaperBackground(canvas, size, paperType);
+    drawPaperBackground(canvas, safeSize, paperType);
 
     // 2. Draw Strokes inside saveLayer so BlendMode.clear only clears stroke layer
-    canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
+    canvas.saveLayer(Rect.fromLTWH(0, 0, safeW, safeH), Paint());
     for (final stroke in strokes) {
       drawStroke(canvas, stroke);
     }
@@ -141,6 +146,7 @@ class SlateService {
 
   /// Draw paper background
   static void drawPaperBackground(Canvas canvas, Size size, SlatePaperType paper) {
+    if (size.width <= 0 || size.height <= 0 || !size.width.isFinite || !size.height.isFinite) return;
     Color bgColor;
     switch (paper) {
       case SlatePaperType.dark:
@@ -191,7 +197,7 @@ class SlateService {
 
   /// Draw an individual stroke
   static void drawStroke(Canvas canvas, SlateStroke stroke) {
-    if (stroke.points.isEmpty) return;
+    if (stroke.points.isEmpty || stroke.points.any((p) => !p.x.isFinite || !p.y.isFinite)) return;
 
     final paint = Paint()
       ..strokeWidth = stroke.size

@@ -107,12 +107,14 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
   void _startPunchTimer(DateTime startTime) {
     _punchTimer?.cancel();
     _activeSessionDuration = DateTime.now().difference(startTime);
-    _punchTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) {
-        setState(() {
-          _activeSessionDuration = DateTime.now().difference(startTime);
-        });
+    _punchTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
       }
+      setState(() {
+        _activeSessionDuration = DateTime.now().difference(startTime);
+      });
     });
   }
 
@@ -1601,6 +1603,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                           label: const Text('Attach Image'),
                           onPressed: () async {
                             final file = await FilePicker.pickFile(type: FileType.image);
+                            if (!ctx.mounted) return;
                             if (file != null && file.path != null) {
                               setDialogState(() {
                                 images.add(file.path!);
@@ -2352,6 +2355,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                             firstDate: DateTime(2020),
                             lastDate: DateTime(2040),
                           );
+                          if (!ctx.mounted) return;
                           if (picked != null) {
                             setDialogState(() => eventDate = picked);
                           }
@@ -2902,6 +2906,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                               firstDate: DateTime(2020),
                               lastDate: DateTime(2040),
                             );
+                            if (!ctx.mounted) return;
                             if (picked != null) {
                               setDialogState(() => dueDate = picked);
                             }
@@ -3264,6 +3269,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                             firstDate: DateTime.now(),
                             lastDate: DateTime(2040),
                           );
+                          if (!ctx.mounted) return;
                           if (picked != null) {
                             setDialogState(() => scheduledDate = picked);
                           }
@@ -3287,6 +3293,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                             context: ctx,
                             initialTime: scheduledTime,
                           );
+                          if (!ctx.mounted) return;
                           if (picked != null) {
                             setDialogState(() => scheduledTime = picked);
                           }
@@ -3494,6 +3501,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                       firstDate: DateTime(2020),
                       lastDate: DateTime(2040),
                     );
+                    if (!ctx.mounted) return;
                     if (picked != null) {
                       setDialogState(() => renewal = picked);
                     }
@@ -3679,6 +3687,7 @@ class _ProductivityToolkitScreenState extends State<ProductivityToolkitScreen> {
                       firstDate: DateTime(2020),
                       lastDate: DateTime(2040),
                     );
+                    if (!ctx.mounted) return;
                     if (picked != null) {
                       setDialogState(() => dueDate = picked);
                     }

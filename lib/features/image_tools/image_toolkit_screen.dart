@@ -245,7 +245,9 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
         _latestCompressionResult = null;
         _compressWidthController.text = image.width.toString();
         _compressHeightController.text = image.height.toString();
-        _compressAspectRatioFactor = image.width / (image.height == 0 ? 1 : image.height);
+        _compressAspectRatioFactor = (image.width > 0 && image.height > 0)
+            ? image.width / image.height
+            : 1.0;
       });
       _runCompression();
     }
@@ -280,7 +282,9 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
             _compressImage = loaded.first;
             _compressWidthController.text = loaded.first.width.toString();
             _compressHeightController.text = loaded.first.height.toString();
-            _compressAspectRatioFactor = loaded.first.width / (loaded.first.height == 0 ? 1 : loaded.first.height);
+            _compressAspectRatioFactor = (loaded.first.width > 0 && loaded.first.height > 0)
+                ? loaded.first.width / loaded.first.height
+                : 1.0;
           }
         });
         _runBatchCompression();
@@ -292,7 +296,7 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
 
   void _onCompressDimensionChanged({required bool widthChanged, required String text}) {
     final value = int.tryParse(text);
-    if (_compressMaintainAspectRatio && value != null && value > 0) {
+    if (_compressMaintainAspectRatio && value != null && value > 0 && _compressAspectRatioFactor > 0 && _compressAspectRatioFactor.isFinite) {
       if (widthChanged) {
         final h = (value / _compressAspectRatioFactor).round();
         _compressHeightController.text = h > 0 ? h.toString() : '';
@@ -406,7 +410,9 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
         _resizeImage = image;
         _resizeWidthController.text = image.width.toString();
         _resizeHeightController.text = image.height.toString();
-        _aspectRatioFactor = image.width / (image.height == 0 ? 1 : image.height);
+        _aspectRatioFactor = (image.width > 0 && image.height > 0)
+            ? image.width / image.height
+            : 1.0;
         _resizedBytes = null;
       });
     }
@@ -449,11 +455,13 @@ class _ImageToolkitScreenState extends State<ImageToolkitScreen> {
   /// field leaves it alone (it used to flip to 0). Any edit makes the old result stale.
   void _onResizeDimensionChanged({required bool widthChanged, required String text}) {
     final value = int.tryParse(text);
-    if (_maintainAspectRatio && value != null && value > 0) {
+    if (_maintainAspectRatio && value != null && value > 0 && _aspectRatioFactor > 0 && _aspectRatioFactor.isFinite) {
       if (widthChanged) {
-        _resizeHeightController.text = (value / _aspectRatioFactor).round().toString();
+        final h = (value / _aspectRatioFactor).round();
+        _resizeHeightController.text = h > 0 ? h.toString() : '';
       } else {
-        _resizeWidthController.text = (value * _aspectRatioFactor).round().toString();
+        final w = (value * _aspectRatioFactor).round();
+        _resizeWidthController.text = w > 0 ? w.toString() : '';
       }
     }
     if (_resizedBytes != null) setState(() => _resizedBytes = null);

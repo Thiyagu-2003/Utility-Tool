@@ -156,6 +156,10 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen> {
         return;
       }
       final decoded = loaded.image;
+      if (decoded.width <= 0 || decoded.height <= 0) {
+        _showToast('Unsupported or corrupt image file.', isError: true);
+        return;
+      }
       final p = decoded.getPixel(0, 0);
       setState(() {
         _resetEdits();

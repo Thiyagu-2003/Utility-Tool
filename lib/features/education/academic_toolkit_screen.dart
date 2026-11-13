@@ -26,6 +26,7 @@ enum AcademicTab {
 /// Both null means the target can no longer be reached. Integer-scaled maths so
 /// 42/0.7 can't land on 59.999... and lose a class.
 ({int? canSkip, int? mustAttend}) attendancePlan(int attended, int total, double required) {
+  if (required <= 0) return (canSkip: 0, mustAttend: null);
   if (attended * 100 >= required * total - 1e-9) {
     final maxTotal = (attended * 100 / required + 1e-9).floor();
     return (canSkip: math.max(0, maxTotal - total), mustAttend: null);
@@ -164,8 +165,8 @@ class _AcademicToolkitScreenState extends State<AcademicToolkitScreen> {
     final attended = int.tryParse(_attAttendedCtrl.text.trim()) ?? 0;
     final req = double.tryParse(_attRequiredCtrl.text.trim()) ?? 75.0;
 
-    if (total <= 0 || attended < 0 || attended > total) {
-      return {'pct': 0.0, 'status': 'Invalid numbers', 'action': 'Check total and attended classes'};
+    if (total <= 0 || attended < 0 || attended > total || req < 0 || req > 100) {
+      return {'pct': 0.0, 'status': 'Invalid numbers', 'action': 'Check total, attended, and required classes'};
     }
 
     final pct = (attended / total) * 100;

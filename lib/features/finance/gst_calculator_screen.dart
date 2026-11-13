@@ -25,9 +25,11 @@ class _GstCalculatorScreenState extends State<GstCalculatorScreen> {
   final List<double> _presetRates = [5.0, 12.0, 18.0, 28.0];
 
   Map<String, double> _calculateGst() {
-    final amount = ValidationUtils.safeParseDouble(_amountController.text);
+    final rawAmount = ValidationUtils.safeParseDouble(_amountController.text);
+    final amount = (rawAmount.isFinite && rawAmount > 0) ? rawAmount : 0.0;
     // Capped at 100% so inclusive pricing can't divide by zero at a -100% rate.
-    final rate = (_isCustomRate ? ValidationUtils.safeParseDouble(_customRateController.text) : _selectedRate).clamp(0.0, 100.0);
+    final rawRate = _isCustomRate ? ValidationUtils.safeParseDouble(_customRateController.text) : _selectedRate;
+    final rate = (rawRate.isFinite && rawRate >= 0) ? rawRate.clamp(0.0, 100.0) : 0.0;
 
     double netAmount = 0;
     double gstAmount = 0;
@@ -45,6 +47,12 @@ class _GstCalculatorScreenState extends State<GstCalculatorScreen> {
       gstAmount = totalAmount - netAmount;
     }
 
+    if (!netAmount.isFinite || !gstAmount.isFinite || !totalAmount.isFinite) {
+      netAmount = 0.0;
+      gstAmount = 0.0;
+      totalAmount = 0.0;
+    }
+
     final cgst = gstAmount / 2;
     final sgst = gstAmount / 2;
 
@@ -52,8 +60,8 @@ class _GstCalculatorScreenState extends State<GstCalculatorScreen> {
       'netAmount': netAmount,
       'gstAmount': gstAmount,
       'totalAmount': totalAmount,
-      'cgst': cgst,
-      'sgst': sgst,
+      'cgst': cgst.isFinite ? cgst : 0.0,
+      'sgst': sgst.isFinite ? sgst : 0.0,
       'rate': rate,
     };
   }

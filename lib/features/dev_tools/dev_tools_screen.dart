@@ -106,6 +106,13 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
   }
 
   void _formatJson() {
+    if (_jsonController.text.trim().isEmpty) {
+      setState(() {
+        _isJsonValid = false;
+        _jsonStatus = 'Empty JSON input';
+      });
+      return;
+    }
     try {
       final parsed = jsonDecode(_jsonController.text);
       const encoder = JsonEncoder.withIndent('  ');
@@ -124,6 +131,13 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
   }
 
   void _minifyJson() {
+    if (_jsonController.text.trim().isEmpty) {
+      setState(() {
+        _isJsonValid = false;
+        _jsonStatus = 'Empty JSON input';
+      });
+      return;
+    }
     try {
       final parsed = jsonDecode(_jsonController.text);
       final minified = jsonEncode(parsed);
@@ -151,11 +165,11 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
     try {
       final bytes = decodeBase64Lenient(_base64InputController.text);
       setState(() {
-        _base64OutputController.text = utf8.decode(bytes);
+        _base64OutputController.text = utf8.decode(bytes, allowMalformed: true);
       });
     } catch (e) {
       setState(() {
-        _base64OutputController.text = 'Decode error: Invalid Base64 string';
+        _base64OutputController.text = 'Decode error: ${e is FormatException ? e.message : 'Invalid Base64 string'}';
       });
     }
   }
@@ -227,7 +241,7 @@ class _DevToolsScreenState extends State<DevToolsScreen> {
     final sizeVal = double.tryParse(_dlSizeCtrl.text) ?? 0;
     final speedVal = double.tryParse(_dlSpeedCtrl.text) ?? 0;
 
-    if (sizeVal <= 0 || speedVal <= 0) {
+    if (sizeVal <= 0 || speedVal <= 0 || !sizeVal.isFinite || !speedVal.isFinite) {
       return {'time': '0s', 'desc': 'Invalid inputs'};
     }
 

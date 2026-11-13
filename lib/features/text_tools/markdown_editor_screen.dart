@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -66,15 +67,17 @@ void main() {
     final selection = _markdownController.selection;
 
     if (selection.isValid && !selection.isCollapsed) {
-      final selectedText = text.substring(selection.start, selection.end);
-      final newText = text.replaceRange(selection.start, selection.end, '$prefix$selectedText$suffix');
+      final start = math.min(selection.start, selection.end).clamp(0, text.length);
+      final end = math.max(selection.start, selection.end).clamp(0, text.length);
+      final selectedText = text.substring(start, end);
+      final newText = text.replaceRange(start, end, '$prefix$selectedText$suffix');
       _markdownController.text = newText;
       _markdownController.selection = TextSelection(
-        baseOffset: selection.start + prefix.length,
-        extentOffset: selection.start + prefix.length + selectedText.length,
+        baseOffset: start + prefix.length,
+        extentOffset: start + prefix.length + selectedText.length,
       );
     } else {
-      final pos = selection.isValid ? selection.start : text.length;
+      final pos = (selection.isValid ? selection.start : text.length).clamp(0, text.length);
       final newText = text.replaceRange(pos, pos, '$prefix$suffix');
       _markdownController.text = newText;
       _markdownController.selection = TextSelection.collapsed(offset: pos + prefix.length);
@@ -88,9 +91,12 @@ void main() {
     PreferencesService().triggerHaptic();
     final text = _markdownController.text;
     final selection = _markdownController.selection;
-    final start = selection.isValid ? selection.start : text.length;
-    final end = selection.isValid ? selection.end : text.length;
-    final lineStart = start == 0 ? 0 : text.lastIndexOf('\n', start - 1) + 1;
+    final rawStart = selection.isValid ? selection.start : text.length;
+    final rawEnd = selection.isValid ? selection.end : text.length;
+    final start = math.min(rawStart, rawEnd).clamp(0, text.length);
+    final end = math.max(rawStart, rawEnd).clamp(0, text.length);
+    final lineStart = start == 0 ? 0 : (text.lastIndexOf('\n', start - 1) + 1).clamp(0, text.length);
+    if (lineStart > end) return;
     final prefixed = text.substring(lineStart, end).split('\n').map((l) => '$prefix$l').join('\n');
     _markdownController.text = text.replaceRange(lineStart, end, prefixed);
     _markdownController.selection = TextSelection.collapsed(offset: lineStart + prefixed.length);

@@ -53,7 +53,7 @@ class _TextAnalyzerScreenState extends State<TextAnalyzerScreen> {
     final paragraphCount = paragraphs.length;
 
     // Reading time: average reading speed ~200 words per minute
-    final readingTimeSec = (wordCount / 200 * 60).round();
+    final readingTimeSec = wordCount == 0 ? 0 : (wordCount / 200 * 60).round();
     final readingTimeStr = readingTimeSec < 60
         ? '$readingTimeSec sec'
         : '${(readingTimeSec / 60).toStringAsFixed(1)} min';

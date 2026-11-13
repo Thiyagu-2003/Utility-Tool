@@ -20,20 +20,25 @@ class AmortizationYear {
 
 /// Month-by-month reducing-balance schedule folded into years.
 List<AmortizationYear> amortizationByYear({required double principal, required double annualRate, required int months}) {
-  if (principal <= 0 || months <= 0 || annualRate < 0) return const [];
+  if (principal <= 0 || months <= 0 || annualRate < 0 || !principal.isFinite || !annualRate.isFinite) return const [];
+  final mCount = months > 1200 ? 1200 : months;
   final r = annualRate / 1200;
-  final growth = math.pow(1 + r, months).toDouble();
-  final emi = r == 0 ? principal / months : principal * r * growth / (growth - 1);
+  final growth = math.pow(1 + r, mCount).toDouble();
+  final emi = (r == 0 || growth == 1.0)
+      ? principal / mCount
+      : (growth.isInfinite ? principal * r : (principal * r * growth) / (growth - 1));
+  if (!emi.isFinite || emi <= 0) return const [];
   final years = <AmortizationYear>[];
   var balance = principal, yearPrincipal = 0.0, yearInterest = 0.0;
-  for (var m = 1; m <= months; m++) {
+  for (var m = 1; m <= mCount; m++) {
     final interest = balance * r;
     final paid = emi - interest;
     balance -= paid;
     yearPrincipal += paid;
     yearInterest += interest;
-    if (m % 12 == 0 || m == months) {
-      years.add(AmortizationYear((m + 11) ~/ 12, yearPrincipal, yearInterest, balance.abs() < 0.005 ? 0 : balance));
+    if (m % 12 == 0 || m == mCount) {
+      final safeBalance = balance.abs() < 0.005 ? 0.0 : (balance > 0 ? balance : 0.0);
+      years.add(AmortizationYear((m + 11) ~/ 12, yearPrincipal, yearInterest, safeBalance.isFinite ? safeBalance : 0.0));
       yearPrincipal = yearInterest = 0;
     }
   }
@@ -60,9 +65,9 @@ class _LoanEmiCalculatorScreenState extends State<LoanEmiCalculatorScreen> {
 
     // Capped at 100 years: beyond that (1 + r)^n overflows a double.
     final monthsExact = _isTenureInYears ? tenureVal * 12 : tenureVal;
-    final totalMonths = monthsExact.isFinite && monthsExact <= 1200 ? monthsExact.round() : 0;
+    final totalMonths = (monthsExact.isFinite && monthsExact > 0 && monthsExact <= 1200) ? monthsExact.round() : 0;
 
-    if (principal <= 0 || annualRate < 0 || totalMonths <= 0) {
+    if (principal <= 0 || annualRate < 0 || totalMonths <= 0 || !principal.isFinite || !annualRate.isFinite) {
       return {
         'emi': 0,
         'totalInterest': 0,
@@ -75,14 +80,14 @@ class _LoanEmiCalculatorScreenState extends State<LoanEmiCalculatorScreen> {
     final monthlyRate = annualRate / (12 * 100);
     // EMI formula: P * r * (1 + r)^n / ((1 + r)^n - 1); at 0% it is simply P / n.
     final mathPower = math.pow(1 + monthlyRate, totalMonths).toDouble();
-    final emi = monthlyRate == 0
+    final emi = (monthlyRate == 0 || mathPower == 1.0)
         ? principal / totalMonths
-        : (principal * monthlyRate * mathPower) / (mathPower - 1);
+        : (mathPower.isInfinite ? principal * monthlyRate : (principal * monthlyRate * mathPower) / (mathPower - 1));
     final totalPayment = emi * totalMonths;
-    final totalInterest = totalPayment - principal;
-    final interestRatio = (totalInterest / totalPayment) * 100;
+    final totalInterest = totalPayment >= principal ? totalPayment - principal : 0.0;
+    final interestRatio = totalPayment > 0 ? (totalInterest / totalPayment) * 100 : 0.0;
 
-    if (!emi.isFinite || !totalPayment.isFinite) {
+    if (!emi.isFinite || !totalPayment.isFinite || !totalInterest.isFinite || !interestRatio.isFinite) {
       return {'emi': 0, 'totalInterest': 0, 'totalPayment': 0, 'interestRatio': 0, 'months': 0};
     }
 
@@ -107,6 +112,8 @@ class _LoanEmiCalculatorScreenState extends State<LoanEmiCalculatorScreen> {
   Widget build(BuildContext context) {
     final data = _calculateEmi();
     final currencyFmt = NumberFormat.currency(symbol: '₹ ', decimalDigits: 0);
+    final rawPrincipal = ValidationUtils.safeParseDouble(_principalController.text);
+    final displayPrincipal = rawPrincipal.isFinite && rawPrincipal > 0 ? rawPrincipal : 0.0;
 
     return ToolScaffold(
       title: 'Loan EMI Calculator',
@@ -131,7 +138,7 @@ class _LoanEmiCalculatorScreenState extends State<LoanEmiCalculatorScreen> {
             breakdowns: [
               BreakdownItem(
                 label: 'Principal Amount',
-                value: currencyFmt.format(ValidationUtils.safeParseDouble(_principalController.text)),
+                value: currencyFmt.format(displayPrincipal),
               ),
               BreakdownItem(
                 label: 'Total Interest',
@@ -242,9 +249,9 @@ class _LoanEmiCalculatorScreenState extends State<LoanEmiCalculatorScreen> {
             padding: const EdgeInsets.symmetric(vertical: 3),
             child: Row(children: [
               cell('${y.year}', flex: 1),
-              cell(fmt.format(y.principalPaid.round())),
-              cell(fmt.format(y.interestPaid.round())),
-              cell(fmt.format(y.balance.round())),
+              cell(fmt.format(y.principalPaid.isFinite ? y.principalPaid.round() : 0)),
+              cell(fmt.format(y.interestPaid.isFinite ? y.interestPaid.round() : 0)),
+              cell(fmt.format(y.balance.isFinite ? y.balance.round() : 0)),
             ]),
           ),
       ],

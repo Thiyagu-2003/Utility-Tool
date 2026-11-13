@@ -29,6 +29,9 @@ enum HardwareTab {
 /// SensorManager.getRotationMatrix). Returns null when the vectors are unusable
 /// (free fall or no magnetic reading). For a flat device it equals atan2(-mx, my).
 double? compassHeadingDegrees(double ax, double ay, double az, double mx, double my, double mz) {
+  if (!ax.isFinite || !ay.isFinite || !az.isFinite || !mx.isFinite || !my.isFinite || !mz.isFinite) {
+    return null;
+  }
   final aNorm = math.sqrt(ax * ax + ay * ay + az * az);
   if (aNorm < 0.1) return null;
   ax /= aNorm;
@@ -45,7 +48,7 @@ double? compassHeadingDegrees(double ax, double ay, double az, double mx, double
   final north = az * hx - ax * hz; // y component of a x h
   var deg = math.atan2(hy, north) * (180.0 / math.pi);
   if (deg < 0) deg += 360.0;
-  return deg;
+  return deg.isFinite ? deg : null;
 }
 
 class DeviceHardwareToolkitScreen extends StatefulWidget {
@@ -246,16 +249,18 @@ class _DeviceHardwareToolkitScreenState extends State<DeviceHardwareToolkitScree
   // Pitch (X tilt angle in degrees) & Roll (Y tilt angle in degrees)
   double _calculatePitch() {
     final g = math.sqrt(_accelX * _accelX + _accelY * _accelY + _accelZ * _accelZ);
-    if (g == 0) return 0;
+    if (g == 0 || !g.isFinite) return 0;
     final rad = math.asin((_accelY / g).clamp(-1.0, 1.0));
-    return (rad * (180.0 / math.pi)) - _calibPitch;
+    final deg = (rad * (180.0 / math.pi)) - _calibPitch;
+    return deg.isFinite ? deg : 0.0;
   }
 
   double _calculateRoll() {
     final g = math.sqrt(_accelX * _accelX + _accelY * _accelY + _accelZ * _accelZ);
-    if (g == 0) return 0;
+    if (g == 0 || !g.isFinite) return 0;
     final rad = math.asin((_accelX / g).clamp(-1.0, 1.0));
-    return (rad * (180.0 / math.pi)) - _calibRoll;
+    final deg = (rad * (180.0 / math.pi)) - _calibRoll;
+    return deg.isFinite ? deg : 0.0;
   }
 
   @override
@@ -567,10 +572,12 @@ class _DeviceHardwareToolkitScreenState extends State<DeviceHardwareToolkitScree
                 onPressed: () {
                   PreferencesService().triggerHaptic();
                   final g = math.sqrt(_accelX * _accelX + _accelY * _accelY + _accelZ * _accelZ);
-                  if (g > 0) {
+                  if (g > 0 && g.isFinite) {
                     setState(() {
-                      _calibPitch = (math.asin((_accelY / g).clamp(-1.0, 1.0)) * (180.0 / math.pi));
-                      _calibRoll = (math.asin((_accelX / g).clamp(-1.0, 1.0)) * (180.0 / math.pi));
+                      final p = (math.asin((_accelY / g).clamp(-1.0, 1.0)) * (180.0 / math.pi));
+                      final r = (math.asin((_accelX / g).clamp(-1.0, 1.0)) * (180.0 / math.pi));
+                      _calibPitch = p.isFinite ? p : 0.0;
+                      _calibRoll = r.isFinite ? r : 0.0;
                     });
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Level calibrated to current plane!')));
                   }
@@ -596,14 +603,17 @@ class _DeviceHardwareToolkitScreenState extends State<DeviceHardwareToolkitScree
     final gTotal = math.sqrt(_accelX * _accelX + _accelY * _accelY + _accelZ * _accelZ) / 9.80665;
     final gyroTotalDeg = math.sqrt(_gyroX * _gyroX + _gyroY * _gyroY + _gyroZ * _gyroZ) * (180.0 / math.pi);
     final magTotal = math.sqrt(_magX * _magX + _magY * _magY + _magZ * _magZ);
+    final safeG = gTotal.isFinite ? gTotal : 0.0;
+    final safeGyro = gyroTotalDeg.isFinite ? gyroTotalDeg : 0.0;
+    final safeMag = magTotal.isFinite ? magTotal : 0.0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ResultCard(
           title: 'Sensor Diagnostics & Status',
-          primaryResult: 'ACCEL: ${gTotal.toStringAsFixed(2)}G',
-          subtitle: 'Gyro: ${gyroTotalDeg.toStringAsFixed(1)}°/s • Mag: ${magTotal.toStringAsFixed(1)} μT',
+          primaryResult: 'ACCEL: ${safeG.toStringAsFixed(2)}G',
+          subtitle: 'Gyro: ${safeGyro.toStringAsFixed(1)}°/s • Mag: ${safeMag.toStringAsFixed(1)} μT',
           accentColor: AppColors.catDev,
         ),
         const SizedBox(height: 16),
@@ -716,7 +726,7 @@ class _DeviceHardwareToolkitScreenState extends State<DeviceHardwareToolkitScree
   }
 
   Widget _axisBar(String label, double frac, Color col) {
-    final clamped = ((frac + 1.0) / 2.0).clamp(0.0, 1.0);
+    final clamped = frac.isFinite ? ((frac + 1.0) / 2.0).clamp(0.0, 1.0) : 0.5;
     return Row(
       children: [
         SizedBox(width: 16, child: Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),

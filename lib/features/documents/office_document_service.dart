@@ -808,22 +808,25 @@ class OfficeDocumentService {
   /// Reads metadata properties from PDF document
   static PdfMetadataInfo readMetadata(Uint8List pdfBytes) {
     final doc = PdfDocument(inputBytes: pdfBytes);
-    final info = doc.documentInformation;
-    final result = PdfMetadataInfo(
-      title: info.title,
-      author: info.author,
-      subject: info.subject,
-      keywords: info.keywords,
-      creator: info.creator,
-      producer: info.producer,
-      // Malformed date strings make these getters throw; don't fail the whole read.
-      creationDate: _tryDate(() => info.creationDate),
-      modificationDate: _tryDate(() => info.modificationDate),
-      pageCount: doc.pages.count,
-      sizeBytes: pdfBytes.length,
-    );
-    doc.dispose();
-    return result;
+    try {
+      final info = doc.documentInformation;
+      final result = PdfMetadataInfo(
+        title: info.title,
+        author: info.author,
+        subject: info.subject,
+        keywords: info.keywords,
+        creator: info.creator,
+        producer: info.producer,
+        // Malformed date strings make these getters throw; don't fail the whole read.
+        creationDate: _tryDate(() => info.creationDate),
+        modificationDate: _tryDate(() => info.modificationDate),
+        pageCount: doc.pages.count,
+        sizeBytes: pdfBytes.length,
+      );
+      return result;
+    } finally {
+      doc.dispose();
+    }
   }
 
   static DateTime? _tryDate(DateTime Function() read) {
@@ -892,21 +895,24 @@ class OfficeDocumentService {
   static List<PdfBookmarkItem> readBookmarks(Uint8List pdfBytes) {
     final doc = PdfDocument(inputBytes: pdfBytes);
     final list = <PdfBookmarkItem>[];
-    // Walk nested bookmarks too: saveBookmarks clears the whole outline, so
-    // reading only top-level entries would silently delete the children.
-    void walk(PdfBookmarkBase parent) {
-      for (int i = 0; i < parent.count; i++) {
-        final bm = parent[i];
-        final dest = bm.destination ?? bm.namedDestination?.destination;
-        final pageIndex = dest != null ? doc.pages.indexOf(dest.page) + 1 : 1;
-        list.add(PdfBookmarkItem(title: bm.title, pageNumber: pageIndex > 0 ? pageIndex : 1));
-        walk(bm);
+    try {
+      // Walk nested bookmarks too: saveBookmarks clears the whole outline, so
+      // reading only top-level entries would silently delete the children.
+      void walk(PdfBookmarkBase parent) {
+        for (int i = 0; i < parent.count; i++) {
+          final bm = parent[i];
+          final dest = bm.destination ?? bm.namedDestination?.destination;
+          final pageIndex = dest != null ? doc.pages.indexOf(dest.page) + 1 : 1;
+          list.add(PdfBookmarkItem(title: bm.title, pageNumber: pageIndex > 0 ? pageIndex : 1));
+          walk(bm);
+        }
       }
-    }
 
-    walk(doc.bookmarks);
-    doc.dispose();
-    return list;
+      walk(doc.bookmarks);
+      return list;
+    } finally {
+      doc.dispose();
+    }
   }
 
   /// Adds or updates bookmarks outline in PDF document

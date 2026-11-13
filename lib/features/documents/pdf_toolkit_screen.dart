@@ -478,19 +478,21 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
       final srcDoc = PdfDocument(inputBytes: _organizePdf!.bytes);
       final outDoc = PdfDocument();
 
-      for (final p in activePages) {
-        // Setting rotation on a newly added page is a no-op in Syncfusion; it
-        // has to go on the section page settings, combined with the source's own.
-        final page = srcDoc.pages[p.originalIndex];
-        final rotation = PdfPageRotateAngle.values[(page.rotation.index + p.rotation ~/ 90) % 4];
-        OfficeDocumentService.appendPageCopy(outDoc, page, rotation: rotation);
+      try {
+        for (final p in activePages) {
+          // Setting rotation on a newly added page is a no-op in Syncfusion; it
+          // has to go on the section page settings, combined with the source's own.
+          final page = srcDoc.pages[p.originalIndex];
+          final rotation = PdfPageRotateAngle.values[(page.rotation.index + p.rotation ~/ 90) % 4];
+          OfficeDocumentService.appendPageCopy(outDoc, page, rotation: rotation);
+        }
+
+        final List<int> bytes = outDoc.saveSync();
+        await shareFileBytes(Uint8List.fromList(bytes), 'Organized_${_organizePdf!.name}');
+      } finally {
+        srcDoc.dispose();
+        outDoc.dispose();
       }
-
-      final List<int> bytes = outDoc.saveSync();
-      srcDoc.dispose();
-      outDoc.dispose();
-
-      await shareFileBytes(Uint8List.fromList(bytes), 'Organized_${_organizePdf!.name}');
     } catch (e) {
       _showError('Organize export failed: $e');
     } finally {
@@ -668,43 +670,45 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
 
     try {
       final doc = PdfDocument(inputBytes: _signPdf!.bytes);
-      final targetPageIdx = (_stampPage - 1).clamp(0, doc.pages.count - 1);
-      final page = doc.pages[targetPageIdx];
-      final graphics = page.graphics;
+      try {
+        final targetPageIdx = (_stampPage - 1).clamp(0, doc.pages.count - 1);
+        final page = doc.pages[targetPageIdx];
+        final graphics = page.graphics;
 
-      final text = _stampTextController.text.trim();
-      if (text.isNotEmpty) {
-        final font = PdfStandardFont(PdfFontFamily.helvetica, 16, style: PdfFontStyle.bold);
-        final brush = PdfSolidBrush(PdfColor(225, 29, 72)); // Rose / Red stamp
-        final pen = PdfPen(PdfColor(225, 29, 72), width: 2);
+        final text = _stampTextController.text.trim();
+        if (text.isNotEmpty) {
+          final font = PdfStandardFont(PdfFontFamily.helvetica, 16, style: PdfFontStyle.bold);
+          final brush = PdfSolidBrush(PdfColor(225, 29, 72)); // Rose / Red stamp
+          final pen = PdfPen(PdfColor(225, 29, 72), width: 2);
 
-        double x = 40;
-        double y = page.size.height - 80;
-        if (_stampPosition == 'Bottom Right') {
-          x = page.size.width - 180;
-          y = page.size.height - 80;
-        } else if (_stampPosition == 'Top Right') {
-          x = page.size.width - 180;
-          y = 40;
-        } else if (_stampPosition == 'Center') {
-          x = (page.size.width - 150) / 2;
-          y = (page.size.height - 40) / 2;
+          double x = 40;
+          double y = page.size.height - 80;
+          if (_stampPosition == 'Bottom Right') {
+            x = page.size.width - 180;
+            y = page.size.height - 80;
+          } else if (_stampPosition == 'Top Right') {
+            x = page.size.width - 180;
+            y = 40;
+          } else if (_stampPosition == 'Center') {
+            x = (page.size.width - 150) / 2;
+            y = (page.size.height - 40) / 2;
+          }
+
+          graphics.drawRectangle(pen: pen, bounds: Rect.fromLTWH(x, y, 140, 36));
+          graphics.drawString(
+            text,
+            font,
+            brush: brush,
+            bounds: Rect.fromLTWH(x + 10, y + 8, 120, 20),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center),
+          );
         }
 
-        graphics.drawRectangle(pen: pen, bounds: Rect.fromLTWH(x, y, 140, 36));
-        graphics.drawString(
-          text,
-          font,
-          brush: brush,
-          bounds: Rect.fromLTWH(x + 10, y + 8, 120, 20),
-          format: PdfStringFormat(alignment: PdfTextAlignment.center),
-        );
+        final List<int> bytes = doc.saveSync();
+        await shareFileBytes(Uint8List.fromList(bytes), 'Signed_${_signPdf!.name}');
+      } finally {
+        doc.dispose();
       }
-
-      final List<int> bytes = doc.saveSync();
-      doc.dispose();
-
-      await shareFileBytes(Uint8List.fromList(bytes), 'Signed_${_signPdf!.name}');
     } catch (e) {
       _showError('Signing/stamping failed: $e');
     } finally {
@@ -779,22 +783,24 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
 
     try {
       final doc = PdfDocument(inputBytes: _formPdf!.bytes);
-      final form = doc.form;
+      try {
+        final form = doc.form;
 
-      for (int i = 0; i < form.fields.count; i++) {
-        final field = form.fields[i];
-        final name = field.name ?? 'Field_$i';
-        if (field is PdfTextBoxField && _formControllers.containsKey(name)) {
-          field.text = _formControllers[name]!.text;
-        } else if (field is PdfCheckBoxField && _formCheckboxes.containsKey(name)) {
-          field.isChecked = _formCheckboxes[name]!;
+        for (int i = 0; i < form.fields.count; i++) {
+          final field = form.fields[i];
+          final name = field.name ?? 'Field_$i';
+          if (field is PdfTextBoxField && _formControllers.containsKey(name)) {
+            field.text = _formControllers[name]!.text;
+          } else if (field is PdfCheckBoxField && _formCheckboxes.containsKey(name)) {
+            field.isChecked = _formCheckboxes[name]!;
+          }
         }
+
+        final List<int> bytes = doc.saveSync();
+        await shareFileBytes(Uint8List.fromList(bytes), 'Filled_${_formPdf!.name}');
+      } finally {
+        doc.dispose();
       }
-
-      final List<int> bytes = doc.saveSync();
-      doc.dispose();
-
-      await shareFileBytes(Uint8List.fromList(bytes), 'Filled_${_formPdf!.name}');
     } catch (e) {
       _showError('Saving filled form failed: $e');
     } finally {
@@ -1102,7 +1108,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
             child: ReorderableListView.builder(
               scrollDirection: Axis.horizontal,
               itemCount: _selectedImages.length,
-              onReorder: (oldIdx, newIdx) => setState(() => ScanPdfService.moveItem(_selectedImages, oldIdx, newIdx)),
+              onReorderItem: (oldIdx, newIdx) => setState(() => ScanPdfService.moveItem(_selectedImages, oldIdx, newIdx)),
               itemBuilder: (context, idx) {
                 final img = _selectedImages[idx];
                 return Padding(
@@ -1247,7 +1253,7 @@ class _PdfToolkitScreenState extends State<PdfToolkitScreen> {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: _mergePdfs.length,
-            onReorder: (oldIdx, newIdx) => setState(() => ScanPdfService.moveItem(_mergePdfs, oldIdx, newIdx)),
+            onReorderItem: (oldIdx, newIdx) => setState(() => ScanPdfService.moveItem(_mergePdfs, oldIdx, newIdx)),
             itemBuilder: (context, idx) {
               final pdf = _mergePdfs[idx];
               return ListTile(

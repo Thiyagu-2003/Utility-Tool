@@ -209,10 +209,26 @@ class _OcrToolkitScreenState extends State<OcrToolkitScreen> {
         });
 
         String resultText = '';
-        if (file.path != null && File(file.path!).existsSync()) {
-          final inputImage = InputImage.fromFilePath(file.path!);
+        File? tempFile;
+        try {
+          final String imagePath;
+          if (file.path != null && File(file.path!).existsSync()) {
+            imagePath = file.path!;
+          } else {
+            final tempDir = await Directory.systemTemp.createTemp('ocr_pick');
+            tempFile = File('${tempDir.path}/input.jpg');
+            await tempFile.writeAsBytes(bytes);
+            imagePath = tempFile.path;
+          }
+          final inputImage = InputImage.fromFilePath(imagePath);
           final RecognizedText recognizedText = await _textRecognizer.processImage(inputImage);
           resultText = recognizedText.text;
+        } finally {
+          if (tempFile != null) {
+            try {
+              await tempFile.parent.delete(recursive: true);
+            } catch (_) {}
+          }
         }
         if (!mounted) return;
 

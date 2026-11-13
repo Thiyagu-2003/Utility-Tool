@@ -152,6 +152,7 @@ String? validateYamlLite(String text) {
       if (key.length >= 2 && (key[0] == '"' || key[0] == "'") && key.endsWith(key[0])) {
         key = key.substring(1, key.length - 1);
       }
+      if (keys.isEmpty) keys.add(<String>{});
       if (!keys.last.add(key)) return err(n, 'duplicate key "$key"');
       final value = content.substring(scan.colon + 1, scan.end).trim();
       if (value.isEmpty) {
@@ -161,7 +162,7 @@ String? validateYamlLite(String text) {
       } else {
         prevHasValue = scan.depth == 0;
       }
-    } else if (!dashed && indents.isNotEmpty && keys.last.isNotEmpty) {
+    } else if (!dashed && indents.isNotEmpty && keys.isNotEmpty && keys.last.isNotEmpty) {
       return err(n, 'expected "key: value" but found no ":"');
     }
   }

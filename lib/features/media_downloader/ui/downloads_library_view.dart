@@ -161,9 +161,11 @@ class _DownloadsLibraryViewState extends State<DownloadsLibraryView> {
           ),
     );
     controller.dispose();
+    if (!mounted) return;
     if (result == null || result.isEmpty || result == record.fileName) return;
 
     final err = await widget.manager.renameDownloadedFile(record.id, result);
+    if (!mounted) return;
     if (err != null) {
       _showSnack(err, isError: true);
     } else {
@@ -194,8 +196,9 @@ class _DownloadsLibraryViewState extends State<DownloadsLibraryView> {
             ],
           ),
     );
-    if (confirmed != true) return;
+    if (!mounted || confirmed != true) return;
     final err = await widget.manager.deleteDownloadedFile(record.id);
+    if (!mounted) return;
     if (err != null) {
       _showSnack(err, isError: true);
     } else {
@@ -872,8 +875,11 @@ class _FilePreviewSheetState extends State<_FilePreviewSheet> {
         if (len <= 25 * 1024 * 1024) {
           final bytes = await file.readAsBytes();
           final doc = PdfDocument(inputBytes: bytes);
-          _pdfPageCount = doc.pages.count;
-          doc.dispose();
+          try {
+            _pdfPageCount = doc.pages.count;
+          } finally {
+            doc.dispose();
+          }
         } else {
           _previewNote = 'Large PDF (${formatBytes(len)}) — tap Open to view.';
         }

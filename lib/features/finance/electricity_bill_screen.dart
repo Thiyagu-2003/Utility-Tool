@@ -59,18 +59,30 @@ class _ElectricityBillScreenState extends State<ElectricityBillScreen> {
   ];
 
   Map<String, double> _calculateBill() {
-    final ratePerUnit = ValidationUtils.safeParseDouble(_ratePerUnitController.text);
-    final fixedCharge = ValidationUtils.safeParseDouble(_fixedChargesController.text);
-    final taxPercent = ValidationUtils.safeParseDouble(_taxPercentController.text);
+    final rawRate = ValidationUtils.safeParseDouble(_ratePerUnitController.text);
+    final ratePerUnit = (rawRate.isFinite && rawRate >= 0) ? rawRate : 0.0;
+
+    final rawFixed = ValidationUtils.safeParseDouble(_fixedChargesController.text);
+    final fixedCharge = (rawFixed.isFinite && rawFixed >= 0) ? rawFixed : 0.0;
+
+    final rawTax = ValidationUtils.safeParseDouble(_taxPercentController.text);
+    final taxPercent = (rawTax.isFinite && rawTax >= 0) ? rawTax.clamp(0.0, 1000.0) : 0.0;
 
     double monthlyKwh = 0;
 
     if (_mode == CalculationMode.byUnits) {
-      monthlyKwh = ValidationUtils.safeParseDouble(_unitsController.text);
+      final rawUnits = ValidationUtils.safeParseDouble(_unitsController.text);
+      monthlyKwh = (rawUnits.isFinite && rawUnits >= 0) ? rawUnits : 0.0;
     } else {
-      final watts = ValidationUtils.safeParseDouble(_applianceWattController.text);
-      final hours = ValidationUtils.safeParseDouble(_hoursPerDayController.text);
-      final qty = ValidationUtils.safeParseDouble(_quantityController.text, defaultValue: 1);
+      final rawWatts = ValidationUtils.safeParseDouble(_applianceWattController.text);
+      final watts = (rawWatts.isFinite && rawWatts >= 0) ? rawWatts : 0.0;
+
+      final rawHours = ValidationUtils.safeParseDouble(_hoursPerDayController.text);
+      // Daily hours cannot exceed 24
+      final hours = (rawHours.isFinite && rawHours >= 0) ? rawHours.clamp(0.0, 24.0) : 0.0;
+
+      final rawQty = ValidationUtils.safeParseDouble(_quantityController.text, defaultValue: 1);
+      final qty = (rawQty.isFinite && rawQty >= 0) ? rawQty.clamp(0.0, 10000.0) : 1.0;
 
       // kWh per day = (Watts * hours * qty) / 1000
       final dailyKwh = (watts * hours * qty) / 1000.0;
@@ -85,14 +97,14 @@ class _ElectricityBillScreenState extends State<ElectricityBillScreen> {
     final annualCost = totalBill * 12.0;
 
     return {
-      'monthlyKwh': monthlyKwh,
-      'dailyKwh': monthlyKwh / 30.0,
-      'energyCharge': energyCharge,
-      'fixedCharge': fixedCharge,
-      'taxAmount': taxAmount,
-      'totalBill': totalBill,
-      'dailyCost': dailyCost,
-      'annualCost': annualCost,
+      'monthlyKwh': monthlyKwh.isFinite ? monthlyKwh : 0.0,
+      'dailyKwh': (monthlyKwh / 30.0).isFinite ? (monthlyKwh / 30.0) : 0.0,
+      'energyCharge': energyCharge.isFinite ? energyCharge : 0.0,
+      'fixedCharge': fixedCharge.isFinite ? fixedCharge : 0.0,
+      'taxAmount': taxAmount.isFinite ? taxAmount : 0.0,
+      'totalBill': totalBill.isFinite ? totalBill : 0.0,
+      'dailyCost': dailyCost.isFinite ? dailyCost : 0.0,
+      'annualCost': annualCost.isFinite ? annualCost : 0.0,
     };
   }
 

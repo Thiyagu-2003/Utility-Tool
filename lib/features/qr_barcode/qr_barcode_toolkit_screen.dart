@@ -191,13 +191,44 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
     return bytes?.buffer.asUint8List();
   }
 
+  static String _defaultBarcodeData(String type) {
+    switch (type) {
+      case 'EAN-13':
+        return '978020137962';
+      case 'EAN-8':
+        return '96385074';
+      case 'UPC-A':
+        return '012345678905';
+      case 'Code 39':
+        return 'CODE39';
+      case 'ISBN':
+        return '978020137962';
+      case 'PDF417':
+        return 'PDF417';
+      case 'Aztec':
+        return 'AZTEC';
+      case 'Code 128':
+      default:
+        return '12345678';
+    }
+  }
+
   /// [custom] uses the generator tab's colours and error-correction level;
   /// other tabs export plain black-on-white at level M.
   Future<void> _exportQrImage(String data, {String filename = 'QRCode.png', bool custom = false}) async {
+    final clean = data.trim();
+    if (clean.isEmpty) {
+      _showToast('Cannot generate QR code from empty data.');
+      return;
+    }
+    if (clean.length > 2950) {
+      _showToast('Payload is too large for a QR code (maximum ~2950 characters).');
+      return;
+    }
     PreferencesService().triggerHaptic();
     try {
       final bytes = await _renderQrPng(
-        data,
+        clean,
         fg: custom ? _qrColor : Colors.black,
         bg: custom ? _qrBgColor : Colors.white,
         level: custom ? _qrErrorLevel : QrErrorCorrectLevel.M,
@@ -284,6 +315,12 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
       return;
     }
 
+    final validLines = lines.where((l) => l.length <= 2000).toList();
+    if (validLines.isEmpty) {
+      _showToast('All items exceed maximum QR code payload length.');
+      return;
+    }
+
     setState(() => _isExportingBulk = true);
     PreferencesService().triggerHaptic();
 
@@ -302,7 +339,7 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
                 crossAxisSpacing: 16,
                 mainAxisSpacing: 16,
                 childAspectRatio: 0.85,
-                children: lines.map((item) {
+                children: validLines.map((item) {
                   return pw.Container(
                     padding: const pw.EdgeInsets.all(8),
                     decoration: pw.BoxDecoration(
@@ -803,10 +840,20 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
             decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
             child: bc.BarcodeWidget(
               barcode: _getBarcodeType(),
-              data: data.isEmpty ? '12345678' : data,
+              data: data.isEmpty ? _defaultBarcodeData(_barcodeType) : data,
               width: 240,
               height: _barcodeHeight,
               drawText: true,
+              errorBuilder: (context, error) => Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(
+                    'Invalid data for $_barcodeType barcode:\n$error',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
             ),
           ),
         ),
@@ -822,7 +869,15 @@ class _QrBarcodeToolkitScreenState extends State<QrBarcodeToolkitScreen> {
               .map((b) => DropdownMenuItem(value: b, child: Text(b)))
               .toList(),
           onChanged: (val) {
-            if (val != null) setState(() => _barcodeType = val);
+            if (val != null) {
+              setState(() {
+                _barcodeType = val;
+                final newBarcode = _getBarcodeType();
+                if (!newBarcode.isValid(_barcodeDataController.text.trim())) {
+                  _barcodeDataController.text = _defaultBarcodeData(val);
+                }
+              });
+            }
           },
         ),
         const SizedBox(height: 16),

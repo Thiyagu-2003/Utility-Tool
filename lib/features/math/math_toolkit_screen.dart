@@ -26,8 +26,8 @@ bool isPrimeInt(int val) {
   if (val < 2) return false;
   if (val == 2 || val == 3) return true;
   if (val % 2 == 0 || val % 3 == 0) return false;
-  for (int i = 5; i * i <= val; i += 6) {
-    if (val % i == 0 || val % (i + 2) == 0) return false;
+  for (int i = 5; i <= val ~/ i; i += 6) {
+    if (val % i == 0 || (i + 2 <= val ~/ (i + 2) && val % (i + 2) == 0)) return false;
   }
   return true;
 }
@@ -37,6 +37,8 @@ bool isPrimeInt(int val) {
 List<int> primesInRange(int start, int end, {int maxSpan = 200000}) {
   var lo = math.min(start, end), hi = math.max(start, end);
   if (lo < 2) lo = 2;
+  if (lo > 1000000000000) return const [];
+  if (hi > 1000000000000) hi = 1000000000000;
   if (hi - lo >= maxSpan) hi = lo + maxSpan - 1;
   return [for (var i = lo; i <= hi; i++) if (isPrimeInt(i)) i];
 }
@@ -156,7 +158,10 @@ class _MathToolkitScreenState extends State<MathToolkitScreen> {
     super.dispose();
   }
 
-  double? _val(TextEditingController c) => double.tryParse(c.text.trim());
+  double? _val(TextEditingController c) {
+    final v = double.tryParse(c.text.trim());
+    return (v != null && v.isFinite) ? v : null;
+  }
 
   // --- SCIENTIFIC CALCULATOR LOGIC ---
   void _onCalcKeyPress(String key) {
@@ -242,6 +247,9 @@ class _MathToolkitScreenState extends State<MathToolkitScreen> {
       }
 
       final disc = (b * b) - (4 * a * c);
+      if (!disc.isFinite) {
+        return {'title': 'Quadratic calculation overflow', 'res': 'Overflow', 'steps': 'Numbers too large'};
+      }
       String res;
       String steps = 'Discriminant Δ = b² - 4ac = (${fmtNum(b)})² - 4(${fmtNum(a)})(${fmtNum(c)}) = ${fmtNum(disc)}\n';
 
@@ -275,6 +283,10 @@ class _MathToolkitScreenState extends State<MathToolkitScreen> {
       final d = (a1 * b2) - (a2 * b1);
       final dx = (c1 * b2) - (c2 * b1);
       final dy = (a1 * c2) - (a2 * c1);
+
+      if (!d.isFinite || !dx.isFinite || !dy.isFinite) {
+        return {'title': '2×2 Linear System', 'res': 'Overflow', 'steps': 'Determinant calculation overflow'};
+      }
 
       if (d == 0) {
         final res = (dx == 0 && dy == 0) ? 'Infinitely many solutions (Dependent lines)' : 'No solution (Parallel lines)';
@@ -385,7 +397,7 @@ class _MathToolkitScreenState extends State<MathToolkitScreen> {
       final detB = (b[0] * b[3]) - (b[1] * b[2]);
 
       String invA;
-      if (detA != 0) {
+      if (detA.isFinite && detA.abs() > 1e-12) {
         invA = matToString([a[3] / detA, -a[1] / detA, -a[2] / detA, a[0] / detA], 2);
       } else {
         invA = 'Singular matrix (No inverse)';
@@ -410,7 +422,7 @@ class _MathToolkitScreenState extends State<MathToolkitScreen> {
       final transA = [a[0], a[3], a[6], a[1], a[4], a[7], a[2], a[5], a[8]];
 
       String invA = 'Singular matrix (No inverse)';
-      if (detA != 0) {
+      if (detA.isFinite && detA.abs() > 1e-12) {
         final adj = [
           a[4] * a[8] - a[5] * a[7], -(a[1] * a[8] - a[2] * a[7]), a[1] * a[5] - a[2] * a[4],
           -(a[3] * a[8] - a[5] * a[6]), a[0] * a[8] - a[2] * a[6], -(a[0] * a[5] - a[2] * a[3]),
@@ -866,7 +878,7 @@ class _MathToolkitScreenState extends State<MathToolkitScreen> {
         ResultCard(
           title: 'Permutations & Combinations',
           primaryResult: 'nPr = ${res['nPr']} • nCr = ${res['nCr']}',
-          subtitle: res['valid'] as bool ? 'P = ${res['formulaP']}' : 'Invalid n or r (ensure 1000 ≥ n ≥ r ≥ 0)',
+          subtitle: res['valid'] as bool ? 'P = ${res['formulaP']} • C = ${res['formulaC']}' : 'Invalid n or r (ensure 1000 ≥ n ≥ r ≥ 0)',
           accentColor: AppColors.catMath,
         ),
         const SizedBox(height: 16),

@@ -265,6 +265,10 @@ class _TextDiffCleanerScreenState extends State<TextDiffCleanerScreen> {
               icon: const Icon(Icons.copy_rounded, size: 16),
               label: const Text('Copy Diff'),
               onPressed: () {
+                if (diffs.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No diff to copy.')));
+                  return;
+                }
                 final str = diffs.map((d) {
                   final p = d.type == DiffType.added ? '+ ' : d.type == DiffType.removed ? '- ' : '  ';
                   return '$p${d.text}';
@@ -414,6 +418,10 @@ class _TextDiffCleanerScreenState extends State<TextDiffCleanerScreen> {
               icon: const Icon(Icons.copy_rounded, size: 18),
               tooltip: 'Copy Output',
               onPressed: () {
+                if (_cleanedResult.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No text to copy.')));
+                  return;
+                }
                 Clipboard.setData(ClipboardData(text: _cleanedResult));
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cleaned text copied!')));
               },

@@ -241,8 +241,8 @@ class _MediaToolsScreenState extends State<MediaToolsScreen> {
       }
       final bytes = await file.readAsBytes();
       final info = parseWav(bytes);
-      if (info == null || info.frames == 0) {
-        _showToast('${file.name} is not an uncompressed (PCM) WAV file.');
+      if (info == null || info.frames == 0 || info.durationSeconds <= 0) {
+        _showToast('${file.name} is not an uncompressed (PCM) WAV file or has zero duration.');
         return;
       }
       if (!mounted) return;

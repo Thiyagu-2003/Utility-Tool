@@ -49,6 +49,7 @@ class _AgeCalculatorScreenState extends State<AgeCalculatorScreen> {
       firstDate: DateTime(1900),
       lastDate: DateTime(2100),
     );
+    if (!mounted) return;
     if (picked != null) {
       setState(() {
         if (isBirthDate) {
@@ -81,9 +82,14 @@ class _AgeCalculatorScreenState extends State<AgeCalculatorScreen> {
     final totalWeeks = (totalDays / 7).floor();
 
     // Next birthday calculation
-    DateTime nextBirthday = DateTime.utc(asOf.year, birth.month, birth.day);
+    DateTime birthdayInYear(int y) {
+      final lastDay = DateTime.utc(y, birth.month + 1, 0).day;
+      return DateTime.utc(y, birth.month, math.min(birth.day, lastDay));
+    }
+
+    DateTime nextBirthday = birthdayInYear(asOf.year);
     if (nextBirthday.isBefore(asOf) || nextBirthday.isAtSameMomentAs(asOf)) {
-      nextBirthday = DateTime.utc(asOf.year + 1, birth.month, birth.day);
+      nextBirthday = birthdayInYear(asOf.year + 1);
     }
     final daysToNextBirthday = nextBirthday.difference(asOf).inDays;
     final untilBirthday = calculateAgeParts(asOf, nextBirthday);

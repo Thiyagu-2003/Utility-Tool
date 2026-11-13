@@ -58,10 +58,12 @@ class _CurrencyConverterScreenState extends State<CurrencyConverterScreen> {
   }
 
   double _convert(double amount, CurrencyInfo from, CurrencyInfo to) {
-    if (from.code == to.code) return amount;
+    if (from.code == to.code) return (amount.isFinite && amount >= 0) ? amount : 0.0;
+    if (from.rateToUsd <= 0 || !from.rateToUsd.isFinite || !amount.isFinite || amount < 0) return 0.0;
     // convert from -> USD -> to
     final amountInUsd = amount / from.rateToUsd;
-    return amountInUsd * to.rateToUsd;
+    final res = amountInUsd * to.rateToUsd;
+    return (res.isFinite && res >= 0) ? res : 0.0;
   }
 
   void _swapCurrencies() {
@@ -83,14 +85,14 @@ class _CurrencyConverterScreenState extends State<CurrencyConverterScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final parsedAmount = double.tryParse(_amountController.text.trim());
-    // Non-finite input ("1e999") is treated as empty rather than shown as Infinity.
-    final amount = parsedAmount != null && parsedAmount.isFinite ? parsedAmount : 0.0;
+    // Money amounts cannot be negative; non-finite input is treated as 0.0.
+    final amount = (parsedAmount != null && parsedAmount.isFinite && parsedAmount >= 0) ? parsedAmount : 0.0;
     final converted = _convert(amount, _fromCurrency, _toCurrency);
 
     final formatter = NumberFormat('#,##0.00');
     // Per-unit rates need more decimals: 1 JPY is 0.0065 USD, not 0.01.
     final rateFormatter = NumberFormat('#,##0.00####');
-    final formattedResult = '${_toCurrency.symbol} ${formatter.format(converted)}';
+    final formattedResult = '${_toCurrency.symbol} ${formatter.format(converted.isFinite ? converted : 0.0)}';
     final oneUnitRate = _convert(1, _fromCurrency, _toCurrency);
 
     return ToolScaffold(
@@ -265,7 +267,7 @@ class _CurrencyConverterScreenState extends State<CurrencyConverterScreen> {
                         const SizedBox(width: 8),
                         Flexible(
                           child: Text(
-                            '${curr.symbol} ${formatter.format(convertedVal)}',
+                            '${curr.symbol} ${formatter.format(convertedVal.isFinite ? convertedVal : 0.0)}',
                             textAlign: TextAlign.end,
                             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: accent),
                           ),

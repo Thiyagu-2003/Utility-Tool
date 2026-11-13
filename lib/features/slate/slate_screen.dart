@@ -135,7 +135,12 @@ class _SlateScreenState extends State<SlateScreen> with WidgetsBindingObserver {
     if (_undoStack.isEmpty) return;
     PreferencesService().triggerHaptic();
     setState(() {
+      _currentStroke = null;
+      _drawingPointer = null;
       _redoStack.add(List.from(_strokes));
+      if (_redoStack.length > _maxHistory) {
+        _redoStack.removeAt(0);
+      }
       _strokes = _undoStack.removeLast();
     });
     _triggerAutoSave();
@@ -145,7 +150,12 @@ class _SlateScreenState extends State<SlateScreen> with WidgetsBindingObserver {
     if (_redoStack.isEmpty) return;
     PreferencesService().triggerHaptic();
     setState(() {
+      _currentStroke = null;
+      _drawingPointer = null;
       _undoStack.add(List.from(_strokes));
+      if (_undoStack.length > _maxHistory) {
+        _undoStack.removeAt(0);
+      }
       _strokes = _redoStack.removeLast();
     });
     _triggerAutoSave();
@@ -395,6 +405,7 @@ class _SlateScreenState extends State<SlateScreen> with WidgetsBindingObserver {
   // Pointer & Gesture Event Handlers
   void _onPointerDown(PointerDownEvent event) {
     if (_isFocusMode || _drawingPointer != null) return;
+    if (!event.localPosition.dx.isFinite || !event.localPosition.dy.isFinite) return;
     _drawingPointer = event.pointer;
     _pushUndoState();
     final point = SlatePoint(event.localPosition.dx, event.localPosition.dy);
@@ -411,6 +422,7 @@ class _SlateScreenState extends State<SlateScreen> with WidgetsBindingObserver {
 
   void _onPointerMove(PointerMoveEvent event) {
     if (_currentStroke == null || event.pointer != _drawingPointer) return;
+    if (!event.localPosition.dx.isFinite || !event.localPosition.dy.isFinite) return;
     final point = SlatePoint(event.localPosition.dx, event.localPosition.dy);
 
     setState(() {
@@ -422,6 +434,12 @@ class _SlateScreenState extends State<SlateScreen> with WidgetsBindingObserver {
           points: [_currentStroke!.points.first, point],
         );
       } else {
+        // Drop points that are sub-pixel close to reduce memory overhead and redundant points
+        final last = _currentStroke!.points.last;
+        final dx = point.x - last.x;
+        final dy = point.y - last.y;
+        if ((dx * dx + dy * dy) < 0.5) return;
+
         // Freehand: append point and re-render entire stroke with smoothing
         _currentStroke = _currentStroke!.copyWith(
           points: [..._currentStroke!.points, point],

@@ -78,7 +78,7 @@ class _SoundLevelEstimatorScreenState extends State<SoundLevelEstimatorScreen> {
     try {
       await _speech.listen(
         onSoundLevelChange: (level) {
-          if (!mounted || !_isMeasuring) return;
+          if (!mounted || !_isMeasuring || !level.isFinite) return;
           // speech_to_text level is roughly -10 to 10 dB relative scale.
           // Map to typical SPL (Sound Pressure Level) range: 35 dB (quiet room) to ~95 dB
           final estimatedSpl = 50.0 + (level * 3.5) + _calibrationOffset;

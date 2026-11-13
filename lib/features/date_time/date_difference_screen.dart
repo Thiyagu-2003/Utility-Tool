@@ -29,6 +29,7 @@ class _DateDifferenceScreenState extends State<DateDifferenceScreen> {
       firstDate: DateTime(1900),
       lastDate: DateTime(2100),
     );
+    if (!mounted) return;
     if (picked != null) {
       setState(() {
         if (isStartDate) {

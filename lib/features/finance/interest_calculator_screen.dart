@@ -9,6 +9,16 @@ import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
 
+enum InterestMode {
+  compound('Compound'),
+  simple('Simple'),
+  sip('SIP'),
+  cagr('CAGR');
+
+  final String label;
+  const InterestMode(this.label);
+}
+
 class InterestCalculatorScreen extends StatefulWidget {
   const InterestCalculatorScreen({super.key});
 
@@ -20,38 +30,140 @@ class _InterestCalculatorScreenState extends State<InterestCalculatorScreen> {
   final TextEditingController _principalController = TextEditingController(text: '50000');
   final TextEditingController _rateController = TextEditingController(text: '7.5');
   final TextEditingController _timeController = TextEditingController(text: '5');
-  bool _isCompound = true;
+  InterestMode _mode = InterestMode.compound;
   int _compoundFrequency = 1; // 1 = Annually, 4 = Quarterly, 12 = Monthly
 
-  Map<String, double> _calculateInterest() {
-    final p = ValidationUtils.safeParseDouble(_principalController.text).clamp(0.0, double.infinity);
-    final r = ValidationUtils.safeParseDouble(_rateController.text).clamp(0.0, double.infinity) / 100;
-    final t = ValidationUtils.safeParseDouble(_timeController.text).clamp(0.0, double.infinity);
+  Map<String, dynamic> _calculateData() {
+    final currencyFmt = NumberFormat.currency(symbol: '₹ ', decimalDigits: 2);
 
-    double totalAmount = 0;
-    double interestEarned = 0;
+    switch (_mode) {
+      case InterestMode.compound:
+        final rawP = ValidationUtils.safeParseDouble(_principalController.text);
+        final p = (rawP.isFinite && rawP > 0) ? rawP : 0.0;
+        final rawR = ValidationUtils.safeParseDouble(_rateController.text);
+        final r = (rawR.isFinite && rawR >= 0) ? rawR / 100 : 0.0;
+        final rawT = ValidationUtils.safeParseDouble(_timeController.text);
+        final t = (rawT.isFinite && rawT >= 0 && rawT <= 100) ? rawT : 0.0;
 
-    if (_isCompound) {
-      final n = _compoundFrequency;
-      totalAmount = p * math.pow(1 + (r / n), n * t).toDouble();
-      interestEarned = totalAmount - p;
-    } else {
-      interestEarned = p * r * t;
-      totalAmount = p + interestEarned;
+        final n = _compoundFrequency > 0 ? _compoundFrequency : 1;
+        double totalAmount = p * math.pow(1 + (r / n), n * t).toDouble();
+        double interestEarned = totalAmount - p;
+
+        if (!totalAmount.isFinite || !interestEarned.isFinite) {
+          totalAmount = p;
+          interestEarned = 0.0;
+        }
+        final growthPercent = p > 0 ? (interestEarned / p) * 100 : 0.0;
+        final safeGrowth = growthPercent.isFinite ? growthPercent : 0.0;
+
+        return {
+          'title': 'Maturity Value',
+          'primary': currencyFmt.format(totalAmount),
+          'subtitle': 'Total Interest: ${currencyFmt.format(interestEarned)} (+${safeGrowth.toStringAsFixed(1)}%)',
+          'breakdowns': [
+            BreakdownItem(label: 'Principal Invested', value: currencyFmt.format(p)),
+            BreakdownItem(label: 'Interest Earned', value: currencyFmt.format(interestEarned)),
+            BreakdownItem(label: 'Return on Investment', value: '${safeGrowth.toStringAsFixed(1)}%'),
+          ],
+        };
+
+      case InterestMode.simple:
+        final rawP = ValidationUtils.safeParseDouble(_principalController.text);
+        final p = (rawP.isFinite && rawP > 0) ? rawP : 0.0;
+        final rawR = ValidationUtils.safeParseDouble(_rateController.text);
+        final r = (rawR.isFinite && rawR >= 0) ? rawR / 100 : 0.0;
+        final rawT = ValidationUtils.safeParseDouble(_timeController.text);
+        final t = (rawT.isFinite && rawT >= 0 && rawT <= 100) ? rawT : 0.0;
+
+        double interestEarned = p * r * t;
+        double totalAmount = p + interestEarned;
+
+        if (!totalAmount.isFinite || !interestEarned.isFinite) {
+          totalAmount = p;
+          interestEarned = 0.0;
+        }
+        final growthPercent = p > 0 ? (interestEarned / p) * 100 : 0.0;
+        final safeGrowth = growthPercent.isFinite ? growthPercent : 0.0;
+
+        return {
+          'title': 'Maturity Value',
+          'primary': currencyFmt.format(totalAmount),
+          'subtitle': 'Total Interest: ${currencyFmt.format(interestEarned)} (+${safeGrowth.toStringAsFixed(1)}%)',
+          'breakdowns': [
+            BreakdownItem(label: 'Principal Invested', value: currencyFmt.format(p)),
+            BreakdownItem(label: 'Interest Earned', value: currencyFmt.format(interestEarned)),
+            BreakdownItem(label: 'Return on Investment', value: '${safeGrowth.toStringAsFixed(1)}%'),
+          ],
+        };
+
+      case InterestMode.sip:
+        final rawMonthly = ValidationUtils.safeParseDouble(_principalController.text);
+        final monthly = (rawMonthly.isFinite && rawMonthly > 0) ? rawMonthly : 0.0;
+        final rawRate = ValidationUtils.safeParseDouble(_rateController.text);
+        final rate = (rawRate.isFinite && rawRate >= 0) ? rawRate : 0.0;
+        final rawYears = ValidationUtils.safeParseDouble(_timeController.text);
+        final years = (rawYears.isFinite && rawYears >= 0 && rawYears <= 100) ? rawYears : 0.0;
+
+        final totalMonths = (years * 12).round();
+        final totalInvested = monthly * totalMonths;
+        double maturityValue = 0.0;
+
+        if (totalMonths <= 0 || monthly <= 0) {
+          maturityValue = 0.0;
+        } else if (rate == 0) {
+          maturityValue = totalInvested;
+        } else {
+          final i = (rate / 100) / 12;
+          final growth = math.pow(1 + i, totalMonths).toDouble();
+          maturityValue = growth.isFinite ? monthly * ((growth - 1) / i) * (1 + i) : totalInvested;
+        }
+
+        if (!maturityValue.isFinite || maturityValue < totalInvested) maturityValue = totalInvested;
+        final wealthGained = maturityValue - totalInvested;
+        final growthPercent = totalInvested > 0 ? (wealthGained / totalInvested) * 100 : 0.0;
+        final safeGrowth = growthPercent.isFinite ? growthPercent : 0.0;
+
+        return {
+          'title': 'Expected Total Wealth (SIP)',
+          'primary': currencyFmt.format(maturityValue),
+          'subtitle': 'Total Invested: ${currencyFmt.format(totalInvested)} • Wealth Gained: ${currencyFmt.format(wealthGained)}',
+          'breakdowns': [
+            BreakdownItem(label: 'Invested Amount', value: currencyFmt.format(totalInvested)),
+            BreakdownItem(label: 'Estimated Returns', value: currencyFmt.format(wealthGained)),
+            BreakdownItem(label: 'Total Growth %', value: '${safeGrowth.toStringAsFixed(1)}%'),
+          ],
+        };
+
+      case InterestMode.cagr:
+        final rawBeginning = ValidationUtils.safeParseDouble(_principalController.text);
+        final beginning = (rawBeginning.isFinite && rawBeginning > 0) ? rawBeginning : 0.0;
+        final rawEnding = ValidationUtils.safeParseDouble(_rateController.text);
+        final ending = (rawEnding.isFinite && rawEnding > 0) ? rawEnding : 0.0;
+        final rawYears = ValidationUtils.safeParseDouble(_timeController.text);
+        final years = (rawYears.isFinite && rawYears > 0 && rawYears <= 100) ? rawYears : 0.0;
+
+        double cagrPercent = 0.0;
+        if (beginning > 0 && ending > 0 && years > 0) {
+          final growth = math.pow(ending / beginning, 1 / years).toDouble();
+          if (growth.isFinite) {
+            cagrPercent = (growth - 1) * 100;
+          }
+        }
+        final safeCagr = cagrPercent.isFinite ? cagrPercent : 0.0;
+        final absoluteGain = ending - beginning;
+        final absolutePercent = beginning > 0 ? (absoluteGain / beginning) * 100 : 0.0;
+
+        return {
+          'title': 'CAGR (Annual Growth Rate)',
+          'primary': '${safeCagr.toStringAsFixed(2)}% p.a.',
+          'subtitle': 'Absolute Gain: ${currencyFmt.format(absoluteGain >= 0 ? absoluteGain : 0)} (${absolutePercent.toStringAsFixed(1)}%)',
+          'breakdowns': [
+            BreakdownItem(label: 'Beginning Value', value: currencyFmt.format(beginning)),
+            BreakdownItem(label: 'Ending Value', value: currencyFmt.format(ending)),
+            BreakdownItem(label: 'Absolute Return', value: '${absolutePercent.toStringAsFixed(1)}%'),
+          ],
+        };
     }
-
-    // Huge rate/period overflow a double; show zeros instead of Infinity/NaN.
-    if (!totalAmount.isFinite || !interestEarned.isFinite) {
-      return {'principal': p, 'interestEarned': 0, 'totalAmount': p, 'growthPercent': 0};
-    }
-    final growthPercent = p > 0 ? (interestEarned / p) * 100 : 0.0;
-
-    return {
-      'principal': p,
-      'interestEarned': interestEarned,
-      'totalAmount': totalAmount,
-      'growthPercent': growthPercent,
-    };
   }
 
   @override
@@ -64,11 +176,10 @@ class _InterestCalculatorScreenState extends State<InterestCalculatorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final data = _calculateInterest();
-    final currencyFmt = NumberFormat.currency(symbol: '₹ ', decimalDigits: 2);
+    final data = _calculateData();
 
     return ToolScaffold(
-      title: 'Interest Calculator',
+      title: 'Interest & Investment Calculator',
       category: ToolCategory.finance,
       toolId: 'interest_calc',
       onReset: () {
@@ -76,14 +187,14 @@ class _InterestCalculatorScreenState extends State<InterestCalculatorScreen> {
           _principalController.text = '50000';
           _rateController.text = '7.5';
           _timeController.text = '5';
-          _isCompound = true;
+          _mode = InterestMode.compound;
           _compoundFrequency = 1;
         });
       },
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Simple vs Compound Chip
+          // Mode Selector Chips
           Container(
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
@@ -91,89 +202,74 @@ class _InterestCalculatorScreenState extends State<InterestCalculatorScreen> {
               borderRadius: BorderRadius.circular(16),
             ),
             child: Row(
-              children: [
-                Expanded(
+              children: InterestMode.values.map((mode) {
+                final isSelected = _mode == mode;
+                return Expanded(
                   child: ChoiceChip(
-                    label: const Center(child: Text('Compound Interest')),
-                    selected: _isCompound,
+                    label: Center(child: Text(mode.label)),
+                    selected: isSelected,
                     selectedColor: AppColors.catFinance,
                     labelStyle: TextStyle(
-                      color: _isCompound ? Colors.white : null,
+                      color: isSelected ? Colors.white : null,
                       fontWeight: FontWeight.bold,
+                      fontSize: 12,
                     ),
                     onSelected: (val) {
                       if (val) {
                         PreferencesService().triggerHaptic();
-                        setState(() => _isCompound = true);
+                        setState(() {
+                          _mode = mode;
+                          if (mode == InterestMode.sip && _principalController.text == '50000') {
+                            _principalController.text = '5000';
+                            _rateController.text = '12';
+                          } else if (mode == InterestMode.cagr && _rateController.text == '7.5') {
+                            _principalController.text = '10000';
+                            _rateController.text = '25000';
+                          }
+                        });
                       }
                     },
                   ),
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: ChoiceChip(
-                    label: const Center(child: Text('Simple Interest')),
-                    selected: !_isCompound,
-                    selectedColor: AppColors.catFinance,
-                    labelStyle: TextStyle(
-                      color: !_isCompound ? Colors.white : null,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    onSelected: (val) {
-                      if (val) {
-                        PreferencesService().triggerHaptic();
-                        setState(() => _isCompound = false);
-                      }
-                    },
-                  ),
-                ),
-              ],
+                );
+              }).toList(),
             ),
           ),
           const SizedBox(height: 20),
 
           ResultCard(
-            title: 'Maturity Value',
-            primaryResult: currencyFmt.format(data['totalAmount']),
-            subtitle: 'Total Interest: ${currencyFmt.format(data['interestEarned'])} (+${data['growthPercent']!.toStringAsFixed(1)}%)',
+            title: data['title'] as String,
+            primaryResult: data['primary'] as String,
+            subtitle: data['subtitle'] as String,
             accentColor: AppColors.catFinance,
-            breakdowns: [
-              BreakdownItem(
-                label: 'Principal Invested',
-                value: currencyFmt.format(data['principal']),
-              ),
-              BreakdownItem(
-                label: 'Interest Earned',
-                value: currencyFmt.format(data['interestEarned']),
-              ),
-              BreakdownItem(
-                label: 'Return on Investment',
-                value: '${data['growthPercent']!.toStringAsFixed(1)}%',
-              ),
-            ],
+            breakdowns: data['breakdowns'] as List<BreakdownItem>,
           ),
           const SizedBox(height: 24),
 
           ModernTextField(
-            label: 'Principal Investment Amount',
+            label: _mode == InterestMode.sip
+                ? 'Monthly Investment Amount'
+                : (_mode == InterestMode.cagr ? 'Beginning / Initial Investment' : 'Principal Investment Amount'),
             controller: _principalController,
-            hintText: '50000',
+            hintText: _mode == InterestMode.sip ? '5000' : '50000',
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             prefixText: '₹',
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 16),
           ModernTextField(
-            label: 'Annual Interest Rate (%)',
+            label: _mode == InterestMode.cagr
+                ? 'Ending / Final Value'
+                : (_mode == InterestMode.sip ? 'Expected Annual Return (%)' : 'Annual Interest Rate (%)'),
             controller: _rateController,
-            hintText: '7.5',
+            hintText: _mode == InterestMode.cagr ? '25000' : '7.5',
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            suffixText: '% p.a.',
+            prefixText: _mode == InterestMode.cagr ? '₹' : null,
+            suffixText: _mode == InterestMode.cagr ? null : '% p.a.',
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 16),
           ModernTextField(
-            label: 'Investment Period (Years)',
+            label: _mode == InterestMode.cagr ? 'Duration / Period (Years)' : 'Investment Period (Years)',
             controller: _timeController,
             hintText: '5',
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -181,7 +277,7 @@ class _InterestCalculatorScreenState extends State<InterestCalculatorScreen> {
             onChanged: (_) => setState(() {}),
           ),
 
-          if (_isCompound) ...[
+          if (_mode == InterestMode.compound) ...[
             const SizedBox(height: 16),
             const Text(
               'Compounding Frequency',

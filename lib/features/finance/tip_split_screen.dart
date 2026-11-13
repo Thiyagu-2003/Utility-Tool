@@ -46,8 +46,10 @@ class _TipSplitScreenState extends State<TipSplitScreen> {
   final _newMemberCtrl = TextEditingController();
 
   Map<String, double> _calculateSplit() {
-    final bill = ValidationUtils.safeParseDouble(_billController.text);
-    final tipAmount = bill * (_tipPercent / 100);
+    final rawBill = ValidationUtils.safeParseDouble(_billController.text);
+    final bill = (rawBill.isFinite && rawBill > 0) ? rawBill : 0.0;
+    final tipPct = (_tipPercent.isFinite && _tipPercent >= 0) ? _tipPercent : 0.0;
+    final tipAmount = bill * (tipPct / 100);
     final totalBill = bill + tipAmount;
     final count = _splitCount < 1 ? 1 : _splitCount;
 
@@ -57,11 +59,11 @@ class _TipSplitScreenState extends State<TipSplitScreen> {
 
     return {
       'bill': bill,
-      'tipAmount': tipAmount,
-      'totalBill': totalBill,
-      'perPersonTotal': perPersonTotal,
-      'perPersonTip': perPersonTip,
-      'perPersonBill': perPersonBill,
+      'tipAmount': tipAmount.isFinite ? tipAmount : 0.0,
+      'totalBill': totalBill.isFinite ? totalBill : 0.0,
+      'perPersonTotal': perPersonTotal.isFinite ? perPersonTotal : 0.0,
+      'perPersonTip': perPersonTip.isFinite ? perPersonTip : 0.0,
+      'perPersonBill': perPersonBill.isFinite ? perPersonBill : 0.0,
     };
   }
 
@@ -73,14 +75,18 @@ class _TipSplitScreenState extends State<TipSplitScreen> {
     final Map<String, double> paidMap = {for (final m in _tripMembers) m: 0.0};
 
     for (final exp in _tripExpenses) {
-      totalExp += exp.amount;
-      paidMap[exp.paidBy] = (paidMap[exp.paidBy] ?? 0) + exp.amount;
+      if (exp.amount.isFinite && exp.amount > 0) {
+        totalExp += exp.amount;
+        paidMap[exp.paidBy] = (paidMap[exp.paidBy] ?? 0) + exp.amount;
+      }
     }
 
-    final perPerson = totalExp / _tripMembers.length;
+    final safeTotalExp = totalExp.isFinite ? totalExp : 0.0;
+    final perPerson = _tripMembers.isNotEmpty ? safeTotalExp / _tripMembers.length : 0.0;
+    final safePerPerson = perPerson.isFinite ? perPerson : 0.0;
     final Map<String, double> netBalance = {};
     for (final m in _tripMembers) {
-      netBalance[m] = (paidMap[m] ?? 0) - perPerson;
+      netBalance[m] = (paidMap[m] ?? 0) - safePerPerson;
     }
 
     final List<MapEntry<String, double>> debtors = [];
@@ -96,10 +102,13 @@ class _TipSplitScreenState extends State<TipSplitScreen> {
 
     final List<String> settlements = [];
     int dIdx = 0, cIdx = 0;
+    int maxLoops = 0;
     while (dIdx < debtors.length && cIdx < creditors.length) {
+      if (++maxLoops > 1000) break;
       final debtor = debtors[dIdx];
       final creditor = creditors[cIdx];
       final settleAmt = math.min(debtor.value, creditor.value);
+      if (settleAmt <= 0.005 || !settleAmt.isFinite) break;
 
       settlements.add('${debtor.key} pays ${creditor.key}: ₹${settleAmt.toStringAsFixed(2)}');
 
@@ -111,8 +120,8 @@ class _TipSplitScreenState extends State<TipSplitScreen> {
     }
 
     return {
-      'total': '₹${totalExp.toStringAsFixed(2)}',
-      'perPerson': '₹${perPerson.toStringAsFixed(2)}',
+      'total': '₹${safeTotalExp.toStringAsFixed(2)}',
+      'perPerson': '₹${safePerPerson.toStringAsFixed(2)}',
       'settlements': settlements,
     };
   }
@@ -144,7 +153,7 @@ class _TipSplitScreenState extends State<TipSplitScreen> {
   void _addExpense() {
     final title = _newExpTitleCtrl.text.trim();
     final amt = double.tryParse(_newExpAmtCtrl.text.trim());
-    if (title.isEmpty || amt == null || amt <= 0) return;
+    if (title.isEmpty || amt == null || amt <= 0 || !amt.isFinite) return;
 
     setState(() {
       _tripExpenses.add(TripExpenseItem(title: title, amount: amt, paidBy: _newExpPayer));

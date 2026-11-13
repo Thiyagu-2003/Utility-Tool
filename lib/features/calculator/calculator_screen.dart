@@ -16,13 +16,15 @@ double evaluateCalculatorExpression(String expression, {bool degrees = false}) {
       .replaceAll('%', '*(0.01)')
       .replaceAll('π', '(pi)')
       .replaceAll('e', '(e)')
-      .replaceAll('lg(', 'log(10,');
+      .replaceAll('lg(', 'log(10,')
+      .replaceAllMapped(RegExp(r'(?<![a-zA-Z0-9_])log\((?!10,)'), (m) => 'log(10,');
   // Auto-close any brackets the user left open, e.g. "sqrt(9".
   final open = '('.allMatches(exp).length - ')'.allMatches(exp).length;
   if (open > 0) exp += ')' * open;
   exp = _wrapSignedExponents(exp);
   final parsed = GrammarParser(const ParserOptions(implicitMultiplication: true)).parse(exp);
-  return _CalculatorEvaluator(degrees).evaluate(parsed).toDouble() + 0.0;
+  final res = _CalculatorEvaluator(degrees).evaluate(parsed).toDouble() + 0.0;
+  return res.abs() < 1e-15 ? 0.0 : res;
 }
 
 /// The grammar rejects `2^-1`; rewrite a signed exponent as `2^(-1)`.
@@ -125,6 +127,11 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     PreferencesService().triggerHaptic();
 
     setState(() {
+      if (_expression == 'Error' || _expression == 'Format error') {
+        _expression = '';
+        _previewResult = '0';
+      }
+
       if (value == 'AC') {
         _expression = '';
         _previewResult = '0';
@@ -152,9 +159,12 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         _expression += 'sqrt(';
         _calculatePreview();
       } else if (value == '.') {
-        final last = _expression.isEmpty ? '' : _expression[_expression.length - 1];
-        _expression += RegExp(r'[0-9]').hasMatch(last) ? '.' : '0.';
-        _calculatePreview();
+        final lastChunk = _expression.split(RegExp(r'[+\-×÷^()]')).last;
+        if (!lastChunk.contains('.')) {
+          final last = _expression.isEmpty ? '' : _expression[_expression.length - 1];
+          _expression += RegExp(r'[0-9]').hasMatch(last) ? '.' : '0.';
+          _calculatePreview();
+        }
       } else if (value == 'x^y') {
         if (_expression.isNotEmpty) _expression += '^';
       } else if (['sin', 'cos', 'tan', 'ln', 'lg'].contains(value)) {
@@ -194,7 +204,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       if (eval.isNaN || eval.isInfinite) {
         _previewResult = 'Error';
       } else {
-        _previewResult = _formatter.format(eval);
+        _previewResult = (eval == 0.0 || eval.abs() < 1e-15) ? '0' : _formatter.format(eval);
       }
     } catch (_) {
       // Expression incomplete while typing
@@ -211,7 +221,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
           _previewResult = 'Error';
         });
       } else {
-        final resultStr = _formatter.format(eval);
+        final resultStr = (eval == 0.0 || eval.abs() < 1e-15) ? '0' : _formatter.format(eval);
         PreferencesService().addCalculationRecord(
           toolTitle: 'Calculator',
           expression: _expression,

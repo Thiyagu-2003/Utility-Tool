@@ -308,7 +308,10 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
     if (_isTimerRunning) return;
     setState(() => _isTimerRunning = true);
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) return;
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
       if (_timerSecondsRemaining > 1) {
         setState(() => _timerSecondsRemaining--);
       } else {
@@ -773,8 +776,8 @@ class _HealthFitnessToolkitScreenState extends State<HealthFitnessToolkitScreen>
   // --- TAB 6: WORKOUT INTERVAL TIMER ---
   Widget _buildIntervalTimerTab(bool isDark) {
     final progress = _isWorkPhase
-        ? (_timerSecondsRemaining / _timerWorkSec).clamp(0.0, 1.0)
-        : (_timerSecondsRemaining / _timerRestSec).clamp(0.0, 1.0);
+        ? (_timerWorkSec > 0 ? (_timerSecondsRemaining / _timerWorkSec).clamp(0.0, 1.0) : 0.0)
+        : (_timerRestSec > 0 ? (_timerSecondsRemaining / _timerRestSec).clamp(0.0, 1.0) : 0.0);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
