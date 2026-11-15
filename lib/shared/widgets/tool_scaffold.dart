@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../core/localization/app_localizations.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
@@ -63,7 +64,7 @@ class ToolScaffold extends StatelessWidget {
               title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18),
             ),
             const SizedBox(height: 2),
             if (subtitle != null)
@@ -71,7 +72,7 @@ class ToolScaffold extends StatelessWidget {
                 subtitle!,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
+                style: GoogleFonts.outfit(
                   color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
@@ -86,7 +87,7 @@ class ToolScaffold extends StatelessWidget {
                 ),
                 child: Text(
                   categoryLabel(context, category).toUpperCase(),
-                  style: TextStyle(
+                  style: GoogleFonts.outfit(
                     color: category.color,
                     fontSize: 10,
                     fontWeight: FontWeight.w700,

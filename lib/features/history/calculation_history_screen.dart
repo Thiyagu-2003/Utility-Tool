@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
@@ -72,7 +73,27 @@ class _CalculationHistoryScreenState extends State<CalculationHistoryScreen> {
     return Scaffold(
       backgroundColor: isDark ? AppColors.darkBackground : AppColors.lightBackground,
       appBar: AppBar(
-        title: const Text('Calculation History', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 8.0),
+          child: IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: isDark ? AppColors.darkCard : AppColors.lightCardHover,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                ),
+              ),
+              child: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
+            ),
+            onPressed: () {
+              prefs.triggerHaptic();
+              Navigator.of(context).pop();
+            },
+          ),
+        ),
+        title: Text('Calculation History', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
         actions: [
           AnimatedBuilder(
             animation: prefs,

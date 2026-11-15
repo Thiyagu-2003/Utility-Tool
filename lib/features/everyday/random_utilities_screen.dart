@@ -5,6 +5,7 @@ import '../../core/models/tool_model.dart';
 import '../../core/services/preferences_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../shared/widgets/tool_scaffold.dart';
+import '../../shared/widgets/feature_tab_selector.dart';
 
 enum EverydayTab {
   random('Random Number', Icons.tag_rounded),
@@ -188,93 +189,16 @@ class _RandomUtilitiesScreenState extends State<RandomUtilitiesScreen>
   }
 
   Widget _buildSegmentedTabSelector(bool isDark) {
-    return Container(
-      height: 52,
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE6EAF2),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        children: [
-          _buildTabItem(EverydayTab.random, 'Number', Icons.tag_rounded, isDark),
-          _buildTabItem(EverydayTab.dice, 'Dice', Icons.grid_view_rounded, isDark),
-          _buildTabItem(
-            EverydayTab.coin,
-            'Coin',
-            Icons.monetization_on_rounded,
-            isDark,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTabItem(
-    EverydayTab tab,
-    String label,
-    IconData icon,
-    bool isDark,
-  ) {
-    final isSelected = _activeTab == tab;
-
-    return Expanded(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () {
-          if (_activeTab != tab) {
-            PreferencesService().triggerHaptic();
-            setState(() => _activeTab = tab);
-          }
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeInOut,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: isSelected
-                ? const Color(0xFF0F172A)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: isSelected
-                ? [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.12),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 18,
-                color: isSelected
-                    ? Colors.white
-                    : (isDark
-                        ? const Color(0xFF94A3B8)
-                        : const Color(0xFF475569)),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 14.5,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                  color: isSelected
-                      ? Colors.white
-                      : (isDark
-                          ? const Color(0xFF94A3B8)
-                          : const Color(0xFF475569)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return FeatureTabSelector<EverydayTab>(
+      tabs: EverydayTab.values
+          .map((tab) => FeatureTabItem(value: tab, label: tab.label, icon: tab.icon))
+          .toList(),
+      activeTab: _activeTab,
+      accentColor: AppColors.primaryOrange,
+      title: 'Random & Decision',
+      onTabSelected: (tab) {
+        setState(() => _activeTab = tab);
+      },
     );
   }
 

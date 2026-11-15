@@ -9,6 +9,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/utils/share_utils.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
+import '../../shared/widgets/feature_tab_selector.dart';
 import 'file_zip_utils.dart';
 import '../ocr_tools/ocr_toolkit_screen.dart';
 
@@ -388,23 +389,16 @@ Use this plan in a video editor or converter: ToolBox Pro cannot re-encode video
   }
 
   Widget _buildSegmentChips(bool isDark) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: MediaTab.values.map((tab) {
-        final isSelected = _activeTab == tab;
-        return ChoiceChip(
-          showCheckmark: false,
-          avatar: Icon(tab.icon, size: 16, color: isSelected ? Colors.white : null),
-          label: Text(tab.label, style: isSelected ? const TextStyle(color: Colors.white) : null),
-          selected: isSelected,
-          selectedColor: AppColors.catPdf,
-          onSelected: (_) {
-            PreferencesService().triggerHaptic();
-            setState(() => _activeTab = tab);
-          },
-        );
-      }).toList(),
+    return FeatureTabSelector<MediaTab>(
+      tabs: MediaTab.values
+          .map((tab) => FeatureTabItem(value: tab, label: tab.label, icon: tab.icon))
+          .toList(),
+      activeTab: _activeTab,
+      accentColor: AppColors.catMedia,
+      title: 'Audio & Video Tools',
+      onTabSelected: (tab) {
+        setState(() => _activeTab = tab);
+      },
     );
   }
 

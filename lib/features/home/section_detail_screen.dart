@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../core/localization/app_localizations.dart';
 import '../../core/models/tool_model.dart';
 import '../../core/registry/tool_registry.dart';
@@ -26,9 +27,29 @@ class SectionDetailScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: isDark ? AppColors.darkBackground : AppColors.lightBackground,
       appBar: AppBar(
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 8.0),
+          child: IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: isDark ? AppColors.darkCard : AppColors.lightCardHover,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                ),
+              ),
+              child: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
+            ),
+            onPressed: () {
+              PreferencesService().triggerHaptic();
+              Navigator.of(context).pop();
+            },
+          ),
+        ),
         title: Text(
           categoryLabel(context, category),
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18),
         ),
         actions: [
           Container(
@@ -45,7 +66,7 @@ class SectionDetailScreen extends StatelessWidget {
                 const SizedBox(width: 4),
                 Text(
                   '${tools.length} ${tools.length == 1 ? 'tool' : 'tools'}',
-                  style: TextStyle(
+                  style: GoogleFonts.outfit(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                     color: category.color,
@@ -98,7 +119,7 @@ class SectionDetailScreen extends StatelessWidget {
                     children: [
                       Text(
                         categoryLabel(context, category),
-                        style: TextStyle(
+                        style: GoogleFonts.outfit(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
                           color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
@@ -107,8 +128,9 @@ class SectionDetailScreen extends StatelessWidget {
                       const SizedBox(height: 3),
                       Text(
                         categoryDescription(context, category),
-                        style: TextStyle(
+                        style: GoogleFonts.outfit(
                           fontSize: 13,
+                          fontWeight: FontWeight.w500,
                           color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
                         ),
                       ),
@@ -122,7 +144,7 @@ class SectionDetailScreen extends StatelessWidget {
           const SizedBox(height: 20),
           Text(
             'AVAILABLE TOOLS',
-            style: TextStyle(
+            style: GoogleFonts.outfit(
               fontSize: 12,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.0,
@@ -186,7 +208,7 @@ class SectionDetailScreen extends StatelessWidget {
                             children: [
                               Text(
                                 tool.title,
-                                style: TextStyle(
+                                style: GoogleFonts.outfit(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 15,
                                   color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
@@ -195,8 +217,9 @@ class SectionDetailScreen extends StatelessWidget {
                               const SizedBox(height: 3),
                               Text(
                                 tool.description,
-                                style: TextStyle(
+                                style: GoogleFonts.outfit(
                                   fontSize: 12,
+                                  fontWeight: FontWeight.w500,
                                   color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
                                 ),
                               ),

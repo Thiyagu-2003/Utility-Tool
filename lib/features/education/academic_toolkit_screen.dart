@@ -6,6 +6,7 @@ import '../../core/theme/app_colors.dart';
 import '../../shared/widgets/modern_text_field.dart';
 import '../../shared/widgets/result_card.dart';
 import '../../shared/widgets/tool_scaffold.dart';
+import '../../shared/widgets/feature_tab_selector.dart';
 
 // Re-export pure math helper functions so existing callers/tests continue to resolve
 export '../math/math_toolkit_screen.dart'
@@ -210,30 +211,16 @@ class _AcademicToolkitScreenState extends State<AcademicToolkitScreen> {
   }
 
   Widget _buildTabChips(bool isDark) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: AcademicTab.values.map((tab) {
-          final isSelected = _activeTab == tab;
-          return Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: FilterChip(
-              avatar: Icon(tab.icon, size: 16, color: isSelected ? Colors.white : AppColors.catEducation),
-              label: Text(tab.label),
-              selected: isSelected,
-              onSelected: (_) {
-                PreferencesService().triggerHaptic();
-                setState(() => _activeTab = tab);
-              },
-              selectedColor: AppColors.catEducation,
-              labelStyle: TextStyle(
-                color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          );
-        }).toList(),
-      ),
+    return FeatureTabSelector<AcademicTab>(
+      tabs: AcademicTab.values
+          .map((tab) => FeatureTabItem(value: tab, label: tab.label, icon: tab.icon))
+          .toList(),
+      activeTab: _activeTab,
+      accentColor: AppColors.catEducation,
+      title: 'Academic Calculators',
+      onTabSelected: (tab) {
+        setState(() => _activeTab = tab);
+      },
     );
   }
 

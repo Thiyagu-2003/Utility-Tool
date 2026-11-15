@@ -20,6 +20,8 @@ class AppColors {
   static const Color catEducation = Color(0xFFC026D3); // Education
   static const Color catHomeTravel = Color(0xFFCA8A04); // Home & Travel
   static const Color catImage = Color(0xFFEA580C);
+  static const Color catMedia = Color(0xFF9333EA); // Media
+  static const Color catCalculate = catMath;
 
   // Dark Theme Neutral Colors
   static const Color darkBg = Color(0xFF0F172A); // Slate 900
