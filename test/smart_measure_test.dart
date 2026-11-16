@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -321,6 +323,41 @@ void main() {
       // Delete
       await storage.deleteMeasurement('test_123');
       expect(storage.items.isEmpty, isTrue);
+    });
+  });
+
+  group('Audit regressions', () {
+    test('Camera down-angle: upright = horizon, flat face-up = floor, tilted back = negative', () {
+      expect(MeasurementMathEngine.cameraDownAngleDegrees(0, 9.81, 0), closeTo(0, 0.01));
+      expect(MeasurementMathEngine.cameraDownAngleDegrees(0, 0, 9.81), closeTo(90, 0.01));
+      expect(MeasurementMathEngine.cameraDownAngleDegrees(0, 9.81, -9.81), closeTo(-45, 0.01));
+    });
+
+    test('Upward ray is never mirrored below/above the camera', () {
+      final a = SpatialAnchor.fromRayPlane(
+        id: 'up',
+        normalizedScreen: const Offset(0.5, 0.5),
+        currentYawDeg: 0,
+        currentPitchDeg: -20, // aiming 20 degrees above the horizon
+        currentRollDeg: 0,
+        surfaceHeightMeters: 1.0,
+      );
+      expect(a.worldY, greaterThan(0)); // stays on the true (upward) ray
+    });
+
+    test('Room length x width does not depend on room rotation in world frame', () {
+      SmartMeasurePoint pt(double x, double z) => SmartMeasurePoint(
+            id: '$x,$z', x: x, y: 0, z: z,
+            screenPosition: const Offset(0.5, 0.5), timestamp: DateTime(2026));
+      final c = math.cos(math.pi / 4), s = math.sin(math.pi / 4);
+      final rotated = [
+        for (final p in [[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0]])
+          pt(p[0] * c - p[1] * s, p[0] * s + p[1] * c),
+      ];
+      final room = MeasurementMathEngine.calculateRoomSummary(rotated);
+      expect(room.estimatedLengthMeters, closeTo(4, 1e-6));
+      expect(room.estimatedWidthMeters, closeTo(3, 1e-6));
+      expect(room.floorAreaSqMeters, closeTo(12, 1e-6));
     });
   });
 }

@@ -98,6 +98,8 @@ class MainActivity : FlutterActivity() {
                     if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
                         result.success(true)
                     } else {
+                        // Settle a still-pending earlier request so its Dart future doesn't hang forever.
+                        cameraPermissionResultCallback?.success(false)
                         cameraPermissionResultCallback = result
                         ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 1001)
                     }

@@ -27,9 +27,12 @@ class _MeasurementHistoryScreenState extends State<MeasurementHistoryScreen> {
     _storage.addListener(_onStorageChange);
   }
 
+  final TextEditingController _searchController = TextEditingController();
+
   @override
   void dispose() {
     _storage.removeListener(_onStorageChange);
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -204,13 +207,17 @@ class _MeasurementHistoryScreenState extends State<MeasurementHistoryScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: TextField(
+              controller: _searchController,
               decoration: InputDecoration(
                 hintText: 'Search measurements...',
                 prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
                         icon: const Icon(Icons.clear_rounded),
-                        onPressed: () => setState(() => _searchQuery = ''),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _searchQuery = '');
+                        },
                       )
                     : null,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

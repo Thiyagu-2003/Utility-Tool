@@ -42,11 +42,13 @@ enum _DragTargetType {
 
 class _ARAnchorData {
   final String id;
-  final double worldX;
-  final double worldY;
-  final double worldZ;
+  // Native anchors: refreshed every frame from the ARCore anchor's current pose.
+  double worldX;
+  double worldY;
+  double worldZ;
   Offset screenPosition; // 0.0 to 1.0 normalized
   final bool isNative;
+  bool visible = true; // false while ARCore isn't tracking it or it is behind the camera
 
   _ARAnchorData({
     required this.id,
@@ -79,7 +81,8 @@ class _LockedSegment {
   });
 
   void recalculate(DistanceUnit unit) {
-    distanceMeters = start.distanceTo(end);
+    // Native segments are frozen at placement (from the two anchor poses); only re-label them.
+    if (!start.isNative || !end.isNative) distanceMeters = start.distanceTo(end);
     label = unit.formatMeters(distanceMeters, decimals: distanceMeters < 0.1 ? 1 : 0);
   }
 }
@@ -92,6 +95,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
   // Native ARCore state
   bool _useNativeARCore = false;
   bool _isNativeViewReady = false;
+  int? _nativeViewId;
   Timer? _arTrackingTimer;
 
   // Camera fallback for devices without ARCore
@@ -105,16 +109,17 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
   // Anchors and Segments
   _ARAnchorData? _activeStartAnchor;
   final List<_LockedSegment> _lockedSegments = [];
-  final List<_LockedSegment> _undoHistory = [];
 
-  // Live 3D reticle coordinates from ARCore tracking
+  // Live 3D reticle coordinates from ARCore tracking (null = no stable surface hit)
   double? _reticleWorldX;
   double? _reticleWorldY;
   double? _reticleWorldZ;
   bool _isSyncingTracking = false;
+  bool _isPlacingPoint = false;
 
   // Surface Detection & Guidance State
   bool _isSurfaceDetected = false;
+  bool _canPlacePoint = false; // ARCore TRACKING and reticle on a tracked plane/depth hit
   String _surfaceStatusMessage = 'Searching for a surface...';
   String _surfaceType = 'NONE';
   int _planesCount = 0;
@@ -154,7 +159,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
     _spatialTracker.stopTracking();
     _levelAccelSub?.cancel();
     _cameraController?.dispose();
-    ARPlatformBridge().clearNativeView();
+    ARPlatformBridge().clearNativeView(_nativeViewId);
     ARPlatformBridge().setActiveCameraController(null);
     super.dispose();
   }
@@ -165,7 +170,12 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
       if (_useNativeARCore) {
         ARPlatformBridge().pauseNativeSession();
       } else {
-        _cameraController?.dispose();
+        // Null it before disposing so CameraPreview never rebuilds on a disposed controller.
+        final c = _cameraController;
+        _cameraController = null;
+        ARPlatformBridge().setActiveCameraController(null);
+        if (mounted) setState(() => _isCameraReady = false);
+        c?.dispose();
       }
     } else if (state == AppLifecycleState.resumed) {
       if (_useNativeARCore) {
@@ -248,6 +258,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
   }
 
   void _onPlatformViewCreated(int viewId) {
+    _nativeViewId = viewId;
     ARPlatformBridge().setNativeViewId(viewId);
     setState(() => _isNativeViewReady = true);
 
@@ -270,13 +281,18 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
       final status = await ARPlatformBridge().querySurfaceStatus();
       if (status != null && mounted) {
         final hasSurf = status['hasSurface'] as bool? ?? false;
+        final canPlace = status['canPlace'] as bool? ?? false;
         final planes = status['planesCount'] as int? ?? 0;
         final type = status['surfaceType'] as String? ?? 'NONE';
         final msg = status['statusMessage'] as String? ?? '';
 
-        if (_isSurfaceDetected != hasSurf || _surfaceStatusMessage != msg || _planesCount != planes) {
+        if (_isSurfaceDetected != hasSurf ||
+            _canPlacePoint != canPlace ||
+            _surfaceStatusMessage != msg ||
+            _planesCount != planes) {
           setState(() {
             _isSurfaceDetected = hasSurf;
+            _canPlacePoint = canPlace;
             _planesCount = planes;
             _surfaceType = type;
             _surfaceStatusMessage = msg;
@@ -297,49 +313,36 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
       final positions = await ARPlatformBridge().getAnchorScreenPositions(anchorIds);
       if (!mounted) return;
 
-      bool needsRepaint = false;
-
-      if (positions.isNotEmpty) {
-        if (positions.containsKey('__reticle__')) {
-          final rData = Map<String, dynamic>.from(positions['__reticle__'] as Map);
-          _reticleWorldX = (rData['worldX'] as num).toDouble();
-          _reticleWorldY = (rData['worldY'] as num).toDouble();
-          _reticleWorldZ = (rData['worldZ'] as num).toDouble();
-          if (_activeStartAnchor != null) {
-            needsRepaint = true;
-          }
-        }
-
-        if (_activeStartAnchor != null && positions.containsKey(_activeStartAnchor!.id)) {
-          final data = Map<String, dynamic>.from(positions[_activeStartAnchor!.id] as Map);
-          _activeStartAnchor!.screenPosition = Offset(
-            (data['x'] as num).toDouble(),
-            (data['y'] as num).toDouble(),
-          );
-          needsRepaint = true;
-        }
-
-        for (final seg in _lockedSegments) {
-          if (positions.containsKey(seg.start.id)) {
-            final data = Map<String, dynamic>.from(positions[seg.start.id] as Map);
-            seg.start.screenPosition = Offset(
-              (data['x'] as num).toDouble(),
-              (data['y'] as num).toDouble(),
-            );
-            needsRepaint = true;
-          }
-          if (positions.containsKey(seg.end.id)) {
-            final data = Map<String, dynamic>.from(positions[seg.end.id] as Map);
-            seg.end.screenPosition = Offset(
-              (data['x'] as num).toDouble(),
-              (data['y'] as num).toDouble(),
-            );
-            needsRepaint = true;
-          }
-        }
+      // Reticle: only a stable plane/depth hit counts; otherwise no live end point.
+      final reticle = positions['__reticle__'];
+      if (reticle is Map && reticle['hasHit'] == true) {
+        _reticleWorldX = (reticle['worldX'] as num).toDouble();
+        _reticleWorldY = (reticle['worldY'] as num).toDouble();
+        _reticleWorldZ = (reticle['worldZ'] as num).toDouble();
+      } else {
+        _reticleWorldX = _reticleWorldY = _reticleWorldZ = null;
       }
 
-      if (needsRepaint && mounted) {
+      // Anchors: current pose + projection every frame. Missing (not tracking) or behind
+      // the camera = hidden, never left at a stale screen position.
+      void apply(_ARAnchorData a) {
+        if (!a.isNative) return;
+        final data = positions[a.id];
+        a.visible = data is Map && data['inView'] == true;
+        if (!a.visible) return;
+        a.screenPosition = Offset((data['x'] as num).toDouble(), (data['y'] as num).toDouble());
+        a.worldX = (data['worldX'] as num).toDouble();
+        a.worldY = (data['worldY'] as num).toDouble();
+        a.worldZ = (data['worldZ'] as num).toDouble();
+      }
+
+      if (_activeStartAnchor != null) apply(_activeStartAnchor!);
+      for (final seg in _lockedSegments) {
+        apply(seg.start);
+        apply(seg.end);
+      }
+
+      if (_activeStartAnchor != null || _lockedSegments.isNotEmpty) {
         setState(() {});
       }
     } finally {
@@ -376,38 +379,32 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
   // --- Point Creation & AR Hit Testing ---
 
   Future<void> _onPlusButtonTapped() async {
-    HapticFeedback.mediumImpact();
+    if (_isPlacingPoint) return;
 
     _ARAnchorData newAnchor;
 
-    if (_useNativeARCore && _isNativeViewReady) {
-      // Native ARCore hit-test on detected plane or instant placement
-      final hit = await ARPlatformBridge().nativeHitTest(x: 0.5, y: 0.5);
-      if (hit != null) {
-        newAnchor = _ARAnchorData(
-          id: hit['anchorId'] as String? ?? UniqueKey().toString(),
-          worldX: (hit['x'] as num).toDouble(),
-          worldY: (hit['y'] as num).toDouble(),
-          worldZ: (hit['z'] as num).toDouble(),
-          screenPosition: const Offset(0.5, 0.5),
-          isNative: true,
-        );
-      } else {
-        // Fallback raycast if no plane hit yet
-        final rayAnchor = _spatialTracker.createAnchorAtScreenPoint(
-          UniqueKey().toString(),
-          const Offset(0.5, 0.5),
-        );
-        newAnchor = _ARAnchorData(
-          id: rayAnchor.id,
-          worldX: rayAnchor.worldX,
-          worldY: rayAnchor.worldY,
-          worldZ: rayAnchor.worldZ,
-          screenPosition: const Offset(0.5, 0.5),
-          isNative: false,
-        );
+    if (_useNativeARCore) {
+      // Only place real ARCore anchors on a tracked surface. Never mix in sensor-estimated
+      // points: they live in a different coordinate space and slide on screen.
+      if (!_isNativeViewReady || !_canPlacePoint) {
+        HapticFeedback.heavyImpact();
+        return;
       }
+      HapticFeedback.mediumImpact();
+      _isPlacingPoint = true;
+      final hit = await ARPlatformBridge().nativeHitTest(x: 0.5, y: 0.5);
+      _isPlacingPoint = false;
+      if (hit == null || !mounted) return;
+      newAnchor = _ARAnchorData(
+        id: hit['anchorId'] as String,
+        worldX: (hit['x'] as num).toDouble(),
+        worldY: (hit['y'] as num).toDouble(),
+        worldZ: (hit['z'] as num).toDouble(),
+        screenPosition: const Offset(0.5, 0.5),
+        isNative: true,
+      );
     } else {
+      HapticFeedback.mediumImpact();
       // Optical fallback raycasting
       final rayAnchor = _spatialTracker.createAnchorAtScreenPoint(
         UniqueKey().toString(),
@@ -447,6 +444,9 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
   // --- Pan / Dragging Points on Screen ---
 
   void _handlePanStart(Offset localPos, Size size) {
+    // Dragging re-places a point by sensor raycast, which would replace a world-locked
+    // ARCore anchor with a drifting estimate. ARCore mode: undo and re-place instead.
+    if (_useNativeARCore) return;
     const hitRadius = 42.0;
 
     if (_activeStartAnchor != null) {
@@ -547,7 +547,6 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
         _activeStartAnchor = null;
       } else if (_lockedSegments.isNotEmpty) {
         final removed = _lockedSegments.removeLast();
-        _undoHistory.add(removed);
         if (removed.start.isNative) ARPlatformBridge().removeNativeAnchor(removed.start.id);
         if (removed.end.isNative) ARPlatformBridge().removeNativeAnchor(removed.end.id);
       }
@@ -560,13 +559,13 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
     setState(() {
       _activeStartAnchor = null;
       _lockedSegments.clear();
-      _undoHistory.clear();
       _selectedAnchorIndex = null;
     });
   }
 
   Future<void> _toggleTorch() async {
     final newState = await ARPlatformBridge().toggleTorch();
+    if (!mounted) return;
     setState(() => _isTorchOn = newState);
   }
 
@@ -691,7 +690,9 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
   }
 
   String get _topInstructionText {
-    if (_activeStartAnchor != null) {
+    if (_useNativeARCore && !_canPlacePoint) {
+      return _surfaceStatusMessage; // "Move camera slowly…" from ARCore tracking state
+    } else if (_activeStartAnchor != null) {
       return 'Move to end point & tap +';
     } else if (_lockedSegments.isNotEmpty) {
       double total = 0.0;
@@ -789,7 +790,10 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
         fit: StackFit.expand,
         children: [
           // 1. Content View based on active dock tab (0 = Measure, 1 = Level)
-          if (_activeDockTab == 0) _buildMeasureView(bottomInset) else _buildLevelView(bottomInset),
+          // Measure stays mounted under Level: unmounting the AndroidView would close the ARCore
+          // session and lose every anchor.
+          Offstage(offstage: _activeDockTab != 0, child: _buildMeasureView(bottomInset)),
+          if (_activeDockTab == 1) _buildLevelView(bottomInset),
 
           // 2. Persistent Bottom Dock: [ Measure ] and [ Level ] (Non-overlapping above navigation bar)
           Positioned(
@@ -887,19 +891,23 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                 Offset? activeStartScreenPos;
                 String? liveDistanceLabel;
 
-                if (_activeStartAnchor != null) {
+                if (_activeStartAnchor != null && _activeStartAnchor!.visible) {
                   activeStartScreenPos = Offset(
                     _activeStartAnchor!.screenPosition.dx * size.width,
                     _activeStartAnchor!.screenPosition.dy * size.height,
                   );
 
                   // Compute live 3D distance from active start point to center reticle
-                  double liveDist;
-                  if (_useNativeARCore && _reticleWorldX != null && _reticleWorldY != null && _reticleWorldZ != null) {
-                    final dx = _reticleWorldX! - _activeStartAnchor!.worldX;
-                    final dy = _reticleWorldY! - _activeStartAnchor!.worldY;
-                    final dz = _reticleWorldZ! - _activeStartAnchor!.worldZ;
-                    liveDist = math.sqrt(dx * dx + dy * dy + dz * dz);
+                  double? liveDist;
+                  if (_useNativeARCore) {
+                    // Start anchor's current pose -> smoothed, dead-banded reticle hit.
+                    // No stable hit = no number, rather than a guessed one.
+                    if (_reticleWorldX != null && _reticleWorldY != null && _reticleWorldZ != null) {
+                      final dx = _reticleWorldX! - _activeStartAnchor!.worldX;
+                      final dy = _reticleWorldY! - _activeStartAnchor!.worldY;
+                      final dz = _reticleWorldZ! - _activeStartAnchor!.worldZ;
+                      liveDist = math.sqrt(dx * dx + dy * dy + dz * dz);
+                    }
                   } else {
                     final currentReticleAnchor = _spatialTracker.createAnchorAtScreenPoint(
                       'reticle_temp',
@@ -911,7 +919,9 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                     liveDist = math.sqrt(dx * dx + dy * dy + dz * dz);
                   }
 
-                  liveDistanceLabel = _unit.formatMeters(liveDist, decimals: liveDist < 0.1 ? 1 : 0);
+                  if (liveDist != null) {
+                    liveDistanceLabel = _unit.formatMeters(liveDist, decimals: liveDist < 0.1 ? 1 : 0);
+                  }
                 }
 
                 // Project locked segments and endpoints
@@ -920,6 +930,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
 
                 for (int i = 0; i < _lockedSegments.length; i++) {
                   final seg = _lockedSegments[i];
+                  if (!seg.start.visible || !seg.end.visible) continue;
                   final sPx = Offset(seg.start.screenPosition.dx * size.width, seg.start.screenPosition.dy * size.height);
                   final ePx = Offset(seg.end.screenPosition.dx * size.width, seg.end.screenPosition.dy * size.height);
 
@@ -1042,13 +1053,15 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Flashlight
-                  _buildCircularIconButton(
-                    icon: _isTorchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded,
-                    onTap: _toggleTorch,
-                    tooltip: 'Torch',
-                  ),
-                  const SizedBox(width: 6),
+                  // Flashlight (Flutter camera fallback only: ARCore owns the camera in native mode)
+                  if (!_useNativeARCore) ...[
+                    _buildCircularIconButton(
+                      icon: _isTorchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded,
+                      onTap: _toggleTorch,
+                      tooltip: 'Torch',
+                    ),
+                    const SizedBox(width: 6),
+                  ],
 
                   // Unit pill
                   GestureDetector(
@@ -1100,7 +1113,10 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                   // Center Large Circular (+) Button (diameter 74dp)
                   GestureDetector(
                     onTap: _onPlusButtonTapped,
-                    child: Container(
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 150),
+                      opacity: (!_useNativeARCore || _canPlacePoint) ? 1.0 : 0.35,
+                      child: Container(
                       width: 74,
                       height: 74,
                       decoration: BoxDecoration(
@@ -1121,6 +1137,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                           size: 44,
                         ),
                       ),
+                    ),
                     ),
                   ),
 
@@ -1162,11 +1179,15 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                     left: 32,
                     child: _buildCircularIconButton(
                       icon: Icons.apps_rounded,
-                      onTap: () {
-                        Navigator.push(
+                      onTap: () async {
+                        await Navigator.push(
                           context,
                           MaterialPageRoute(builder: (_) => const SmartMeasureDashboardScreen()),
                         );
+                        // A screen opened from there (e.g. another Measure) may have re-pointed the
+                        // shared bridge at its own AR view; point it back at ours.
+                        final id = _nativeViewId;
+                        if (mounted && id != null) ARPlatformBridge().setNativeViewId(id);
                       },
                       tooltip: 'All 15 Tools',
                     ),

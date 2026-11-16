@@ -25,16 +25,28 @@ class SmartMeasureStorageService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_storageKey);
       if (raw != null && raw.isNotEmpty) {
-        final decoded = jsonDecode(raw) as List<dynamic>;
-        _items = decoded
-            .map((item) => SmartMeasureItem.fromJson(item as Map<String, dynamic>))
-            .toList();
+        List<dynamic> decoded;
+        try {
+          decoded = jsonDecode(raw) as List<dynamic>;
+        } catch (e) {
+          // Unreadable blob: keep a copy so the next save can't destroy it.
+          debugPrint('Smart Measure history unreadable, backed up: $e');
+          await prefs.setString('${_storageKey}_corrupt', raw);
+          decoded = const [];
+        }
+        _items = [];
+        for (final item in decoded) {
+          try {
+            _items.add(SmartMeasureItem.fromJson(Map<String, dynamic>.from(item as Map)));
+          } catch (e) {
+            debugPrint('Skipping malformed Smart Measure record: $e'); // drop one, keep the rest
+          }
+        }
         // Sort newest first
         _items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       }
     } catch (e) {
       debugPrint('Error loading Smart Measure history: $e');
-      _items = [];
     } finally {
       _isLoaded = true;
       notifyListeners();
@@ -43,6 +55,7 @@ class SmartMeasureStorageService extends ChangeNotifier {
 
   /// Save a new measurement.
   Future<void> saveMeasurement(SmartMeasureItem item) async {
+    await init(); // otherwise saving before History was opened overwrites stored records
     _items.insert(0, item);
     await _persist();
     notifyListeners();
@@ -50,6 +63,7 @@ class SmartMeasureStorageService extends ChangeNotifier {
 
   /// Update an existing measurement (e.g. name or notes).
   Future<void> updateMeasurement(String id, {String? name, String? notes}) async {
+    await init();
     final index = _items.indexWhere((m) => m.id == id);
     if (index != -1) {
       if (name != null) _items[index].name = name;
@@ -61,6 +75,7 @@ class SmartMeasureStorageService extends ChangeNotifier {
 
   /// Delete a saved measurement by ID.
   Future<void> deleteMeasurement(String id) async {
+    await init();
     _items.removeWhere((m) => m.id == id);
     await _persist();
     notifyListeners();

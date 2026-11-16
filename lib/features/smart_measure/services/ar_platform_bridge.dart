@@ -20,12 +20,17 @@ class ARPlatformBridge {
   CameraController? _activeCameraController;
   bool _isTorchOn = false;
   MethodChannel? _viewChannel;
+  int? _viewId;
 
   void setNativeViewId(int viewId) {
+    _viewId = viewId;
     _viewChannel = MethodChannel('com.utility.app/smart_measure_ar_view_$viewId');
   }
 
-  void clearNativeView() {
+  /// Clears only if [viewId] is still the active view, so a disposed screen can't cut off another.
+  void clearNativeView([int? viewId]) {
+    if (viewId != null && viewId != _viewId) return;
+    _viewId = null;
     _viewChannel = null;
   }
 
@@ -147,8 +152,11 @@ class ARPlatformBridge {
       final res = await _channel.invokeMethod<Map<dynamic, dynamic>>('checkCapabilities');
       if (res != null) {
         final Map<String, dynamic> data = Map<String, dynamic>.from(res);
-        _cachedCapability = SmartMeasureCapability.fromNative(data);
-        return _cachedCapability!;
+        final cap = SmartMeasureCapability.fromNative(data);
+        // ARCore's first check is often UNKNOWN_CHECKING; don't pin that for the whole process.
+        final status = data['availabilityStatus']?.toString() ?? '';
+        if (!status.startsWith('UNKNOWN')) _cachedCapability = cap;
+        return cap;
       }
     } catch (e) {
       debugPrint('ARPlatformBridge checkCapabilities error: $e');
@@ -166,6 +174,7 @@ class ARPlatformBridge {
   Future<String?> requestInstallARCore() async {
     if (!kIsWeb && Platform.isAndroid) {
       try {
+        _cachedCapability = null; // re-check after install
         return await _channel.invokeMethod<String>('requestInstallARCore');
       } catch (e) {
         debugPrint('Error requesting ARCore install: $e');
@@ -214,32 +223,8 @@ class ARPlatformBridge {
     required double currentFocalScale,
     PlaneType assumedPlane = PlaneType.horizontalDownward,
   }) async {
-    // 1. Check if device supports native AR hit-test
-    final cap = await checkCapabilities();
-    if (cap.canUseLiveAR) {
-      try {
-        final res = await _channel.invokeMethod<Map<dynamic, dynamic>>('raycastHitTest', {
-          'x': normalizedScreenPos.dx,
-          'y': normalizedScreenPos.dy,
-        });
-        if (res != null) {
-          return SmartMeasurePoint(
-            id: UniqueKey().toString(),
-            x: (res['x'] as num).toDouble(),
-            y: (res['y'] as num).toDouble(),
-            z: (res['z'] as num).toDouble(),
-            screenPosition: normalizedScreenPos,
-            timestamp: DateTime.now(),
-            planeType: assumedPlane,
-            confidence: (res['confidence'] as num?)?.toDouble() ?? 0.95,
-            depthMeters: (res['depth'] as num?)?.toDouble() ?? 1.5,
-          );
-        }
-      } catch (_) {
-        // Native AR hit-test fallback to geometric optical raycast
-      }
-    }
-
+    // Sensor-only estimate. (There is no app-level native raycast: ARCore hit-tests live in the
+    // Measure screen's AR view. The old call here always hit notImplemented and was swallowed.)
     // 2. Optical Geometric Pinhole Raycast (Accurate Ground & Object Depth Trigonometry):
     // Standard phone camera FOV: ~60° horizontal, ~75° vertical.
     // Screen center is (0.5, 0.5).
@@ -282,7 +267,7 @@ class ARPlatformBridge {
       screenPosition: normalizedScreenPos,
       timestamp: DateTime.now(),
       planeType: assumedPlane,
-      confidence: cap.canUseLiveAR ? 0.9 : 0.75,
+      confidence: 0.6, // assumed phone height + tilt, not a tracked surface
       depthMeters: depth,
     );
   }

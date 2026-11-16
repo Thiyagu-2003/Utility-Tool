@@ -111,8 +111,9 @@ class MeasurementMathEngine {
     // 4 or more points: Length, Width, Height
     final l = distance3D(points[0], points[1]);
     final w = distance3D(points[1], points[2]);
+    // Height is vertical rise only; points on one plane have none (don't report a floor edge as height).
     final h = (points[3].y - points[0].y).abs();
-    final actualH = h > 0.01 ? h : distance3D(points[2], points[3]);
+    final actualH = h > 0.01 ? h : 0.0;
 
     return ObjectDimensionModel(
       lengthMeters: l,
@@ -133,7 +134,7 @@ class MeasurementMathEngine {
         perimeterMeters: 0,
         floorAreaSqMeters: 0,
         ceilingHeightMeters: ceilingHeightMeters,
-        estimatedVolumeCuMeters: 0,
+        estimatedVolumeCuMeters: null,
         estimatedLengthMeters: 0,
         estimatedWidthMeters: 0,
         isClosedPolygon: false,
@@ -168,17 +169,31 @@ class MeasurementMathEngine {
 
     final area = polygonArea3D(corners);
 
-    // Estimate bounding length & width from corner extremes
-    double minX = corners.first.x, maxX = corners.first.x;
-    double minZ = corners.first.z, maxZ = corners.first.z;
-    for (final c in corners) {
-      if (c.x < minX) minX = c.x;
-      if (c.x > maxX) maxX = c.x;
-      if (c.z < minZ) minZ = c.z;
-      if (c.z > maxZ) maxZ = c.z;
+    // Length & width: corner extents along the longest wall and its perpendicular, so the result
+    // doesn't depend on how the room happens to sit in the (arbitrarily rotated) world frame.
+    final longest = walls.reduce((a, b) => a.lengthMeters >= b.lengthMeters ? a : b);
+    var ax = longest.endPoint.x - longest.startPoint.x;
+    var az = longest.endPoint.z - longest.startPoint.z;
+    final axLen = math.sqrt(ax * ax + az * az);
+    if (axLen > 1e-9) {
+      ax /= axLen;
+      az /= axLen;
+    } else {
+      ax = 1;
+      az = 0;
     }
-    final estLength = (maxX - minX).abs();
-    final estWidth = (maxZ - minZ).abs();
+    double minU = double.infinity, maxU = -double.infinity;
+    double minV = double.infinity, maxV = -double.infinity;
+    for (final c in corners) {
+      final u = c.x * ax + c.z * az;
+      final v = -c.x * az + c.z * ax;
+      minU = math.min(minU, u);
+      maxU = math.max(maxU, u);
+      minV = math.min(minV, v);
+      maxV = math.max(maxV, v);
+    }
+    final estLength = maxU - minU;
+    final estWidth = maxV - minV;
 
     final volume = ceilingHeightMeters != null ? area * ceilingHeightMeters : null;
 
@@ -252,6 +267,13 @@ class MeasurementMathEngine {
       uncertaintyPercent: baseUncertaintyPercent,
       absoluteErrorMarginDisplay: marginDisplay,
     );
+  }
+
+  /// Back-camera angle below the horizon, from accelerometer (portrait): 0° = phone upright
+  /// (camera at horizon), 90° = phone flat face-up (camera at floor), negative = aiming up.
+  /// This is what the ray-plane raycasts expect — NOT [LevelReading.pitchDegrees], which is 90° upright.
+  static double cameraDownAngleDegrees(double ax, double ay, double az) {
+    return math.atan2(az, math.sqrt(ax * ax + ay * ay)) * (180.0 / math.pi);
   }
 
   /// Calculate level angles from device accelerometer readings (ax, ay, az in m/s²).

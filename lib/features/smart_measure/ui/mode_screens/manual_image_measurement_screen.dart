@@ -63,7 +63,7 @@ class _ManualImageMeasurementScreenState extends State<ManualImageMeasurementScr
   Future<void> _pickImage() async {
     try {
       final file = await FilePicker.pickFile(type: FileType.image);
-      if (file != null && file.path != null) {
+      if (file != null && file.path != null && mounted) {
         setState(() {
           _imagePath = file.path;
           _step = ManualMeasureStep.calibrateReference;
@@ -82,12 +82,26 @@ class _ManualImageMeasurementScreenState extends State<ManualImageMeasurementScr
     if (_calibStart == null || _calibEnd == null) return;
 
     final realMm = _selectedRefType == ReferenceItemType.custom
-        ? (double.tryParse(_customMmController.text) ?? 100.0)
+        ? double.tryParse(_customMmController.text.trim())
         : _selectedRefType.defaultLengthMm;
+
+    // Reject inputs that would silently produce a nonsense scale.
+    String? problem;
+    if (realMm == null || !realMm.isFinite || realMm <= 0) {
+      problem = 'Enter the reference length in mm (a number above 0).';
+    } else if ((_calibEnd! - _calibStart!).distance < 10) {
+      problem = 'The two reference points are too close. Tap both ends of the reference object.';
+    }
+    if (problem != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(problem), behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
 
     final calib = ImageCalibration.fromPoints(
       referenceType: _selectedRefType,
-      referenceRealMm: realMm,
+      referenceRealMm: realMm!,
       start: _calibStart!,
       end: _calibEnd!,
     );

@@ -50,6 +50,7 @@ class _RoomMeasurementScreenState extends State<RoomMeasurementScreen> {
   void dispose() {
     _raycastTimer?.cancel();
     _accelSub?.cancel();
+    ARPlatformBridge().setActiveCameraController(null); // bridge must not keep a disposed controller
     _cameraController?.dispose();
     super.dispose();
   }
@@ -63,7 +64,7 @@ class _RoomMeasurementScreenState extends State<RoomMeasurementScreen> {
       _accelSub = accelerometerEventStream().listen((event) {
         if (!mounted) return;
         final r = MeasurementMathEngine.calculateLevel(event.x, event.y, event.z);
-        _pitchDeg = r.pitchDegrees.abs();
+        _pitchDeg = MeasurementMathEngine.cameraDownAngleDegrees(event.x, event.y, event.z); // below-horizon angle the raycast expects
         _rollDeg = r.rollDegrees;
       });
     } catch (_) {}
@@ -135,7 +136,7 @@ class _RoomMeasurementScreenState extends State<RoomMeasurementScreen> {
     );
 
     final audit = MeasurementMathEngine.evaluateConfidence(
-      trackingState: TrackingConfidence.high,
+      trackingState: TrackingConfidence.medium, // sensor-estimated, not ARCore-tracked
       engine: _capability?.preferredEngine ?? MeasurementTrackingEngine.androidArCore,
       measurementDistanceMeters: summary.perimeterMeters,
       sensorDepthMeters: _wallCorners.first.depthMeters,
@@ -163,7 +164,7 @@ class _RoomMeasurementScreenState extends State<RoomMeasurementScreen> {
         areaUnit: _areaUnit,
         formattedValue: _areaUnit.formatSqMeters(summary.floorAreaSqMeters),
         secondaryValues: secondary,
-        confidence: TrackingConfidence.high,
+        confidence: TrackingConfidence.medium, // sensor-estimated, not ARCore-tracked
         uncertaintyPercent: audit.uncertaintyPercent,
         capabilityUsed: _capability?.preferredEngine.title ?? 'Multi-Plane Room Engine',
         points: List.from(_wallCorners),

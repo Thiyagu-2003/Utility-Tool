@@ -17,13 +17,13 @@ import com.google.ar.core.Anchor
 import com.google.ar.core.Camera
 import com.google.ar.core.Config
 import com.google.ar.core.Coordinates2d
+import com.google.ar.core.DepthPoint
 import com.google.ar.core.Frame
-import com.google.ar.core.HitResult
-import com.google.ar.core.InstantPlacementPoint
 import com.google.ar.core.Plane
-import com.google.ar.core.Point
 import com.google.ar.core.Pose
 import com.google.ar.core.Session
+import com.google.ar.core.Trackable
+import com.google.ar.core.TrackingFailureReason
 import com.google.ar.core.TrackingState
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
@@ -68,6 +68,11 @@ class SmartMeasureArView(
             -1.0f, +1.0f,
             +1.0f, +1.0f
         )
+
+        // Reticle stabilisation. Tune on-device if needed.
+        private const val RETICLE_EMA_ALPHA = 0.2f    // low-pass weight of each new hit (60 fps)
+        private const val RETICLE_DEADBAND_M = 0.003f // published reticle ignores jitter below 3 mm
+        private const val RETICLE_JUMP_M = 0.08f      // a bigger jump = new surface, reset the filter
     }
 
     private var session: Session? = null
@@ -88,14 +93,21 @@ class SmartMeasureArView(
     private var lastDisplayRotation = -1
     private var hasTransformedUvs = false
 
-    // State Tracking
-    @Volatile
-    private var latestFrame: Frame? = null
+    // State. ARCore objects are touched only on the GL thread; the main thread
+    // reads immutable snapshots published once per frame.
     private val activeAnchors = ConcurrentHashMap<String, Anchor>()
-    private var hasSurface = false
-    private var surfaceType = "NONE"
-    private var planesCount = 0
-    private var trackingStateStr = "SEARCHING"
+    @Volatile private var statusSnapshot: Map<String, Any> = mapOf(
+        "hasSurface" to false, "canPlace" to false, "planesCount" to 0,
+        "surfaceType" to "NONE", "trackingState" to "SEARCHING",
+        "statusMessage" to "Move camera slowly to detect surfaces"
+    )
+    @Volatile private var anchorSnapshot: Map<String, Any> = emptyMap()
+
+    // Stable centre-reticle hit (GL thread only)
+    private var reticleTrackable: Trackable? = null
+    private var reticleRotation = floatArrayOf(0f, 0f, 0f, 1f)
+    private var reticleSmoothed: FloatArray? = null
+    private var reticlePublished: FloatArray? = null
 
     init {
         channel.setMethodCallHandler(this)
@@ -120,7 +132,8 @@ class SmartMeasureArView(
                 if (arSession.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
                     depthMode = Config.DepthMode.AUTOMATIC
                 }
-                instantPlacementMode = Config.InstantPlacementMode.LOCAL_Y_UP
+                // No instant placement: its estimated depth drifts, which made points slide.
+                instantPlacementMode = Config.InstantPlacementMode.DISABLED
                 lightEstimationMode = Config.LightEstimationMode.ENVIRONMENTAL_HDR
                 focusMode = Config.FocusMode.AUTO
             }
@@ -215,47 +228,140 @@ class SmartMeasureArView(
 
             arSession.setCameraTextureName(cameraTextureId)
             val frame = arSession.update()
-            latestFrame = frame
 
             // Always render the camera background feed so the user sees live video immediately!
             drawBackground(frame)
 
-            val camera = frame.camera
-            if (camera.trackingState == TrackingState.TRACKING) {
-                updateSurfaceTracking(frame, arSession)
-            } else {
-                hasSurface = false
-                trackingStateStr = "SEARCHING"
-            }
+            val tracking = frame.camera.trackingState == TrackingState.TRACKING
+            if (tracking) updateReticle(frame) else resetReticle()
+            publishStatus(frame, arSession, tracking)
+            publishAnchors(frame, tracking)
         } catch (e: Exception) {
             // Ignore camera frame drop exceptions during resume/pause
         }
     }
 
-    private fun updateSurfaceTracking(frame: Frame, arSession: Session) {
-        val planes = arSession.getAllTrackables(Plane::class.java)
-        var detected = false
+    private fun resetReticle() {
+        reticleTrackable = null
+        reticleSmoothed = null
+        reticlePublished = null
+    }
+
+    private fun dist(a: FloatArray, b: FloatArray): Float {
+        val dx = a[0] - b[0]; val dy = a[1] - b[1]; val dz = a[2] - b[2]
+        return Math.sqrt((dx * dx + dy * dy + dz * dz).toDouble()).toFloat()
+    }
+
+    /** Centre hit-test against real geometry only: tracked plane polygons first, depth as fallback.
+     *  Raw feature points, estimated planes and instant placement are ignored. */
+    private fun updateReticle(frame: Frame) {
+        val hits = frame.hitTest(viewportWidth * 0.5f, viewportHeight * 0.5f)
+        val hit = hits.firstOrNull { h ->
+            val t = h.trackable
+            t is Plane && t.trackingState == TrackingState.TRACKING && t.subsumedBy == null &&
+                t.isPoseInPolygon(h.hitPose)
+        } ?: hits.firstOrNull { h ->
+            val t = h.trackable
+            t is DepthPoint && t.trackingState == TrackingState.TRACKING
+        }
+
+        if (hit == null) {
+            resetReticle()
+            return
+        }
+
+        val raw = hit.hitPose.translation
+        val smoothed = reticleSmoothed
+        val published = reticlePublished
+        // Depth points are new objects every frame, so only a change of plane counts as a new surface.
+        val sameSurface = (hit.trackable is DepthPoint && reticleTrackable is DepthPoint) ||
+            hit.trackable == reticleTrackable
+        if (smoothed == null || published == null || !sameSurface || dist(smoothed, raw) > RETICLE_JUMP_M) {
+            reticleSmoothed = raw.copyOf()
+            reticlePublished = raw.copyOf()
+        } else {
+            for (i in 0..2) smoothed[i] += RETICLE_EMA_ALPHA * (raw[i] - smoothed[i])
+            if (dist(published, smoothed) > RETICLE_DEADBAND_M) reticlePublished = smoothed.copyOf()
+        }
+        reticleTrackable = hit.trackable
+        reticleRotation = hit.hitPose.rotationQuaternion
+    }
+
+    private fun publishStatus(frame: Frame, arSession: Session, tracking: Boolean) {
         var count = 0
         var type = "NONE"
-
-        for (plane in planes) {
-            if (plane.trackingState == TrackingState.TRACKING && plane.subsumedBy == null) {
-                count++
-                detected = true
-                type = if (plane.type == Plane.Type.VERTICAL) "VERTICAL" else "HORIZONTAL"
+        if (tracking) {
+            for (plane in arSession.getAllTrackables(Plane::class.java)) {
+                if (plane.trackingState == TrackingState.TRACKING && plane.subsumedBy == null) {
+                    count++
+                    type = if (plane.type == Plane.Type.VERTICAL) "VERTICAL" else "HORIZONTAL"
+                }
             }
         }
+        if (reticleTrackable is DepthPoint) type = "DEPTH"
 
-        // When instant placement is enabled, the camera can track surfaces immediately
-        if (!detected && frame.camera.trackingState == TrackingState.TRACKING) {
-            detected = true
-            type = "INSTANT_SURFACE"
+        val onSurface = tracking && reticlePublished != null
+        val message = when {
+            !tracking -> when (frame.camera.trackingFailureReason) {
+                TrackingFailureReason.INSUFFICIENT_LIGHT -> "Move camera slowly • More light needed"
+                TrackingFailureReason.INSUFFICIENT_FEATURES -> "Move camera slowly • Aim at a textured area"
+                else -> "Move camera slowly"
+            }
+            !onSurface -> "Move camera slowly to detect surfaces"
+            activeAnchors.isEmpty() -> "Surface detected • Ready to measure"
+            else -> "Move to second point & tap +"
+        }
+        statusSnapshot = mapOf(
+            "hasSurface" to onSurface,
+            "canPlace" to onSurface,
+            "planesCount" to count,
+            "surfaceType" to type,
+            "trackingState" to frame.camera.trackingState.name,
+            "statusMessage" to message
+        )
+    }
+
+    /** Projects every anchor's *current* pose (so points follow ARCore's map refinements) and the reticle. */
+    private fun publishAnchors(frame: Frame, tracking: Boolean) {
+        if (!tracking) {
+            anchorSnapshot = emptyMap() // Dart hides points rather than leaving them at stale screen positions
+            return
+        }
+        val camera = frame.camera
+        val projMatrix = FloatArray(16)
+        val viewMatrix = FloatArray(16)
+        val viewProjMatrix = FloatArray(16)
+        camera.getProjectionMatrix(projMatrix, 0, 0.05f, 50.0f)
+        camera.getViewMatrix(viewMatrix, 0)
+        Matrix.multiplyMM(viewProjMatrix, 0, projMatrix, 0, viewMatrix, 0)
+
+        val resultMap = mutableMapOf<String, Any>()
+        val worldPosIn = FloatArray(4)
+        val clipPosOut = FloatArray(4)
+
+        for ((id, anchor) in activeAnchors) {
+            if (anchor.trackingState != TrackingState.TRACKING) continue
+            val pose = anchor.pose
+            worldPosIn[0] = pose.tx(); worldPosIn[1] = pose.ty(); worldPosIn[2] = pose.tz(); worldPosIn[3] = 1.0f
+            Matrix.multiplyMV(clipPosOut, 0, viewProjMatrix, 0, worldPosIn, 0)
+            val w = clipPosOut[3]
+            val inFront = w > 0.05f
+            resultMap[id] = mapOf(
+                "x" to if (inFront) ((clipPosOut[0] / w + 1.0f) * 0.5f).toDouble() else -1.0,
+                "y" to if (inFront) ((1.0f - clipPosOut[1] / w) * 0.5f).toDouble() else -1.0,
+                "inView" to inFront, // behind the camera = hide; off-screen in front still draws to the edge
+                "worldX" to pose.tx().toDouble(),
+                "worldY" to pose.ty().toDouble(),
+                "worldZ" to pose.tz().toDouble()
+            )
         }
 
-        hasSurface = detected
-        planesCount = count
-        surfaceType = type
-        trackingStateStr = if (detected) "SURFACE_DETECTED" else "SEARCHING"
+        val r = reticlePublished
+        resultMap["__reticle__"] = if (r != null) mapOf(
+            "worldX" to r[0].toDouble(), "worldY" to r[1].toDouble(), "worldZ" to r[2].toDouble(), "hasHit" to true
+        ) else mapOf("hasHit" to false)
+
+        anchorSnapshot = resultMap
     }
 
     private fun setupShaders() {
@@ -362,219 +468,48 @@ class SmartMeasureArView(
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "querySurfaceStatus" -> {
-                val data = mapOf(
-                    "hasSurface" to hasSurface,
-                    "planesCount" to planesCount,
-                    "surfaceType" to surfaceType,
-                    "trackingState" to trackingStateStr,
-                    "statusMessage" to when {
-                        !hasSurface -> "Move camera slowly to detect surfaces"
-                        activeAnchors.isEmpty() -> "Surface detected • Ready to measure"
-                        else -> "Move to second point & tap +"
-                    }
-                )
-                result.success(data)
-            }
+            "querySurfaceStatus" -> result.success(statusSnapshot)
             "hitTest" -> {
-                val normX = (call.argument<Number>("x")?.toFloat() ?: 0.5f)
-                val normY = (call.argument<Number>("y")?.toFloat() ?: 0.5f)
+                // Places a point at the stabilised centre reticle. Runs on the GL thread between
+                // session.update() calls and anchors to the hit plane / depth trackable.
+                glSurfaceView.queueEvent {
+                    val trackable = reticleTrackable
+                    val position = reticlePublished
+                    val anchor = try {
+                        if (trackable != null && position != null &&
+                            trackable.trackingState == TrackingState.TRACKING) {
+                            trackable.createAnchor(Pose(position, reticleRotation))
+                        } else null
+                    } catch (e: Exception) { null }
 
-                val frame = latestFrame
-                if (frame == null || frame.camera.trackingState != TrackingState.TRACKING) {
-                    result.error("TRACKING_NOT_READY", "ARCore tracking is not ready", null)
-                    return
-                }
-
-                val pixelX = normX * viewportWidth
-                val pixelY = normY * viewportHeight
-
-                var hitResults = frame.hitTest(pixelX, pixelY)
-                if (hitResults.isEmpty()) {
-                    try {
-                        hitResults = frame.hitTestInstantPlacement(pixelX, pixelY, 0.8f)
-                    } catch (e: Exception) {}
-                }
-
-                var bestHit: HitResult? = null
-
-                // 1. Preference: Hit on tracked plane polygon
-                for (hit in hitResults) {
-                    val trackable = hit.trackable
-                    if (trackable is Plane && trackable.isPoseInPolygon(hit.hitPose)) {
-                        bestHit = hit
-                        break
+                    if (anchor == null) {
+                        mainHandler.post { result.error("NO_HIT", "No tracked surface under the reticle", null) }
+                        return@queueEvent
                     }
-                }
-
-                // 2. Preference: Hit on InstantPlacementPoint or feature point
-                if (bestHit == null) {
-                    for (hit in hitResults) {
-                        val trackable = hit.trackable
-                        if (trackable is InstantPlacementPoint ||
-                            (trackable is Point && trackable.orientationMode == Point.OrientationMode.ESTIMATED_SURFACE_NORMAL)) {
-                            bestHit = hit
-                            break
-                        }
-                    }
-                }
-
-                // 3. Fallback: Any hit result
-                if (bestHit == null && hitResults.isNotEmpty()) {
-                    bestHit = hitResults[0]
-                }
-
-                val anchor: Anchor
-                val planeType: String
-                val depth: Double
-
-                if (bestHit != null) {
-                    anchor = bestHit.createAnchor()
-                    planeType = if (bestHit.trackable is Plane) "PLANE" else "INSTANT"
+                    val anchorId = UUID.randomUUID().toString()
+                    activeAnchors[anchorId] = anchor
                     val pose = anchor.pose
-                    val cameraPose = frame.camera.pose
-                    val dx = pose.tx() - cameraPose.tx()
-                    val dy = pose.ty() - cameraPose.ty()
-                    val dz = pose.tz() - cameraPose.tz()
-                    depth = Math.sqrt((dx * dx + dy * dy + dz * dz).toDouble())
-                } else {
-                    val camPose = frame.camera.pose
-                    val forwardRay = camPose.transformPoint(floatArrayOf(0f, 0f, -0.6f))
-                    val anchorPose = Pose(forwardRay, camPose.rotationQuaternion)
-                    val createdAnchor = session?.createAnchor(anchorPose)
-                    if (createdAnchor != null) {
-                        anchor = createdAnchor
-                        planeType = "RAY_PLANE"
-                        depth = 0.6
-                    } else {
-                        result.error("NO_HIT", "No surface hit at this position", null)
-                        return
+                    mainHandler.post {
+                        result.success(mapOf(
+                            "anchorId" to anchorId,
+                            "x" to pose.tx().toDouble(),
+                            "y" to pose.ty().toDouble(),
+                            "z" to pose.tz().toDouble(),
+                            "planeType" to if (trackable is Plane) "PLANE" else "DEPTH"
+                        ))
                     }
                 }
-
-                val anchorId = UUID.randomUUID().toString()
-                activeAnchors[anchorId] = anchor
-
-                val pose = anchor.pose
-                result.success(mapOf(
-                    "anchorId" to anchorId,
-                    "x" to pose.tx().toDouble(),
-                    "y" to pose.ty().toDouble(),
-                    "z" to pose.tz().toDouble(),
-                    "depth" to depth,
-                    "planeType" to planeType
-                ))
             }
-            "getAnchorScreenPositions" -> {
-                val anchorIds = call.argument<List<String>>("anchorIds") ?: emptyList()
-                val frame = latestFrame
-                if (frame == null || frame.camera.trackingState != TrackingState.TRACKING) {
-                    result.success(emptyMap<String, Any>())
-                    return
-                }
-
-                val camera = frame.camera
-                val projMatrix = FloatArray(16)
-                val viewMatrix = FloatArray(16)
-                val viewProjMatrix = FloatArray(16)
-
-                camera.getProjectionMatrix(projMatrix, 0, 0.05f, 50.0f)
-                camera.getViewMatrix(viewMatrix, 0)
-                Matrix.multiplyMM(viewProjMatrix, 0, projMatrix, 0, viewMatrix, 0)
-
-                val resultMap = mutableMapOf<String, Any>()
-                val worldPosIn = FloatArray(4)
-                val clipPosOut = FloatArray(4)
-
-                // 1. Reproject all dropped anchors to 2D screen coordinates
-                for (id in anchorIds) {
-                    val anchor = activeAnchors[id] ?: continue
-                    if (anchor.trackingState != TrackingState.TRACKING) continue
-
-                    val pose = anchor.pose
-                    worldPosIn[0] = pose.tx()
-                    worldPosIn[1] = pose.ty()
-                    worldPosIn[2] = pose.tz()
-                    worldPosIn[3] = 1.0f
-
-                    Matrix.multiplyMV(clipPosOut, 0, viewProjMatrix, 0, worldPosIn, 0)
-
-                    val w = clipPosOut[3]
-                    if (w > 0.05f) {
-                        val ndcX = clipPosOut[0] / w
-                        val ndcY = clipPosOut[1] / w
-                        val screenNormX = (ndcX + 1.0f) * 0.5f
-                        val screenNormY = (1.0f - ndcY) * 0.5f
-
-                        resultMap[id] = mapOf(
-                            "x" to screenNormX.toDouble(),
-                            "y" to screenNormY.toDouble(),
-                            "inView" to (screenNormX in -0.1f..1.1f && screenNormY in -0.1f..1.1f),
-                            "worldX" to pose.tx().toDouble(),
-                            "worldY" to pose.ty().toDouble(),
-                            "worldZ" to pose.tz().toDouble()
-                        )
-                    }
-                }
-
-                // 2. Query 3D real-time coordinates of the center reticle for live distance line tracking
-                val centerPixelX = viewportWidth * 0.5f
-                val centerPixelY = viewportHeight * 0.5f
-                var centerHits = frame.hitTest(centerPixelX, centerPixelY)
-                if (centerHits.isEmpty()) {
-                    try {
-                        centerHits = frame.hitTestInstantPlacement(centerPixelX, centerPixelY, 0.8f)
-                    } catch (e: Exception) {}
-                }
-
-                var reticleHit: HitResult? = null
-                for (hit in centerHits) {
-                    val trackable = hit.trackable
-                    if ((trackable is Plane && trackable.isPoseInPolygon(hit.hitPose)) ||
-                        trackable is InstantPlacementPoint ||
-                        (trackable is Point && trackable.orientationMode == Point.OrientationMode.ESTIMATED_SURFACE_NORMAL)) {
-                        reticleHit = hit
-                        break
-                    }
-                }
-                if (reticleHit == null && centerHits.isNotEmpty()) {
-                    reticleHit = centerHits[0]
-                }
-
-                if (reticleHit != null) {
-                    val rPose = reticleHit.hitPose
-                    resultMap["__reticle__"] = mapOf(
-                        "worldX" to rPose.tx().toDouble(),
-                        "worldY" to rPose.ty().toDouble(),
-                        "worldZ" to rPose.tz().toDouble(),
-                        "hasHit" to true
-                    )
-                } else {
-                    val camPose = frame.camera.pose
-                    val forwardRay = camPose.transformPoint(floatArrayOf(0f, 0f, -0.6f))
-                    resultMap["__reticle__"] = mapOf(
-                        "worldX" to forwardRay[0].toDouble(),
-                        "worldY" to forwardRay[1].toDouble(),
-                        "worldZ" to forwardRay[2].toDouble(),
-                        "hasHit" to false
-                    )
-                }
-
-                result.success(resultMap)
-            }
+            "getAnchorScreenPositions" -> result.success(anchorSnapshot)
             "removeAnchor" -> {
-                val anchorId = call.argument<String>("anchorId")
-                if (anchorId != null) {
-                    val anchor = activeAnchors.remove(anchorId)
-                    anchor?.detach()
-                }
+                val anchor = call.argument<String>("anchorId")?.let { activeAnchors.remove(it) }
+                if (anchor != null) glSurfaceView.queueEvent { anchor.detach() }
                 result.success(true)
             }
             "clearAllAnchors" -> {
-                for (anchor in activeAnchors.values) {
-                    anchor.detach()
-                }
+                val anchors = activeAnchors.values.toList()
                 activeAnchors.clear()
+                glSurfaceView.queueEvent { anchors.forEach { it.detach() } }
                 result.success(true)
             }
             "pauseSession" -> {

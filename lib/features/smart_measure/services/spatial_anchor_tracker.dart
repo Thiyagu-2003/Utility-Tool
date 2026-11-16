@@ -92,10 +92,11 @@ class SpatialAnchor {
     // Camera is at cameraPosY (0.0). Plane is at -H.
     // Ray: cameraPosY + t * wY = -H  ==>  t = (-H - cameraPosY) / wY
     double t;
-    if (wY.abs() > 0.05) {
-      t = (-surfaceHeightMeters - cameraPosY) / (wY < 0 ? wY : -wY);
+    if (wY < -0.05) {
+      t = (-surfaceHeightMeters - cameraPosY) / wY;
     } else {
-      // Near horizontal ray, fallback to direct line-of-sight distance
+      // Horizontal or upward ray never meets the floor: keep the true ray direction at a nominal
+      // distance (flipping wY used to mirror the point above the camera).
       t = surfaceHeightMeters / math.sin(math.max(0.15, pitchRad.abs()));
     }
 
@@ -285,8 +286,9 @@ class SpatialAnchorTracker extends ChangeNotifier {
 
         if (dt > 0 && dt < 0.2) {
           // Gyroscope yaw rate around phone Y-axis in portrait
+          // Android: +y rate = counter-clockwise seen from above = turning LEFT; our yaw is +right.
           final yawRateDeg = event.y * (180.0 / math.pi);
-          currentYawDeg += yawRateDeg * dt;
+          currentYawDeg -= yawRateDeg * dt;
 
           _throttleNotify(onUpdate);
         }
@@ -301,12 +303,10 @@ class SpatialAnchorTracker extends ChangeNotifier {
         final norm = math.sqrt(ax * ax + ay * ay + az * az);
 
         if (norm > 0.1) {
-          // Precise tilt down from horizontal (pitch)
-          // When phone is vertical, pitch = 90°. When flat, pitch = 0°.
-          final pitchRad = math.atan2(ay.abs(), math.sqrt(ax * ax + az * az));
+          // Camera angle below the horizon: upright = 0°, flat face-up = 90°, aiming up < 0.
           final rollRad = math.atan2(ax, math.sqrt(ay * ay + az * az));
 
-          final newPitchDeg = pitchRad * (180.0 / math.pi);
+          final newPitchDeg = math.atan2(az, math.sqrt(ax * ax + ay * ay)) * (180.0 / math.pi);
           final newRollDeg = rollRad * (180.0 / math.pi);
 
           // Exponential moving average filter (reduces hand tremors by 80%)
