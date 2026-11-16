@@ -69,6 +69,8 @@ dependencies:
   url_launcher: ^6.3.3
   open_filex: ^5.0.0
   youtube_explode_dart: ^3.1.0
+  camera: ^0.12.2
+  camera_windows: ^0.3.1
 
 dev_dependencies:
   flutter_test:

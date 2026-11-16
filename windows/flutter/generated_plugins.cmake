@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   battery_plus
+  camera_windows
   flutter_tts
   printing
   share_plus

@@ -49,6 +49,7 @@ import '../../features/productivity/productivity_toolkit_screen.dart';
 import '../../features/entertainment/entertainment_tracker_screen.dart';
 import '../../features/file_tools/archive_preview_toolkit_screen.dart';
 import '../../features/slate/slate_screen.dart';
+import '../../features/smart_measure/ui/smart_measure_dashboard_screen.dart';
 
 class ToolRegistry {
   static final List<ToolItem> allTools = [
@@ -631,6 +632,35 @@ class ToolRegistry {
         'kdrama'
       ],
       builder: (_) => const EntertainmentTrackerScreen(),
+    ),
+    // Smart Measure: Advanced Camera-Based Measurement System
+    ToolItem(
+      id: 'smart_measure',
+      title: 'Smart Measure',
+      description: 'AR camera measurements, 3D point-to-point, object, room, person height, angle & level',
+      category: ToolCategory.deviceTests,
+      icon: Icons.straighten_rounded,
+      customColor: const Color(0xFF2563EB),
+      keywords: [
+        'measure',
+        'smart measure',
+        'camera',
+        'ar',
+        'arcore',
+        'arkit',
+        'lidar',
+        'tape',
+        'distance',
+        'dimension',
+        'height',
+        'room',
+        'area',
+        'level',
+        'angle',
+        'ruler',
+        'calibration'
+      ],
+      builder: (_) => const SmartMeasureDashboardScreen(),
     ),
   ];
 

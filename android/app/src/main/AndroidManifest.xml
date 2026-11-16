@@ -12,6 +12,10 @@
         android:label="ToolBox Pro"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- Google ARCore optional metadata: allows installation on non-AR devices with fallback -->
+        <meta-data
+            android:name="com.google.ar.core"
+            android:value="optional" />
         <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
         <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
             <intent-filter>

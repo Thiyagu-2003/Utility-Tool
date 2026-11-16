@@ -2,7 +2,7 @@
 
 > **Release Version**: `1.0.90` (Build `#90`)  
 > **Status**: Production Ready & Fully Tested (Pure Offline Client)  
-> **Total Built-in Tools**: 53 Registered Tools  
+> **Total Built-in Tools**: 54 Registered Tools  
 > **Architecture**: Pure Offline Flutter Client with Dynamic Scaling & Multi-Language Support (English, தமிழ், हिंदी, Español)
 
 Here is the comprehensive list of features currently implemented in the app, categorized by domain and screen toolkit:
@@ -25,7 +25,7 @@ Here is the comprehensive list of features currently implemented in the app, cat
 | Media & Downloads | Media Downloader, Audio & Video Studio, Voice Studio (TTS & Speech-to-Text) |
 | QR & Barcode | QR & Barcode Suite, QR Contact & vCard Share |
 | Developer | Developer Suite, XML & YAML Formatter |
-| Device & Hardware | Device & Hardware Studio, Compass & Spirit Level, Sensor Tester, Battery Status, Mic & Speaker Tester, Touchscreen Digitizer Test, Screen Color & Pixel Test, Vibration & Haptics Tester, Screen Refresh Rate & Specs, Sound-Level (dB) Estimator |
+| Device & Hardware | Smart Measure, Device & Hardware Studio, Compass & Spirit Level, Sensor Tester, Battery Status, Mic & Speaker Tester, Touchscreen Digitizer Test, Screen Color & Pixel Test, Vibration & Haptics Tester, Screen Refresh Rate & Specs, Sound-Level (dB) Estimator |
 | Security | Password & Security Generator |
 | Kitchen | Kitchen & Recipe Tools |
 | Random & Decision | Random & Decision |
@@ -375,6 +375,33 @@ Here is the comprehensive list of features currently implemented in the app, cat
 ---
 
 ## 15. Device & Hardware
+- [x] **Smart Measure – Advanced Camera-Based Measurement System** (`SmartMeasureDashboardScreen`):
+  - Advanced, camera-based measurement system inspired by professional measurement tools, powered by real-world AR and sensor geometry.
+  - **15 Professional Measurement Tools**:
+    1. **Quick Measure**: Instant 2-point direct raycast dimensioning.
+    2. **Point-to-Point Measurement**: Multi-point 3D Euclidean distance along complex paths.
+    3. **Length Measurement**: Guided horizontal span dimensioning.
+    4. **Width Measurement**: Guided perpendicular cross-sectional span.
+    5. **Height Measurement**: Gravity-referenced vertical dimensioning for doors, walls, and furniture.
+    6. **Area Measurement**: Multi-point 3D planar polygon area calculation via vector cross-product Shoelace algorithm.
+    7. **Room Measurement**: Floor-plane lock, multi-wall connected perimeter mapping, automatic rectangular & polygon floor area, ceiling height, volume, and structured room summary.
+    8. **Object Dimension Measurement**: Corner-by-corner 3D bounding box (Length, Width, Height, Volume in liters and $m^3$, Surface Area, 3D Spatial Diagonal).
+    9. **Person Height Measurement**: Ground-plane alignment to crown of head with visual guidance and estimated vs. LiDAR depth labeling.
+    10. **Distance Measurement**: Continuous real-time center-reticle depth tracking from camera lens to surfaces.
+    11. **Angle Measurement**: 3-point 3D vector angle calculation ($\arccos(\vec{u} \cdot \vec{v})$) displaying interior and reflex angles.
+    12. **Level Tool**: High-precision 2D bullseye bubble level and tubular spirit levels with zero-surface calibration, angular degree readout, and haptic level feedback.
+    13. **Surface Measurement**: Plane surface area, inclination angle, and horizontal vs. vertical orientation slope.
+    14. **Manual Image Measurement**: Calibrated 2D photo measurement using standard reference objects (Credit Card, A4 paper, Coins, Rulers, or Custom physical length) with perspective distortion warnings.
+    15. **Measurement History**: Offline persistent storage, editing, type filtering, real-time search, clipboard summaries, and PDF audit report generation.
+  - **Device Compatibility Matrix**:
+    - **Android**: Google ARCore integration (`com.google.ar:core`), Hardware Depth API check, and 6DoF tracking.
+    - **iOS**: Apple ARKit 6DoF tracking, LiDAR mesh depth sensing, and scene depth support.
+    - **Desktop (Windows, macOS, Linux)**: Calibrated manual image measurement and sensor/inclinometer fallback.
+  - **Accuracy & Honesty**:
+    - Multi-tier confidence indicators: High, Medium, Low, Tracking Lost.
+    - Honest physical uncertainty calculation ($\pm \Delta$ mm/cm) based on sensor depth, incident angle, and tracking state.
+    - Offline-only operation with zero cloud dependencies.
+
 - [x] **Device & Hardware Studio** (`DeviceHardwareToolkitScreen`):
   - **Device Info Viewer**: Device model, brand, manufacturer, OS version, SDK build, screen resolution, DPR, hardware specs & PDF/Text spec report export
   - **Digital Magnetic Compass**: Rotating 360° compass rose with heading degrees and cardinal orientation (N, NE, E, SE, S, SW, W, NW)
