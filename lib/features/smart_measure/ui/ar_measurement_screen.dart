@@ -107,6 +107,12 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
   final List<_LockedSegment> _lockedSegments = [];
   final List<_LockedSegment> _undoHistory = [];
 
+  // Live 3D reticle coordinates from ARCore tracking
+  double? _reticleWorldX;
+  double? _reticleWorldY;
+  double? _reticleWorldZ;
+  bool _isSyncingTracking = false;
+
   // Surface Detection & Guidance State
   bool _isSurfaceDetected = false;
   String _surfaceStatusMessage = 'Searching for a surface...';
@@ -256,45 +262,61 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
   }
 
   Future<void> _syncARCoreTracking() async {
-    if (!_useNativeARCore || !_isNativeViewReady) return;
+    if (!_useNativeARCore || !_isNativeViewReady || _isSyncingTracking) return;
+    _isSyncingTracking = true;
 
-    // 1. Query surface state
-    final status = await ARPlatformBridge().querySurfaceStatus();
-    if (status != null && mounted) {
-      final hasSurf = status['hasSurface'] as bool? ?? false;
-      final planes = status['planesCount'] as int? ?? 0;
-      final type = status['surfaceType'] as String? ?? 'NONE';
-      final msg = status['statusMessage'] as String? ?? '';
+    try {
+      // 1. Query surface state
+      final status = await ARPlatformBridge().querySurfaceStatus();
+      if (status != null && mounted) {
+        final hasSurf = status['hasSurface'] as bool? ?? false;
+        final planes = status['planesCount'] as int? ?? 0;
+        final type = status['surfaceType'] as String? ?? 'NONE';
+        final msg = status['statusMessage'] as String? ?? '';
 
-      if (_isSurfaceDetected != hasSurf || _surfaceStatusMessage != msg || _planesCount != planes) {
-        setState(() {
-          _isSurfaceDetected = hasSurf;
-          _planesCount = planes;
-          _surfaceType = type;
-          _surfaceStatusMessage = msg;
-        });
+        if (_isSurfaceDetected != hasSurf || _surfaceStatusMessage != msg || _planesCount != planes) {
+          setState(() {
+            _isSurfaceDetected = hasSurf;
+            _planesCount = planes;
+            _surfaceType = type;
+            _surfaceStatusMessage = msg;
+          });
+        }
       }
-    }
 
-    // 2. Query anchor screen reprojection from ARCore camera matrix
-    final anchorIds = <String>[];
-    if (_activeStartAnchor != null && _activeStartAnchor!.isNative) {
-      anchorIds.add(_activeStartAnchor!.id);
-    }
-    for (final seg in _lockedSegments) {
-      if (seg.start.isNative) anchorIds.add(seg.start.id);
-      if (seg.end.isNative) anchorIds.add(seg.end.id);
-    }
+      // 2. Query anchor screen reprojection and live reticle world pose from ARCore camera matrix
+      final anchorIds = <String>[];
+      if (_activeStartAnchor != null && _activeStartAnchor!.isNative) {
+        anchorIds.add(_activeStartAnchor!.id);
+      }
+      for (final seg in _lockedSegments) {
+        if (seg.start.isNative) anchorIds.add(seg.start.id);
+        if (seg.end.isNative) anchorIds.add(seg.end.id);
+      }
 
-    if (anchorIds.isNotEmpty) {
       final positions = await ARPlatformBridge().getAnchorScreenPositions(anchorIds);
-      if (positions.isNotEmpty && mounted) {
+      if (!mounted) return;
+
+      bool needsRepaint = false;
+
+      if (positions.isNotEmpty) {
+        if (positions.containsKey('__reticle__')) {
+          final rData = Map<String, dynamic>.from(positions['__reticle__'] as Map);
+          _reticleWorldX = (rData['worldX'] as num).toDouble();
+          _reticleWorldY = (rData['worldY'] as num).toDouble();
+          _reticleWorldZ = (rData['worldZ'] as num).toDouble();
+          if (_activeStartAnchor != null) {
+            needsRepaint = true;
+          }
+        }
+
         if (_activeStartAnchor != null && positions.containsKey(_activeStartAnchor!.id)) {
           final data = Map<String, dynamic>.from(positions[_activeStartAnchor!.id] as Map);
           _activeStartAnchor!.screenPosition = Offset(
             (data['x'] as num).toDouble(),
             (data['y'] as num).toDouble(),
           );
+          needsRepaint = true;
         }
 
         for (final seg in _lockedSegments) {
@@ -304,6 +326,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
               (data['x'] as num).toDouble(),
               (data['y'] as num).toDouble(),
             );
+            needsRepaint = true;
           }
           if (positions.containsKey(seg.end.id)) {
             final data = Map<String, dynamic>.from(positions[seg.end.id] as Map);
@@ -311,9 +334,16 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
               (data['x'] as num).toDouble(),
               (data['y'] as num).toDouble(),
             );
+            needsRepaint = true;
           }
         }
       }
+
+      if (needsRepaint && mounted) {
+        setState(() {});
+      }
+    } finally {
+      _isSyncingTracking = false;
     }
   }
 
@@ -863,17 +893,23 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                     _activeStartAnchor!.screenPosition.dy * size.height,
                   );
 
-                  // Compute live distance from active start point to center reticle
-                  final currentReticleAnchor = _spatialTracker.createAnchorAtScreenPoint(
-                    'reticle_temp',
-                    const Offset(0.5, 0.5),
-                  );
-
-                  final liveDist = math.sqrt(
-                    math.pow(currentReticleAnchor.worldX - _activeStartAnchor!.worldX, 2) +
-                    math.pow(currentReticleAnchor.worldY - _activeStartAnchor!.worldY, 2) +
-                    math.pow(currentReticleAnchor.worldZ - _activeStartAnchor!.worldZ, 2)
-                  );
+                  // Compute live 3D distance from active start point to center reticle
+                  double liveDist;
+                  if (_useNativeARCore && _reticleWorldX != null && _reticleWorldY != null && _reticleWorldZ != null) {
+                    final dx = _reticleWorldX! - _activeStartAnchor!.worldX;
+                    final dy = _reticleWorldY! - _activeStartAnchor!.worldY;
+                    final dz = _reticleWorldZ! - _activeStartAnchor!.worldZ;
+                    liveDist = math.sqrt(dx * dx + dy * dy + dz * dz);
+                  } else {
+                    final currentReticleAnchor = _spatialTracker.createAnchorAtScreenPoint(
+                      'reticle_temp',
+                      const Offset(0.5, 0.5),
+                    );
+                    final dx = currentReticleAnchor.worldX - _activeStartAnchor!.worldX;
+                    final dy = currentReticleAnchor.worldY - _activeStartAnchor!.worldY;
+                    final dz = currentReticleAnchor.worldZ - _activeStartAnchor!.worldZ;
+                    liveDist = math.sqrt(dx * dx + dy * dy + dz * dz);
+                  }
 
                   liveDistanceLabel = _unit.formatMeters(liveDist, decimals: liveDist < 0.1 ? 1 : 0);
                 }

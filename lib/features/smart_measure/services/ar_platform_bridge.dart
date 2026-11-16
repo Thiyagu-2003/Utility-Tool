@@ -85,9 +85,9 @@ class ARPlatformBridge {
     return null;
   }
 
-  /// Get real-time screen reprojected positions for tracked ARCore anchors
+  /// Get real-time screen reprojected positions for tracked ARCore anchors and current reticle
   Future<Map<String, dynamic>> getAnchorScreenPositions(List<String> anchorIds) async {
-    if (_viewChannel == null || anchorIds.isEmpty) return {};
+    if (_viewChannel == null) return {};
     try {
       final res = await _viewChannel!.invokeMethod<Map<dynamic, dynamic>>('getAnchorScreenPositions', {'anchorIds': anchorIds});
       if (res != null) {

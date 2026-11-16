@@ -389,7 +389,13 @@ class SmartMeasureArView(
                 val pixelX = normX * viewportWidth
                 val pixelY = normY * viewportHeight
 
-                val hitResults = frame.hitTest(pixelX, pixelY)
+                var hitResults = frame.hitTest(pixelX, pixelY)
+                if (hitResults.isEmpty()) {
+                    try {
+                        hitResults = frame.hitTestInstantPlacement(pixelX, pixelY, 0.8f)
+                    } catch (e: Exception) {}
+                }
+
                 var bestHit: HitResult? = null
 
                 // 1. Preference: Hit on tracked plane polygon
@@ -418,29 +424,46 @@ class SmartMeasureArView(
                     bestHit = hitResults[0]
                 }
 
-                if (bestHit != null) {
-                    val anchor = bestHit.createAnchor()
-                    val anchorId = UUID.randomUUID().toString()
-                    activeAnchors[anchorId] = anchor
+                val anchor: Anchor
+                val planeType: String
+                val depth: Double
 
+                if (bestHit != null) {
+                    anchor = bestHit.createAnchor()
+                    planeType = if (bestHit.trackable is Plane) "PLANE" else "INSTANT"
                     val pose = anchor.pose
                     val cameraPose = frame.camera.pose
                     val dx = pose.tx() - cameraPose.tx()
                     val dy = pose.ty() - cameraPose.ty()
                     val dz = pose.tz() - cameraPose.tz()
-                    val depth = Math.sqrt((dx * dx + dy * dy + dz * dz).toDouble())
-
-                    result.success(mapOf(
-                        "anchorId" to anchorId,
-                        "x" to pose.tx().toDouble(),
-                        "y" to pose.ty().toDouble(),
-                        "z" to pose.tz().toDouble(),
-                        "depth" to depth,
-                        "planeType" to if (bestHit.trackable is Plane) "PLANE" else "INSTANT"
-                    ))
+                    depth = Math.sqrt((dx * dx + dy * dy + dz * dz).toDouble())
                 } else {
-                    result.error("NO_HIT", "No surface hit at this position", null)
+                    val camPose = frame.camera.pose
+                    val forwardRay = camPose.transformPoint(floatArrayOf(0f, 0f, -0.6f))
+                    val anchorPose = Pose(forwardRay, camPose.rotationQuaternion)
+                    val createdAnchor = session?.createAnchor(anchorPose)
+                    if (createdAnchor != null) {
+                        anchor = createdAnchor
+                        planeType = "RAY_PLANE"
+                        depth = 0.6
+                    } else {
+                        result.error("NO_HIT", "No surface hit at this position", null)
+                        return
+                    }
                 }
+
+                val anchorId = UUID.randomUUID().toString()
+                activeAnchors[anchorId] = anchor
+
+                val pose = anchor.pose
+                result.success(mapOf(
+                    "anchorId" to anchorId,
+                    "x" to pose.tx().toDouble(),
+                    "y" to pose.ty().toDouble(),
+                    "z" to pose.tz().toDouble(),
+                    "depth" to depth,
+                    "planeType" to planeType
+                ))
             }
             "getAnchorScreenPositions" -> {
                 val anchorIds = call.argument<List<String>>("anchorIds") ?: emptyList()
@@ -463,6 +486,7 @@ class SmartMeasureArView(
                 val worldPosIn = FloatArray(4)
                 val clipPosOut = FloatArray(4)
 
+                // 1. Reproject all dropped anchors to 2D screen coordinates
                 for (id in anchorIds) {
                     val anchor = activeAnchors[id] ?: continue
                     if (anchor.trackingState != TrackingState.TRACKING) continue
@@ -492,6 +516,50 @@ class SmartMeasureArView(
                         )
                     }
                 }
+
+                // 2. Query 3D real-time coordinates of the center reticle for live distance line tracking
+                val centerPixelX = viewportWidth * 0.5f
+                val centerPixelY = viewportHeight * 0.5f
+                var centerHits = frame.hitTest(centerPixelX, centerPixelY)
+                if (centerHits.isEmpty()) {
+                    try {
+                        centerHits = frame.hitTestInstantPlacement(centerPixelX, centerPixelY, 0.8f)
+                    } catch (e: Exception) {}
+                }
+
+                var reticleHit: HitResult? = null
+                for (hit in centerHits) {
+                    val trackable = hit.trackable
+                    if ((trackable is Plane && trackable.isPoseInPolygon(hit.hitPose)) ||
+                        trackable is InstantPlacementPoint ||
+                        (trackable is Point && trackable.orientationMode == Point.OrientationMode.ESTIMATED_SURFACE_NORMAL)) {
+                        reticleHit = hit
+                        break
+                    }
+                }
+                if (reticleHit == null && centerHits.isNotEmpty()) {
+                    reticleHit = centerHits[0]
+                }
+
+                if (reticleHit != null) {
+                    val rPose = reticleHit.hitPose
+                    resultMap["__reticle__"] = mapOf(
+                        "worldX" to rPose.tx().toDouble(),
+                        "worldY" to rPose.ty().toDouble(),
+                        "worldZ" to rPose.tz().toDouble(),
+                        "hasHit" to true
+                    )
+                } else {
+                    val camPose = frame.camera.pose
+                    val forwardRay = camPose.transformPoint(floatArrayOf(0f, 0f, -0.6f))
+                    resultMap["__reticle__"] = mapOf(
+                        "worldX" to forwardRay[0].toDouble(),
+                        "worldY" to forwardRay[1].toDouble(),
+                        "worldZ" to forwardRay[2].toDouble(),
+                        "hasHit" to false
+                    )
+                }
+
                 result.success(resultMap)
             }
             "removeAnchor" -> {
