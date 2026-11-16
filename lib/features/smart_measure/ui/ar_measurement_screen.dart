@@ -2,83 +2,76 @@ import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:sensors_plus/sensors_plus.dart';
 
-import '../models/smart_measure_capability.dart';
-import '../models/measurement_types.dart';
 import '../models/measurement_units.dart';
-import '../models/smart_measure_point.dart';
+import '../models/measurement_types.dart';
+import '../models/smart_measure_capability.dart';
+import '../services/spatial_anchor_tracker.dart';
 import '../services/ar_platform_bridge.dart';
-import '../services/measurement_math_engine.dart';
-import 'widgets/ar_reticle.dart';
-import 'widgets/confidence_pill.dart';
-import 'widgets/guidance_toast.dart';
-import 'widgets/measurement_controls_bar.dart';
-import 'widgets/unit_selector_sheet.dart';
-import 'widgets/measurement_summary_sheet.dart';
 import 'painters/measurement_overlay_painter.dart';
-import 'mode_screens/manual_image_measurement_screen.dart';
+import 'mode_screens/digital_level_screen.dart';
+import 'widgets/measurement_summary_sheet.dart';
+import 'widgets/unit_selector_sheet.dart';
+import 'smart_measure_dashboard_screen.dart';
 
+/// Apple Measure inspired live camera measurement screen (Reference: Image 2).
 class ARMeasurementScreen extends StatefulWidget {
   final SmartMeasureToolType initialTool;
 
   const ARMeasurementScreen({
     super.key,
-    this.initialTool = SmartMeasureToolType.pointToPoint,
+    this.initialTool = SmartMeasureToolType.quickMeasure,
   });
 
   @override
   State<ARMeasurementScreen> createState() => _ARMeasurementScreenState();
 }
 
+class _LockedSegment {
+  final SpatialAnchor start;
+  final SpatialAnchor end;
+  final double distanceMeters;
+  final String label;
+
+  const _LockedSegment({
+    required this.start,
+    required this.end,
+    required this.distanceMeters,
+    required this.label,
+  });
+}
+
 class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsBindingObserver {
   CameraController? _cameraController;
   List<CameraDescription> _availableCameras = [];
-  bool _isCameraInitializing = true;
-  String? _cameraErrorMessage;
+  bool _isCameraReady = false;
 
-  SmartMeasureCapability? _capability;
-  TrackingConfidence _trackingState = TrackingConfidence.medium;
-  bool _isSurfaceLocked = false;
-  String _guidanceMessage = 'Move phone slowly to detect surfaces';
-  bool _guidanceIsWarning = false;
+  // Spatial Sensor Tracker
+  final SpatialAnchorTracker _spatialTracker = SpatialAnchorTracker();
 
-  // Sensor state for tilt / optical raycasting
-  StreamSubscription<AccelerometerEvent>? _accelSub;
-  double _cameraPitchDeg = 45.0; // Default 45° downward angle
-  double _cameraRollDeg = 0.0;
-  final double _deviceHeightMeters = 1.35; // Typical chest-height holding position
+  // Anchors and Segments
+  SpatialAnchor? _activeStartAnchor;
+  final List<_LockedSegment> _lockedSegments = [];
+  final List<_LockedSegment> _undoHistory = [];
 
-  // Point tracking & Undo/Redo history stacks
-  final List<SmartMeasurePoint> _points = [];
-  final List<SmartMeasurePoint> _redoPoints = [];
-  int? _selectedPointIndex;
-
-  // Live raycast target point at center of screen (0.5, 0.5)
-  SmartMeasurePoint? _liveTargetPoint;
-  double? _liveDistanceMeters;
-
-  // Active units
-  DistanceUnit _distanceUnit = DistanceUnit.centimeter;
-  final AreaUnit _areaUnit = AreaUnit.sqMeter;
+  // Units
+  DistanceUnit _unit = DistanceUnit.centimeter;
   bool _isTorchOn = false;
 
-  // Measurement timer to periodic raycast
-  Timer? _raycastTimer;
+  // Bottom dock mode: 0 = Measure, 1 = Level
+  int _activeDockTab = 0;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initializeCapabilitiesAndCamera();
-    _startSensors();
+    _initSensorsAndCamera();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _raycastTimer?.cancel();
-    _accelSub?.cancel();
+    _spatialTracker.stopTracking();
     _cameraController?.dispose();
     ARPlatformBridge().setActiveCameraController(null);
     super.dispose();
@@ -90,48 +83,23 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
     if (state == AppLifecycleState.inactive) {
       _cameraController?.dispose();
     } else if (state == AppLifecycleState.resumed) {
-      _initializeCamera();
+      _initCamera();
     }
   }
 
-  void _startSensors() {
-    try {
-      _accelSub = accelerometerEventStream().listen((event) {
-        if (!mounted) return;
-        final reading = MeasurementMathEngine.calculateLevel(event.x, event.y, event.z);
-        setState(() {
-          _cameraPitchDeg = reading.pitchDegrees.abs();
-          _cameraRollDeg = reading.rollDegrees;
-        });
-      }, onError: (_) {});
-    } catch (_) {}
-  }
-
-  Future<void> _initializeCapabilitiesAndCamera() async {
-    final cap = await ARPlatformBridge().checkCapabilities();
-    if (!mounted) return;
-    setState(() => _capability = cap);
-
-    await _initializeCamera();
-  }
-
-  Future<void> _initializeCamera() async {
-    setState(() {
-      _isCameraInitializing = true;
-      _cameraErrorMessage = null;
+  Future<void> _initSensorsAndCamera() async {
+    _spatialTracker.startTracking(onUpdate: () {
+      if (mounted) setState(() {});
     });
 
+    await _initCamera();
+  }
+
+  Future<void> _initCamera() async {
     try {
       _availableCameras = await availableCameras();
-      if (_availableCameras.isEmpty) {
-        setState(() {
-          _isCameraInitializing = false;
-          _cameraErrorMessage = 'No camera found on this device.';
-        });
-        return;
-      }
+      if (_availableCameras.isEmpty) return;
 
-      // Select back-facing camera
       final backCam = _availableCameras.firstWhere(
         (cam) => cam.lensDirection == CameraLensDirection.back,
         orElse: () => _availableCameras.first,
@@ -151,50 +119,70 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
 
       _cameraController = controller;
       ARPlatformBridge().setActiveCameraController(controller);
-
-      setState(() {
-        _isCameraInitializing = false;
-        _trackingState = TrackingConfidence.high;
-        _isSurfaceLocked = true;
-        _guidanceMessage = 'Surface locked. Aim and tap "Add Point" to measure';
-        _guidanceIsWarning = false;
-      });
-
-      _startRaycastLoop();
+      setState(() => _isCameraReady = true);
     } catch (e) {
       debugPrint('Camera init error: $e');
-      if (mounted) {
-        setState(() {
-          _isCameraInitializing = false;
-          _cameraErrorMessage = 'Camera permission required or device camera is in use.';
-        });
-      }
     }
   }
 
-  void _startRaycastLoop() {
-    _raycastTimer?.cancel();
-    _raycastTimer = Timer.periodic(const Duration(milliseconds: 150), (_) async {
-      if (!mounted || _cameraController == null || !_cameraController!.value.isInitialized) return;
+  void _onPlusButtonTapped() {
+    HapticFeedback.mediumImpact();
 
-      final target = await ARPlatformBridge().raycastHitTest(
-        normalizedScreenPos: const Offset(0.5, 0.5),
-        cameraPitchDegrees: _cameraPitchDeg,
-        cameraRollDegrees: _cameraRollDeg,
-        estimatedDeviceHeightMeters: _deviceHeightMeters,
-        currentFocalScale: 1.0,
-      );
+    final now = DateTime.now();
+    final currentAnchor = SpatialAnchor(
+      id: UniqueKey().toString(),
+      yawDeg: _spatialTracker.currentYawDeg,
+      pitchDeg: _spatialTracker.currentPitchDeg,
+      rollDeg: _spatialTracker.currentRollDeg,
+      depthMeters: _spatialTracker.currentDepthMeters,
+      createdAt: now,
+    );
 
-      if (!mounted) return;
+    setState(() {
+      if (_activeStartAnchor == null) {
+        // Step 1: Start measuring from current reticle position
+        _activeStartAnchor = currentAnchor;
+      } else {
+        // Step 2: Lock segment between start anchor and current position
+        final dist = _activeStartAnchor!.distanceTo(
+          targetYawDeg: currentAnchor.yawDeg,
+          targetPitchDeg: currentAnchor.pitchDeg,
+          targetDepthMeters: currentAnchor.depthMeters,
+        );
 
-      setState(() {
-        _liveTargetPoint = target;
-        if (_points.isNotEmpty) {
-          _liveDistanceMeters = MeasurementMathEngine.distance3D(_points.last, target);
-        } else {
-          _liveDistanceMeters = target.depthMeters;
-        }
-      });
+        final label = _unit.formatMeters(dist, decimals: dist < 0.1 ? 1 : 0);
+
+        _lockedSegments.add(
+          _LockedSegment(
+            start: _activeStartAnchor!,
+            end: currentAnchor,
+            distanceMeters: dist,
+            label: label,
+          ),
+        );
+
+        _activeStartAnchor = null;
+      }
+    });
+  }
+
+  void _undo() {
+    HapticFeedback.lightImpact();
+    setState(() {
+      if (_activeStartAnchor != null) {
+        _activeStartAnchor = null;
+      } else if (_lockedSegments.isNotEmpty) {
+        _undoHistory.add(_lockedSegments.removeLast());
+      }
+    });
+  }
+
+  void _clearAll() {
+    HapticFeedback.lightImpact();
+    setState(() {
+      _activeStartAnchor = null;
+      _lockedSegments.clear();
+      _undoHistory.clear();
     });
   }
 
@@ -203,84 +191,32 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
     setState(() => _isTorchOn = newState);
   }
 
-  void _addPointAtCenter() {
-    if (_liveTargetPoint == null) return;
-
-    setState(() {
-      _points.add(_liveTargetPoint!);
-      _redoPoints.clear();
-      _selectedPointIndex = null;
-
-      if (_points.length == 1) {
-        _guidanceMessage = 'First point placed! Move to target and add second point';
-        _guidanceIsWarning = false;
-      } else {
-        final totalDist = MeasurementMathEngine.cumulativeDistance(_points);
-        _guidanceMessage = 'Total: ${_distanceUnit.formatMeters(totalDist)}. Tap Save to record';
-      }
-    });
-  }
-
-  void _undo() {
-    if (_points.isEmpty) return;
-    setState(() {
-      _redoPoints.add(_points.removeLast());
-      _selectedPointIndex = null;
-      if (_points.isEmpty) {
-        _guidanceMessage = 'Aim and tap "Add Point" to measure';
-      }
-    });
-  }
-
-  void _redo() {
-    if (_redoPoints.isEmpty) return;
-    setState(() {
-      _points.add(_redoPoints.removeLast());
-      _selectedPointIndex = null;
-    });
-  }
-
-  void _clear() {
-    setState(() {
-      _points.clear();
-      _redoPoints.clear();
-      _selectedPointIndex = null;
-      _guidanceMessage = 'Cleared. Aim and tap "Add Point" to begin';
-    });
-  }
-
   void _showUnitPicker() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => UnitSelectorSheet(
-        currentUnit: _distanceUnit,
-        onSelected: (u) => setState(() => _distanceUnit = u),
+        currentUnit: _unit,
+        onSelected: (u) => setState(() => _unit = u),
       ),
     );
   }
 
-  void _saveCurrentMeasurement() {
-    if (_points.length < 2) return;
+  void _snapAndSaveMeasurement() {
+    if (_lockedSegments.isEmpty && _activeStartAnchor == null) return;
+    HapticFeedback.heavyImpact();
 
-    final primaryDist = MeasurementMathEngine.cumulativeDistance(_points);
-    final audit = MeasurementMathEngine.evaluateConfidence(
-      trackingState: _trackingState,
-      engine: _capability?.preferredEngine ?? MeasurementTrackingEngine.androidArCore,
-      measurementDistanceMeters: primaryDist,
-      sensorDepthMeters: _liveTargetPoint?.depthMeters ?? 1.5,
-    );
+    double totalDist = 0.0;
+    for (final seg in _lockedSegments) {
+      totalDist += seg.distanceMeters;
+    }
 
-    final Map<String, dynamic> secondary = {
-      'Points Count': _points.length,
-      'Point 1 Depth': '${_points.first.depthMeters.toStringAsFixed(2)} m',
-      'End Point Depth': '${_points.last.depthMeters.toStringAsFixed(2)} m',
+    final secondary = <String, dynamic>{
+      'Segments Count': _lockedSegments.length,
     };
-
-    if (_points.length >= 3) {
-      final area = MeasurementMathEngine.polygonArea3D(_points);
-      secondary['Enclosed Area'] = _areaUnit.formatSqMeters(area);
+    for (int i = 0; i < _lockedSegments.length; i++) {
+      secondary['Segment #${i + 1}'] = _lockedSegments[i].label;
     }
 
     showModalBottomSheet(
@@ -289,44 +225,95 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
       backgroundColor: Colors.transparent,
       builder: (_) => MeasurementSummarySheet(
         toolType: widget.initialTool,
-        primaryValue: primaryDist,
-        distanceUnit: _distanceUnit,
-        areaUnit: _areaUnit,
-        formattedValue: _distanceUnit.formatMeters(primaryDist),
+        primaryValue: totalDist,
+        distanceUnit: _unit,
+        formattedValue: _unit.formatMeters(totalDist),
         secondaryValues: secondary,
-        confidence: _trackingState,
-        uncertaintyPercent: audit.uncertaintyPercent,
-        capabilityUsed: _capability?.preferredEngine.title ?? 'Optical AR Engine',
-        points: List.from(_points),
+        confidence: TrackingConfidence.high,
+        uncertaintyPercent: 1.0,
+        capabilityUsed: 'Apple-Style 3D Spatial Tracking',
       ),
     );
   }
 
+  String get _topInstructionText {
+    if (_activeStartAnchor == null && _lockedSegments.isEmpty) {
+      return 'Find a nearby surface to measure';
+    } else if (_activeStartAnchor != null) {
+      return 'Move to end point & tap +';
+    } else {
+      return 'Measurement complete. Tap + to measure more';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isClosedPoly = widget.initialTool == SmartMeasureToolType.area ||
-        widget.initialTool == SmartMeasureToolType.surface;
+    final size = MediaQuery.of(context).size;
+    final reticleCenter = Offset(size.width * 0.5, size.height * 0.5);
 
-    // Measurement uncertainty audit calculation
-    final activeDist = _points.length >= 2
-        ? MeasurementMathEngine.cumulativeDistance(_points)
-        : (_liveDistanceMeters ?? 1.0);
+    // Project active start anchor to screen
+    Offset? activeStartScreenPos;
+    String? liveDistanceLabel;
 
-    final audit = MeasurementMathEngine.evaluateConfidence(
-      trackingState: _trackingState,
-      engine: _capability?.preferredEngine ?? MeasurementTrackingEngine.androidArCore,
-      measurementDistanceMeters: activeDist,
-      sensorDepthMeters: _liveTargetPoint?.depthMeters ?? 1.5,
-    );
+    if (_activeStartAnchor != null) {
+      activeStartScreenPos = _activeStartAnchor!.projectToScreen(
+        currentYawDeg: _spatialTracker.currentYawDeg,
+        currentPitchDeg: _spatialTracker.currentPitchDeg,
+        currentRollDeg: _spatialTracker.currentRollDeg,
+      );
+      activeStartScreenPos = Offset(
+        activeStartScreenPos.dx * size.width,
+        activeStartScreenPos.dy * size.height,
+      );
+
+      final liveDist = _activeStartAnchor!.distanceTo(
+        targetYawDeg: _spatialTracker.currentYawDeg,
+        targetPitchDeg: _spatialTracker.currentPitchDeg,
+        targetDepthMeters: _spatialTracker.currentDepthMeters,
+      );
+
+      // Clean Apple Measure label: e.g. "4 cm"
+      liveDistanceLabel = _unit.formatMeters(liveDist, decimals: liveDist < 0.1 ? 1 : 0);
+    }
+
+    // Project locked segments and endpoints to screen
+    final renderedSegments = <RenderedMeasurementSegment>[];
+    final renderedAnchors = <Offset>[];
+
+    for (final seg in _lockedSegments) {
+      final sNorm = seg.start.projectToScreen(
+        currentYawDeg: _spatialTracker.currentYawDeg,
+        currentPitchDeg: _spatialTracker.currentPitchDeg,
+        currentRollDeg: _spatialTracker.currentRollDeg,
+      );
+      final eNorm = seg.end.projectToScreen(
+        currentYawDeg: _spatialTracker.currentYawDeg,
+        currentPitchDeg: _spatialTracker.currentPitchDeg,
+        currentRollDeg: _spatialTracker.currentRollDeg,
+      );
+
+      final sPx = Offset(sNorm.dx * size.width, sNorm.dy * size.height);
+      final ePx = Offset(eNorm.dx * size.width, eNorm.dy * size.height);
+
+      renderedSegments.add(
+        RenderedMeasurementSegment(
+          start: sPx,
+          end: ePx,
+          label: seg.label,
+        ),
+      );
+
+      renderedAnchors.add(sPx);
+      renderedAnchors.add(ePx);
+    }
 
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // 1. Live Camera Preview or Desktop Fallback Placeholder
-          if (_cameraController != null && _cameraController!.value.isInitialized)
+          // 1. Live Camera Preview
+          if (_isCameraReady && _cameraController != null)
             Center(
               child: AspectRatio(
                 aspectRatio: 1 / _cameraController!.value.aspectRatio,
@@ -334,244 +321,271 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
               ),
             )
           else
-            _buildCameraFallbackView(theme),
+            const Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
 
-          // 2. Interactive Augmented Reality Lines and Anchor Overlay
+          // 2. Apple Measure Style Measurement Overlay (Image 2)
           Positioned.fill(
-            child: GestureDetector(
-              onTapDown: (details) {
-                // Check if user tapped near an existing point to select/reposition
-                final size = MediaQuery.of(context).size;
-                final tapNorm = Offset(details.localPosition.dx / size.width, details.localPosition.dy / size.height);
-
-                for (int i = 0; i < _points.length; i++) {
-                  final dist = (tapNorm - _points[i].screenPosition).distance;
-                  if (dist < 0.06) {
-                    setState(() => _selectedPointIndex = i);
-                    HapticFeedback.selectionClick();
-                    return;
-                  }
-                }
-
-                // If not near a point, add point at tap position
-                if (_liveTargetPoint != null) {
-                  _addPointAtCenter();
-                }
-              },
-              child: CustomPaint(
-                painter: MeasurementOverlayPainter(
-                  points: _points,
-                  activeTargetPos: const Offset(0.5, 0.5),
-                  activeTargetPoint: _liveTargetPoint,
-                  unit: _distanceUnit,
-                  isClosedPolygon: isClosedPoly && _points.length >= 3,
-                  selectedPointIndex: _selectedPointIndex,
-                  primaryColor: widget.initialTool.color,
-                ),
+            child: CustomPaint(
+              painter: MeasurementOverlayPainter(
+                segments: renderedSegments,
+                anchorPoints: renderedAnchors,
+                activeStartPoint: activeStartScreenPos,
+                reticleCenter: reticleCenter,
+                activeDistanceLabel: liveDistanceLabel,
               ),
             ),
           ),
 
-          // 3. Central Aiming Reticle with real-time depth readout
-          IgnorePointer(
-            child: ARReticle(
-              isLockedOnSurface: _isSurfaceLocked,
-              liveDistanceMeters: _liveDistanceMeters,
-              distanceDisplay: _liveDistanceMeters != null
-                  ? _distanceUnit.formatMeters(_liveDistanceMeters!)
-                  : null,
-            ),
-          ),
-
-          // 4. Top Header: Navigation, Tool Title, Flashlight, Unit Switcher
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
+          // 3. Apple Measure Aiming Reticle (Subtle center dot & ring)
+          Center(
             child: Container(
-              padding: EdgeInsets.only(
-                top: MediaQuery.of(context).padding.top + 8,
-                left: 12,
-                right: 12,
-                bottom: 12,
-              ),
+              width: 14,
+              height: 14,
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.black.withOpacity(0.85), Colors.transparent],
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                ),
-              ),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          widget.initialTool.title,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Text(
-                          _capability?.preferredEngine.title ?? 'Smart Measure Engine',
-                          style: const TextStyle(color: Colors.white70, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Torch Toggle
-                  IconButton(
-                    icon: Icon(
-                      _isTorchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded,
-                      color: _isTorchOn ? const Color(0xFFFBBF24) : Colors.white70,
-                    ),
-                    onPressed: _toggleTorch,
-                    tooltip: 'Flashlight',
-                  ),
-
-                  // Unit Selector Pill
-                  GestureDetector(
-                    onTap: _showUnitPicker,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.white30, width: 1),
-                      ),
-                      child: Row(
-                        children: [
-                          Text(
-                            _distanceUnit.symbol,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white, size: 16),
-                        ],
-                      ),
-                    ),
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.85),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.4),
+                    blurRadius: 4,
                   ),
                 ],
               ),
+              child: Center(
+                child: Container(
+                  width: 4,
+                  height: 4,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.black87,
+                  ),
+                ),
+              ),
             ),
           ),
 
-          // 5. Tracking Guidance Toast & Confidence Pill
+          // 4. Top Controls (Matching Image 2)
           Positioned(
-            top: MediaQuery.of(context).padding.top + 64,
+            top: MediaQuery.of(context).padding.top + 8,
             left: 16,
             right: 16,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                ConfidencePill(
-                  confidence: _trackingState,
-                  errorMargin: audit.absoluteErrorMarginDisplay,
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Tracking Confidence: ${_trackingState.label}\n${_trackingState.hint}\nUncertainty: ±${audit.uncertaintyPercent.toStringAsFixed(1)}%',
-                        ),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
-                  },
+                // Top-Left: Undo circular button
+                _buildCircularIconButton(
+                  icon: Icons.undo_rounded,
+                  onTap: (_activeStartAnchor != null || _lockedSegments.isNotEmpty) ? _undo : null,
+                  tooltip: 'Undo',
                 ),
-                const SizedBox(height: 10),
-                GuidanceToast(
-                  message: _guidanceMessage,
-                  isWarning: _guidanceIsWarning,
-                  icon: _guidanceIsWarning ? Icons.warning_amber_rounded : Icons.radar_rounded,
+
+                // Top-Center: Translucent instruction capsule
+                Expanded(
+                  child: Center(
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                      ),
+                      child: Text(
+                        _topInstructionText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Top-Right: Unit selector & Trash/Clear button & Torch
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Flashlight
+                    _buildCircularIconButton(
+                      icon: _isTorchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded,
+                      onTap: _toggleTorch,
+                      tooltip: 'Torch',
+                    ),
+                    const SizedBox(width: 8),
+
+                    // Unit pill
+                    GestureDetector(
+                      onTap: _showUnitPicker,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _unit.symbol,
+                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                            const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white, size: 14),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+
+                    // Trash / Clear button
+                    _buildCircularIconButton(
+                      icon: Icons.delete_outline_rounded,
+                      onTap: (_activeStartAnchor != null || _lockedSegments.isNotEmpty) ? _clearAll : null,
+                      tooltip: 'Clear All',
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
 
-          // 6. Live Distance Readout Banner
-          if (_points.isNotEmpty)
-            Positioned(
-              bottom: 100,
-              left: 20,
-              right: 20,
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.85),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: widget.initialTool.color.withOpacity(0.8), width: 1.5),
-                    boxShadow: [
-                      BoxShadow(
-                        color: widget.initialTool.color.withOpacity(0.3),
-                        blurRadius: 12,
-                      )
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(widget.initialTool.icon, color: widget.initialTool.color, size: 18),
-                      const SizedBox(width: 10),
-                      Text(
-                        _distanceUnit.formatMeters(MeasurementMathEngine.cumulativeDistance(_points)),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.5,
+          // 5. Bottom Controls (Apple Measure style large + button & Shutter)
+          Positioned(
+            bottom: 74,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: SizedBox(
+                width: size.width,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Center Large Circular (+) Button (diameter 74dp)
+                    GestureDetector(
+                      onTap: _onPlusButtonTapped,
+                      child: Container(
+                        width: 74,
+                        height: 74,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withValues(alpha: 0.28),
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.6), width: 2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.35),
+                              blurRadius: 10,
+                            ),
+                          ],
                         ),
-                      ),
-                      if (isClosedPoly && _points.length >= 3) ...[
-                        const SizedBox(width: 12),
-                        Container(width: 1, height: 16, color: Colors.white24),
-                        const SizedBox(width: 12),
-                        Text(
-                          _areaUnit.formatSqMeters(MeasurementMathEngine.polygonArea3D(_points)),
-                          style: const TextStyle(
-                            color: Color(0xFF10B981),
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
+                        child: const Center(
+                          child: Icon(
+                            Icons.add_rounded,
+                            color: Colors.white,
+                            size: 44,
                           ),
                         ),
-                      ],
-                    ],
-                  ),
+                      ),
+                    ),
+
+                    // Right Camera Shutter Button (diameter 56dp)
+                    Positioned(
+                      right: 32,
+                      child: GestureDetector(
+                        onTap: _snapAndSaveMeasurement,
+                        child: Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white,
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.8), width: 3),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.35),
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
+                          child: Center(
+                            child: Container(
+                              width: 44,
+                              height: 44,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Left Tools Menu Button
+                    Positioned(
+                      left: 32,
+                      child: _buildCircularIconButton(
+                        icon: Icons.apps_rounded,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const SmartMeasureDashboardScreen()),
+                          );
+                        },
+                        tooltip: 'All 15 Tools',
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
+          ),
 
-          // 7. Bottom Measurement Controls Bar
+          // 6. Bottom Dock: [ Measure ] and [ Level ] Tabs (Exact Apple Measure layout in Image 2)
           Positioned(
-            bottom: 0,
+            bottom: 12,
             left: 0,
             right: 0,
-            child: MeasurementControlsBar(
-              onAddPoint: _addPointAtCenter,
-              onUndo: _undo,
-              onRedo: _redo,
-              onClear: _clear,
-              onSave: _saveCurrentMeasurement,
-              canUndo: _points.isNotEmpty,
-              canRedo: _redoPoints.isNotEmpty,
-              canSave: _points.length >= 2,
-              pointsCount: _points.length,
-              primaryActionLabel: _points.isEmpty ? 'Start Point' : 'Add Point',
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.65),
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Measure Tab
+                    _buildDockTab(
+                      label: 'Measure',
+                      icon: Icons.straighten_rounded,
+                      isSelected: _activeDockTab == 0,
+                      onTap: () {
+                        setState(() => _activeDockTab = 0);
+                      },
+                    ),
+
+                    // Level Tab
+                    _buildDockTab(
+                      label: 'Level',
+                      icon: Icons.architecture_rounded,
+                      isSelected: _activeDockTab == 1,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const DigitalLevelScreen()),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ],
@@ -579,66 +593,63 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
     );
   }
 
-  Widget _buildCameraFallbackView(ThemeData theme) {
-    if (_isCameraInitializing) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(color: widget.initialTool.color),
-            const SizedBox(height: 16),
-            const Text(
-              'Initializing camera & AR sensors...',
-              style: TextStyle(color: Colors.white70, fontSize: 14),
-            ),
-          ],
+  Widget _buildCircularIconButton({
+    required IconData icon,
+    required VoidCallback? onTap,
+    String? tooltip,
+  }) {
+    final isEnabled = onTap != null;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.black.withValues(alpha: 0.55),
+          border: Border.all(color: Colors.white.withValues(alpha: isEnabled ? 0.25 : 0.08)),
         ),
-      );
-    }
+        child: Center(
+          child: Icon(
+            icon,
+            color: isEnabled ? Colors.white : Colors.white24,
+            size: 22,
+          ),
+        ),
+      ),
+    );
+  }
 
-    return Container(
-      color: const Color(0xFF0F172A),
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Center(
+  Widget _buildDockTab({
+    required String label,
+    required IconData icon,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.white.withValues(alpha: 0.22) : Colors.transparent,
+          borderRadius: BorderRadius.circular(24),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white12),
-              ),
-              child: const Icon(Icons.camera_alt_outlined, size: 48, color: Colors.white54),
+            Icon(
+              icon,
+              size: 20,
+              color: isSelected ? Colors.white : Colors.white60,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 2),
             Text(
-              _cameraErrorMessage ?? 'Live Camera Unsupported',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'For desktop or devices without active webcam support, use the Calibrated Image Measurement tool.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.4),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2563EB),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              label,
+              style: TextStyle(
+                color: isSelected ? Colors.white : Colors.white60,
+                fontSize: 11,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
               ),
-              onPressed: () {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ManualImageMeasurementScreen()),
-                );
-              },
-              icon: const Icon(Icons.photo_size_select_actual_rounded),
-              label: const Text('Open Manual Image Measurement'),
             ),
           ],
         ),

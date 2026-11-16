@@ -7,7 +7,7 @@
 
 Here is the comprehensive list of features currently implemented in the app, categorized by domain and screen toolkit:
 
-### Tool Categories (20, in default home order — `ToolCategory` enum)
+### Tool Categories (21, in default home order — `ToolCategory` enum)
 | Category | Registered tools |
 |---|---|
 | Percentage Calculation | Advanced Math Suite, Percentage Calculator (Scientific Calculator is its own bottom tab) |
@@ -25,11 +25,12 @@ Here is the comprehensive list of features currently implemented in the app, cat
 | Media & Downloads | Media Downloader, Audio & Video Studio, Voice Studio (TTS & Speech-to-Text) |
 | QR & Barcode | QR & Barcode Suite, QR Contact & vCard Share |
 | Developer | Developer Suite, XML & YAML Formatter |
-| Device & Hardware | Smart Measure, Device & Hardware Studio, Compass & Spirit Level, Sensor Tester, Battery Status, Mic & Speaker Tester, Touchscreen Digitizer Test, Screen Color & Pixel Test, Vibration & Haptics Tester, Screen Refresh Rate & Specs, Sound-Level (dB) Estimator |
+| Device & Hardware | Device & Hardware Studio, Compass & Spirit Level, Sensor Tester, Battery Status, Mic & Speaker Tester, Touchscreen Digitizer Test, Screen Color & Pixel Test, Vibration & Haptics Tester, Screen Refresh Rate & Specs, Sound-Level (dB) Estimator |
 | Security | Password & Security Generator |
 | Kitchen | Kitchen & Recipe Tools |
 | Random & Decision | Random & Decision |
 | Entertainment Tracker | Entertainment Notes & Tracker |
+| Smart Measure | Smart Measure (AR Tape), Digital Level, Smart Measure Suite, Room Measurement Plan, Object 3D Bounding Box, Person & Height Measure, Manual Image Measurement, Measurement History |
 
 ---
 

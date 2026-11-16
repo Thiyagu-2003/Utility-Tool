@@ -50,6 +50,13 @@ import '../../features/entertainment/entertainment_tracker_screen.dart';
 import '../../features/file_tools/archive_preview_toolkit_screen.dart';
 import '../../features/slate/slate_screen.dart';
 import '../../features/smart_measure/ui/smart_measure_dashboard_screen.dart';
+import '../../features/smart_measure/ui/ar_measurement_screen.dart';
+import '../../features/smart_measure/ui/mode_screens/digital_level_screen.dart';
+import '../../features/smart_measure/ui/mode_screens/room_measurement_screen.dart';
+import '../../features/smart_measure/ui/mode_screens/object_dimension_screen.dart';
+import '../../features/smart_measure/ui/mode_screens/person_height_screen.dart';
+import '../../features/smart_measure/ui/mode_screens/manual_image_measurement_screen.dart';
+import '../../features/smart_measure/ui/history/measurement_history_screen.dart';
 
 class ToolRegistry {
   static final List<ToolItem> allTools = [
@@ -633,34 +640,86 @@ class ToolRegistry {
       ],
       builder: (_) => const EntertainmentTrackerScreen(),
     ),
-    // Smart Measure: Advanced Camera-Based Measurement System
+    // Smart Measure Category: Advanced Camera-Based Measurement System
     ToolItem(
       id: 'smart_measure',
-      title: 'Smart Measure',
-      description: 'AR camera measurements, 3D point-to-point, object, room, person height, angle & level',
-      category: ToolCategory.deviceTests,
+      title: 'Smart Measure (AR Tape)',
+      description: 'Apple-inspired live camera 3D tape measurement with spatial anchoring',
+      category: ToolCategory.smartMeasure,
       icon: Icons.straighten_rounded,
       customColor: const Color(0xFF2563EB),
-      keywords: [
-        'measure',
-        'smart measure',
-        'camera',
-        'ar',
-        'arcore',
-        'arkit',
-        'lidar',
-        'tape',
-        'distance',
-        'dimension',
-        'height',
-        'room',
-        'area',
-        'level',
-        'angle',
-        'ruler',
-        'calibration'
-      ],
+      keywords: ['measure', 'smart measure', 'camera', 'ar', 'tape', 'distance', 'apple measure'],
+      builder: (_) => const ARMeasurementScreen(),
+    ),
+    ToolItem(
+      id: 'smart_measure_level',
+      title: 'Digital Level',
+      description: '2D spirit bubble level, vertical tubular inclinometer with degree readout',
+      category: ToolCategory.smartMeasure,
+      icon: Icons.architecture_rounded,
+      customColor: const Color(0xFFF59E0B),
+      keywords: ['level', 'bubble', 'spirit level', 'tilt', 'pitch', 'roll', 'inclinometer'],
+      builder: (_) => const DigitalLevelScreen(),
+    ),
+    ToolItem(
+      id: 'smart_measure_suite',
+      title: 'Smart Measure Suite',
+      description: 'Complete 15-tool measurement suite: Room, Object 3D Box, Height, Area, Angle',
+      category: ToolCategory.smartMeasure,
+      icon: Icons.grid_view_rounded,
+      customColor: const Color(0xFF6366F1),
+      keywords: ['smart measure suite', 'tools', 'room', 'box', 'height', 'area', 'angle', 'all tools'],
       builder: (_) => const SmartMeasureDashboardScreen(),
+    ),
+    ToolItem(
+      id: 'smart_measure_room',
+      title: 'Room Measurement Plan',
+      description: 'Multi-wall connected perimeter, floor plane mapping & room summary',
+      category: ToolCategory.smartMeasure,
+      icon: Icons.meeting_room_rounded,
+      customColor: const Color(0xFFD97706),
+      keywords: ['room', 'walls', 'floor', 'perimeter', 'floorplan', 'house'],
+      builder: (_) => const RoomMeasurementScreen(),
+    ),
+    ToolItem(
+      id: 'smart_measure_object',
+      title: 'Object 3D Bounding Box',
+      description: 'Corner-by-corner 3D bounding box: length, width, height & volume',
+      category: ToolCategory.smartMeasure,
+      icon: Icons.view_in_ar_rounded,
+      customColor: const Color(0xFFEC4899),
+      keywords: ['object', 'box', 'bounding box', 'volume', 'dimension', 'package'],
+      builder: (_) => const ObjectDimensionScreen(),
+    ),
+    ToolItem(
+      id: 'smart_measure_height',
+      title: 'Person & Height Measure',
+      description: 'Ground plane lock to crown of head with vertical raycasting',
+      category: ToolCategory.smartMeasure,
+      icon: Icons.accessibility_new_rounded,
+      customColor: const Color(0xFFF43F5E),
+      keywords: ['height', 'person', 'human', 'door', 'wall', 'vertical'],
+      builder: (_) => const PersonHeightScreen(),
+    ),
+    ToolItem(
+      id: 'smart_measure_manual',
+      title: 'Manual Image Measurement',
+      description: 'Calibrated scale measurement on photos using standard reference objects',
+      category: ToolCategory.smartMeasure,
+      icon: Icons.photo_size_select_actual_rounded,
+      customColor: const Color(0xFF0284C7),
+      keywords: ['manual', 'photo', 'image', 'calibrate', 'reference', 'credit card', 'scale'],
+      builder: (_) => const ManualImageMeasurementScreen(),
+    ),
+    ToolItem(
+      id: 'smart_measure_history',
+      title: 'Measurement History',
+      description: 'Browse, search, edit notes and export PDF audit reports',
+      category: ToolCategory.smartMeasure,
+      icon: Icons.history_rounded,
+      customColor: const Color(0xFF64748B),
+      keywords: ['history', 'records', 'audit', 'pdf', 'export', 'measurements'],
+      builder: (_) => const MeasurementHistoryScreen(),
     ),
   ];
 

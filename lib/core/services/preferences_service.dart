@@ -102,6 +102,7 @@ class PreferencesService extends ChangeNotifier {
     ToolCategory.kitchen,
     ToolCategory.randomDecision,
     ToolCategory.entertainment,
+    ToolCategory.smartMeasure,
   ];
 
   /// Language codes the app ships translations for (see AppLocalizations).

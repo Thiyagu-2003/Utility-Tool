@@ -112,6 +112,8 @@ class AppLocalizations {
       'cat_randomDecision_desc': 'Random numbers, dice roller & fair coin toss',
       'cat_entertainment': 'Entertainment Tracker',
       'cat_entertainment_desc': 'Anime, Drama, Movies & TV Series watchlist & notes',
+      'cat_smartMeasure': 'Smart Measure',
+      'cat_smartMeasure_desc': 'AR camera 3D tape, room, height & digital level',
     },
     'ta': {
       'app_title': 'டூல்பாக்ஸ் புரோ',
@@ -199,6 +201,8 @@ class AppLocalizations {
       'cat_randomDecision_desc': 'ரேண்டம் எண்கள், பகடை & நாணயம் சுண்டுதல்',
       'cat_entertainment': 'பொழுதுபோக்கு டிராக்கர்',
       'cat_entertainment_desc': 'அனிமே, நாடகம், திரைப்படங்கள் & தொடர்கள் குறிப்புகள்',
+      'cat_smartMeasure': 'ஸ்மார்ட் அளவீடு',
+      'cat_smartMeasure_desc': 'AR கேமரா 3D அளவீடு, அறை, உயரம் & டிஜிட்டல் மட்டம்',
     },
     'hi': {
       'app_title': 'टूलबॉक्स प्रो',
@@ -286,6 +290,8 @@ class AppLocalizations {
       'cat_randomDecision_desc': 'रैंडम संख्याएँ, पासा रोलर और सिक्का उछाल',
       'cat_entertainment': 'एंटरटेनमेंट ट्रैकर',
       'cat_entertainment_desc': 'एनीमे, ड्रामा, मूवीज़ और टीवी सीरीज़ ट्रैकर व नोट्स',
+      'cat_smartMeasure': 'स्मार्ट माप',
+      'cat_smartMeasure_desc': 'AR कैमरा 3D फीता, कमरा, ऊंचाई और डिजिटल लेवल',
     },
     'es': {
       'app_title': 'ToolBox Pro',
@@ -373,6 +379,8 @@ class AppLocalizations {
       'cat_randomDecision_desc': 'Números aleatorios, dados y lanzamiento de moneda',
       'cat_entertainment': 'Entretenimiento',
       'cat_entertainment_desc': 'Seguimiento y notas de anime, series y películas',
+      'cat_smartMeasure': 'Medición Inteligente',
+      'cat_smartMeasure_desc': 'Cinta 3D AR con cámara, habitación, altura y nivel digital',
     },
   };
 

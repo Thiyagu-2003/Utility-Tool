@@ -1,12 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:utility_tool/core/models/tool_model.dart';
 import 'package:utility_tool/core/registry/tool_registry.dart';
 import 'package:utility_tool/features/smart_measure/models/smart_measure_capability.dart';
 import 'package:utility_tool/features/smart_measure/models/measurement_types.dart';
 import 'package:utility_tool/features/smart_measure/models/measurement_units.dart';
 import 'package:utility_tool/features/smart_measure/models/smart_measure_point.dart';
 import 'package:utility_tool/features/smart_measure/models/smart_measure_item.dart';
+import 'package:utility_tool/features/smart_measure/services/spatial_anchor_tracker.dart';
 import 'package:utility_tool/features/smart_measure/services/measurement_math_engine.dart';
 import 'package:utility_tool/features/smart_measure/services/manual_calibration_engine.dart';
 import 'package:utility_tool/features/smart_measure/services/smart_measure_storage_service.dart';
@@ -18,14 +20,47 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  group('SpatialAnchor Motion Tracking & Screen Projection', () {
+    test('Anchor stays anchored when camera pans right and projects left on screen', () {
+      final anchor = SpatialAnchor(
+        id: 'start',
+        yawDeg: 0.0,
+        pitchDeg: 45.0,
+        rollDeg: 0.0,
+        depthMeters: 0.5,
+        createdAt: DateTime.now(),
+      );
+
+      // Camera centered on anchor
+      final p0 = anchor.projectToScreen(currentYawDeg: 0.0, currentPitchDeg: 45.0, currentRollDeg: 0.0);
+      expect(p0.dx, closeTo(0.5, 0.001));
+      expect(p0.dy, closeTo(0.5, 0.001));
+
+      // Camera pans 10 degrees to the right: the anchored point moves to the LEFT on screen
+      final pRight = anchor.projectToScreen(currentYawDeg: 10.0, currentPitchDeg: 45.0, currentRollDeg: 0.0);
+      expect(pRight.dx, lessThan(0.5));
+      expect(pRight.dy, closeTo(0.5, 0.01));
+
+      // Camera pans 10 degrees to the left: the anchored point moves to the RIGHT on screen
+      final pLeft = anchor.projectToScreen(currentYawDeg: -10.0, currentPitchDeg: 45.0, currentRollDeg: 0.0);
+      expect(pLeft.dx, greaterThan(0.5));
+      expect(pLeft.dy, closeTo(0.5, 0.01));
+
+      // Real distance across 5 degrees at 0.5m depth is approximately 4.3 cm (mouse size)
+      final distM = anchor.distanceTo(targetYawDeg: 5.0, targetPitchDeg: 45.0, targetDepthMeters: 0.5);
+      final distCm = DistanceUnit.centimeter.fromMeters(distM);
+      expect(distCm, closeTo(4.36, 0.1));
+    });
+  });
+
   group('ToolRegistry Integration', () {
     test('Smart Measure is properly registered in ToolRegistry', () {
       final tool = ToolRegistry.findById('smart_measure');
       expect(tool, isNotNull);
-      expect(tool!.title, 'Smart Measure');
-      expect(tool.keywords, contains('arcore'));
-      expect(tool.keywords, contains('lidar'));
-      expect(tool.keywords, contains('level'));
+      expect(tool!.title, contains('Smart Measure'));
+      expect(tool.category, ToolCategory.smartMeasure);
+      expect(tool.keywords, contains('ar'));
+      expect(tool.keywords, contains('tape'));
     });
   });
 

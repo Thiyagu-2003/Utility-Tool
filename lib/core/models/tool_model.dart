@@ -126,6 +126,12 @@ enum ToolCategory {
     Icons.movie_filter_rounded,
     Color(0xFFE11D48),
     'Anime, Drama, Movies & TV Series watchlist & notes',
+  ),
+  smartMeasure(
+    'Smart Measure',
+    Icons.straighten_rounded,
+    Color(0xFF2563EB),
+    'AR camera 3D tape, room, height & digital level',
   );
 
   final String label;
