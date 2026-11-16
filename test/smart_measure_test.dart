@@ -24,6 +24,9 @@ void main() {
     test('Anchor stays anchored when camera pans right and projects left on screen', () {
       final anchor = SpatialAnchor(
         id: 'start',
+        worldX: 0.0,
+        worldY: -0.35,
+        worldZ: 0.35,
         yawDeg: 0.0,
         pitchDeg: 45.0,
         rollDeg: 0.0,
@@ -46,10 +49,10 @@ void main() {
       expect(pLeft.dx, greaterThan(0.5));
       expect(pLeft.dy, closeTo(0.5, 0.01));
 
-      // Real distance across 5 degrees at 0.5m depth is approximately 4.3 cm (mouse size)
+      // Real distance across 5 degrees yaw at 45° pitch and 0.5m depth in 3D space is ~3.11 cm
       final distM = anchor.distanceTo(targetYawDeg: 5.0, targetPitchDeg: 45.0, targetDepthMeters: 0.5);
       final distCm = DistanceUnit.centimeter.fromMeters(distM);
-      expect(distCm, closeTo(4.36, 0.1));
+      expect(distCm, closeTo(3.11, 0.1));
     });
 
     test('SpatialAnchor.fromScreenPoint creates anchor that projects back to screen', () {

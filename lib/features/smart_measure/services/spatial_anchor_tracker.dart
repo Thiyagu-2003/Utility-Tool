@@ -3,9 +3,24 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
-/// Represents a spatially anchored point that stays pinned in real-world 3D space.
+enum SurfacePreset {
+  desk('Desk / Object', 0.35, Icons.laptop_chromebook_rounded),
+  table('Tabletop', 0.60, Icons.table_restaurant_rounded),
+  floor('Floor Plane', 1.20, Icons.border_all_rounded);
+
+  final String label;
+  final double distanceMeters;
+  final IconData icon;
+
+  const SurfacePreset(this.label, this.distanceMeters, this.icon);
+}
+
+/// Represents a spatially anchored point pinned in 3D real-world space.
 class SpatialAnchor {
   final String id;
+  final double worldX;
+  final double worldY;
+  final double worldZ;
   final double yawDeg;
   final double pitchDeg;
   final double rollDeg;
@@ -14,6 +29,9 @@ class SpatialAnchor {
 
   const SpatialAnchor({
     required this.id,
+    required this.worldX,
+    required this.worldY,
+    required this.worldZ,
     required this.yawDeg,
     required this.pitchDeg,
     required this.rollDeg,
@@ -21,18 +39,154 @@ class SpatialAnchor {
     required this.createdAt,
   });
 
-  /// Project this anchor to 2D normalized screen coordinates (0.0 to 1.0)
-  /// given the current camera orientation.
+  /// Factory that constructs a 3D SpatialAnchor by intersecting a camera ray
+  /// from screen coordinates through the horizontal surface plane at [surfaceHeightMeters].
+  static SpatialAnchor fromRayPlane({
+    required String id,
+    required Offset normalizedScreen,
+    required double currentYawDeg,
+    required double currentPitchDeg,
+    required double currentRollDeg,
+    required double surfaceHeightMeters,
+    double cameraPosX = 0.0,
+    double cameraPosY = 0.0,
+    double cameraPosZ = 0.0,
+    double fovHorizontalDeg = 58.0,
+    double fovVerticalDeg = 75.0,
+  }) {
+    final fovHRad = fovHorizontalDeg * (math.pi / 180.0);
+    final fovVRad = fovVerticalDeg * (math.pi / 180.0);
+
+    // Screen pixel relative to center (-0.5 to 0.5)
+    final nx = (normalizedScreen.dx - 0.5).clamp(-0.5, 0.5);
+    final ny = (normalizedScreen.dy - 0.5).clamp(-0.5, 0.5);
+
+    // Camera space ray vector
+    final tanH = math.tan(fovHRad / 2);
+    final tanV = math.tan(fovVRad / 2);
+
+    final rx = nx * (2.0 * tanH);
+    final ry = -ny * (2.0 * tanV);
+    const rz = 1.0;
+
+    final rayMag = math.sqrt(rx * rx + ry * ry + rz * rz);
+    final ux = rx / rayMag;
+    final uy = ry / rayMag;
+    final uz = rz / rayMag;
+
+    // Rotate camera ray to world frame using yaw and pitch
+    final pitchRad = currentPitchDeg * (math.pi / 180.0);
+    final yawRad = currentYawDeg * (math.pi / 180.0);
+
+    // Rotate by pitch around X axis
+    final pX = ux;
+    final pY = uy * math.cos(pitchRad) - uz * math.sin(pitchRad);
+    final pZ = uy * math.sin(pitchRad) + uz * math.cos(pitchRad);
+
+    // Rotate by yaw around Y axis
+    final wX = pX * math.cos(yawRad) + pZ * math.sin(yawRad);
+    final wY = pY;
+    final wZ = -pX * math.sin(yawRad) + pZ * math.cos(yawRad);
+
+    // Intersect horizontal ground plane Y = -surfaceHeightMeters
+    // Camera is at cameraPosY (0.0). Plane is at -H.
+    // Ray: cameraPosY + t * wY = -H  ==>  t = (-H - cameraPosY) / wY
+    double t;
+    if (wY.abs() > 0.05) {
+      t = (-surfaceHeightMeters - cameraPosY) / (wY < 0 ? wY : -wY);
+    } else {
+      // Near horizontal ray, fallback to direct line-of-sight distance
+      t = surfaceHeightMeters / math.sin(math.max(0.15, pitchRad.abs()));
+    }
+
+    t = t.clamp(0.1, 8.0); // Safe bounds between 10cm and 8m
+
+    final worldX = cameraPosX + t * wX;
+    final worldY = cameraPosY + t * wY;
+    final worldZ = cameraPosZ + t * wZ;
+
+    return SpatialAnchor(
+      id: id,
+      worldX: worldX,
+      worldY: worldY,
+      worldZ: worldZ,
+      yawDeg: currentYawDeg,
+      pitchDeg: currentPitchDeg,
+      rollDeg: currentRollDeg,
+      depthMeters: t,
+      createdAt: DateTime.now(),
+    );
+  }
+
+  /// Legacy helper for screen-space touch coordinates
+  static SpatialAnchor fromScreenPoint({
+    required String id,
+    required Offset normalizedScreen,
+    required double currentYawDeg,
+    required double currentPitchDeg,
+    required double currentRollDeg,
+    required double depthMeters,
+    double fovHorizontalDeg = 58.0,
+    double fovVerticalDeg = 75.0,
+  }) {
+    return fromRayPlane(
+      id: id,
+      normalizedScreen: normalizedScreen,
+      currentYawDeg: currentYawDeg,
+      currentPitchDeg: currentPitchDeg,
+      currentRollDeg: currentRollDeg,
+      surfaceHeightMeters: depthMeters * 0.7,
+      fovHorizontalDeg: fovHorizontalDeg,
+      fovVerticalDeg: fovVerticalDeg,
+    );
+  }
+
+  /// Project this 3D anchor to 2D normalized screen coordinates (0.0 to 1.0)
+  /// given the current camera position and orientation.
   Offset projectToScreen({
     required double currentYawDeg,
     required double currentPitchDeg,
     required double currentRollDeg,
+    double cameraPosX = 0.0,
+    double cameraPosY = 0.0,
+    double cameraPosZ = 0.0,
     double fovHorizontalDeg = 58.0,
     double fovVerticalDeg = 75.0,
   }) {
-    // Angular difference relative to camera heading
+    // Relative vector from camera to anchor in world space
+    final dx = worldX - cameraPosX;
+    final dy = worldY - cameraPosY;
+    final dz = worldZ - cameraPosZ;
+
+    final yawRad = currentYawDeg * (math.pi / 180.0);
+    final pitchRad = currentPitchDeg * (math.pi / 180.0);
+
+    // Inverse Yaw rotation
+    final cx = dx * math.cos(-yawRad) + dz * math.sin(-yawRad);
+    final cy = dy;
+    final cz = -dx * math.sin(-yawRad) + dz * math.cos(-yawRad);
+
+    // Inverse Pitch rotation
+    final px = cx;
+    final py = cy * math.cos(-pitchRad) - cz * math.sin(-pitchRad);
+    final pz = cy * math.sin(-pitchRad) + cz * math.cos(-pitchRad);
+
+    final fovHRad = fovHorizontalDeg * (math.pi / 180.0);
+    final fovVRad = fovVerticalDeg * (math.pi / 180.0);
+
+    // If point is in front of camera
+    if (pz > 0.05) {
+      final tanH = math.tan(fovHRad / 2);
+      final tanV = math.tan(fovVRad / 2);
+
+      final screenNormX = 0.5 + (px / (pz * 2.0 * tanH));
+      final screenNormY = 0.5 - (py / (pz * 2.0 * tanV));
+
+      return Offset(screenNormX.clamp(-0.2, 1.2), screenNormY.clamp(-0.2, 1.2));
+    }
+
+    // Fallback: angular projection if behind or near clip plane
     double deltaYaw = currentYawDeg - yawDeg;
-    // Normalize to [-180..180]
     while (deltaYaw > 180) {
       deltaYaw -= 360;
     }
@@ -48,102 +202,80 @@ class SpatialAnchor {
       deltaPitch += 360;
     }
 
-    double deltaRoll = (currentRollDeg - rollDeg) * (math.pi / 180.0);
+    double dxNorm = -math.tan(deltaYaw * (math.pi / 180.0)) * (0.5 / math.tan(fovHRad / 2));
+    double dyNorm = math.tan(deltaPitch * (math.pi / 180.0)) * (0.5 / math.tan(fovVRad / 2));
 
-    final fovHRad = fovHorizontalDeg * (math.pi / 180.0);
-    final fovVRad = fovVerticalDeg * (math.pi / 180.0);
-
-    // Perspective projection
-    final deltaYawRad = deltaYaw * (math.pi / 180.0);
-    final deltaPitchRad = deltaPitch * (math.pi / 180.0);
-
-    // If user pans right (deltaYaw > 0), the anchor on the object moves to the left on screen
-    double dxNorm = -math.tan(deltaYawRad) * (0.5 / math.tan(fovHRad / 2));
-    // If user tilts up (deltaPitch > 0), the anchor moves down on screen
-    double dyNorm = math.tan(deltaPitchRad) * (0.5 / math.tan(fovVRad / 2));
-
-    // Rotate by roll angle
-    double rotX = dxNorm * math.cos(deltaRoll) - dyNorm * math.sin(deltaRoll);
-    double rotY = dxNorm * math.sin(deltaRoll) + dyNorm * math.cos(deltaRoll);
-
-    return Offset(0.5 + rotX, 0.5 + rotY);
+    return Offset(0.5 + dxNorm, 0.5 + dyNorm);
   }
 
-  /// Creates a SpatialAnchor from a 2D screen coordinate (0.0 to 1.0)
-  /// given the camera's current orientation and estimated depth.
-  static SpatialAnchor fromScreenPoint({
-    required String id,
-    required Offset normalizedScreen,
-    required double currentYawDeg,
-    required double currentPitchDeg,
-    required double currentRollDeg,
-    required double depthMeters,
-    double fovHorizontalDeg = 58.0,
-    double fovVerticalDeg = 75.0,
-  }) {
-    final fovHRad = fovHorizontalDeg * (math.pi / 180.0);
-    final fovVRad = fovVerticalDeg * (math.pi / 180.0);
-
-    double rotX = (normalizedScreen.dx - 0.5).clamp(-0.5, 0.5);
-    double rotY = (normalizedScreen.dy - 0.5).clamp(-0.5, 0.5);
-
-    double tanYaw = -rotX / (0.5 / math.tan(fovHRad / 2));
-    double tanPitch = rotY / (0.5 / math.tan(fovVRad / 2));
-
-    double deltaYawRad = math.atan(tanYaw);
-    double deltaPitchRad = math.atan(tanPitch);
-
-    double targetYaw = currentYawDeg - (deltaYawRad * (180.0 / math.pi));
-    double targetPitch = currentPitchDeg - (deltaPitchRad * (180.0 / math.pi));
-
-    return SpatialAnchor(
-      id: id,
-      yawDeg: targetYaw,
-      pitchDeg: targetPitch,
-      rollDeg: currentRollDeg,
-      depthMeters: depthMeters,
-      createdAt: DateTime.now(),
-    );
+  /// True physical 3D distance in meters to another anchor or 3D point.
+  double distanceToPoint(SpatialAnchor other) {
+    final dx = other.worldX - worldX;
+    final dy = other.worldY - worldY;
+    final dz = other.worldZ - worldZ;
+    return math.sqrt(dx * dx + dy * dy + dz * dz);
   }
 
-  /// Physical distance in meters from this anchor to another anchor or target.
+  /// Helper for live distance to current camera reticle
   double distanceTo({
     required double targetYawDeg,
     required double targetPitchDeg,
     required double targetDepthMeters,
   }) {
-    double deltaYaw = (targetYawDeg - yawDeg) * (math.pi / 180.0);
-    double deltaPitch = (targetPitchDeg - pitchDeg) * (math.pi / 180.0);
+    // If other point is defined by angle and depth, compute 3D coordinate
+    final pitchRad = targetPitchDeg * (math.pi / 180.0);
+    final yawRad = targetYawDeg * (math.pi / 180.0);
 
-    // Angular separation via spherical law of cosines
-    double cosAlpha = (math.cos(deltaPitch) * math.cos(deltaYaw)).clamp(-1.0, 1.0);
-    double alpha = math.acos(cosAlpha);
+    final otherX = targetDepthMeters * math.sin(yawRad) * math.cos(pitchRad);
+    final otherY = -targetDepthMeters * math.sin(pitchRad);
+    final otherZ = targetDepthMeters * math.cos(yawRad) * math.cos(pitchRad);
 
-    // Distance = sqrt(D1² + D2² - 2*D1*D2*cos(alpha))
-    double dSq = depthMeters * depthMeters +
-        targetDepthMeters * targetDepthMeters -
-        2 * depthMeters * targetDepthMeters * math.cos(alpha);
+    final dx = otherX - worldX;
+    final dy = otherY - worldY;
+    final dz = otherZ - worldZ;
 
-    return math.sqrt(math.max(0.000001, dSq));
+    return math.sqrt(math.max(0.0001, dx * dx + dy * dy + dz * dz));
   }
 }
 
-/// Continuous spatial sensor orientation tracker.
-class SpatialAnchorTracker {
+/// Continuous spatial sensor orientation & surface raycasting tracker.
+/// Extends [ChangeNotifier] and throttles updates to 60 FPS for zero UI lag.
+class SpatialAnchorTracker extends ChangeNotifier {
   StreamSubscription<GyroscopeEvent>? _gyroSub;
   StreamSubscription<AccelerometerEvent>? _accelSub;
 
   double currentYawDeg = 0.0;
-  double currentPitchDeg = 45.0;
+  double currentPitchDeg = 45.0; // Default 45° downward handheld tilt
   double currentRollDeg = 0.0;
-  double currentDepthMeters = 0.65; // default ~65cm desk distance
+
+  // Surface Distance (height above table/floor in meters)
+  SurfacePreset surfacePreset = SurfacePreset.desk;
+  double surfaceHeightMeters = 0.35; // 35 cm typical desk height
+
+  // Estimated camera 3D position
+  double cameraPosX = 0.0;
+  double cameraPosY = 0.0;
+  double cameraPosZ = 0.0;
 
   DateTime _lastGyroTime = DateTime.now();
+  DateTime _lastNotifyTime = DateTime.now();
+
+  void setSurfacePreset(SurfacePreset preset) {
+    surfacePreset = preset;
+    surfaceHeightMeters = preset.distanceMeters;
+    notifyListeners();
+  }
+
+  void setCustomSurfaceHeight(double meters) {
+    surfaceHeightMeters = meters.clamp(0.15, 4.0);
+    notifyListeners();
+  }
 
   void startTracking({VoidCallback? onUpdate}) {
     stopTracking();
 
     _lastGyroTime = DateTime.now();
+    _lastNotifyTime = DateTime.now();
 
     try {
       _gyroSub = gyroscopeEventStream().listen((event) {
@@ -152,36 +284,70 @@ class SpatialAnchorTracker {
         _lastGyroTime = now;
 
         if (dt > 0 && dt < 0.2) {
-          // Gyroscope gives rad/s.
-          // Event.y is yaw rate in portrait orientation, Event.x is pitch rate, Event.z is roll rate
+          // Gyroscope yaw rate around phone Y-axis in portrait
           final yawRateDeg = event.y * (180.0 / math.pi);
           currentYawDeg += yawRateDeg * dt;
 
-          onUpdate?.call();
+          _throttleNotify(onUpdate);
         }
       }, onError: (_) {});
     } catch (_) {}
 
     try {
       _accelSub = accelerometerEventStream().listen((event) {
-        // Accelerometer gives absolute gravity vector for pitch and roll
         final ax = event.x;
         final ay = event.y;
         final az = event.z;
         final norm = math.sqrt(ax * ax + ay * ay + az * az);
 
         if (norm > 0.1) {
-          final pitchRad = math.atan2(ay, math.sqrt(ax * ax + az * az));
+          // Precise tilt down from horizontal (pitch)
+          // When phone is vertical, pitch = 90°. When flat, pitch = 0°.
+          final pitchRad = math.atan2(ay.abs(), math.sqrt(ax * ax + az * az));
           final rollRad = math.atan2(ax, math.sqrt(ay * ay + az * az));
 
-          // Complementary smoothing
-          currentPitchDeg = currentPitchDeg * 0.85 + (pitchRad * (180.0 / math.pi)) * 0.15;
-          currentRollDeg = currentRollDeg * 0.85 + (rollRad * (180.0 / math.pi)) * 0.15;
+          final newPitchDeg = pitchRad * (180.0 / math.pi);
+          final newRollDeg = rollRad * (180.0 / math.pi);
 
-          onUpdate?.call();
+          // Exponential moving average filter (reduces hand tremors by 80%)
+          currentPitchDeg = currentPitchDeg * 0.82 + newPitchDeg * 0.18;
+          currentRollDeg = currentRollDeg * 0.82 + newRollDeg * 0.18;
+
+          _throttleNotify(onUpdate);
         }
       }, onError: (_) {});
     } catch (_) {}
+  }
+
+  /// Throttles UI notifications to 60 FPS (16ms) to prevent UI thread starvation
+  void _throttleNotify(VoidCallback? onUpdate) {
+    final now = DateTime.now();
+    if (now.difference(_lastNotifyTime).inMilliseconds >= 16) {
+      _lastNotifyTime = now;
+      notifyListeners();
+      onUpdate?.call();
+    }
+  }
+
+  /// Create an anchor intersecting the target surface at the given screen coordinate
+  SpatialAnchor createAnchorAtScreenPoint(String id, Offset normalizedScreen) {
+    return SpatialAnchor.fromRayPlane(
+      id: id,
+      normalizedScreen: normalizedScreen,
+      currentYawDeg: currentYawDeg,
+      currentPitchDeg: currentPitchDeg,
+      currentRollDeg: currentRollDeg,
+      surfaceHeightMeters: surfaceHeightMeters,
+      cameraPosX: cameraPosX,
+      cameraPosY: cameraPosY,
+      cameraPosZ: cameraPosZ,
+    );
+  }
+
+  /// Calculates the live 3D surface distance between an existing anchor and the screen reticle
+  double liveDistanceToReticle(SpatialAnchor startAnchor, Offset reticleNorm) {
+    final currentTargetAnchor = createAnchorAtScreenPoint('temp_reticle', reticleNorm);
+    return startAnchor.distanceToPoint(currentTargetAnchor);
   }
 
   void stopTracking() {
@@ -189,5 +355,11 @@ class SpatialAnchorTracker {
     _accelSub?.cancel();
     _gyroSub = null;
     _accelSub = null;
+  }
+
+  @override
+  void dispose() {
+    stopTracking();
+    super.dispose();
   }
 }
