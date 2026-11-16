@@ -19,6 +19,12 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // Register Native ARCore PlatformView for Smart Measure
+        flutterEngine.platformViewsController.registry.registerViewFactory(
+            "com.utility.app/smart_measure_ar_view",
+            SmartMeasureArViewFactory(flutterEngine.dartExecutor.binaryMessenger, this)
+        )
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_VIBRATOR).setMethodCallHandler { call, result ->
             val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager

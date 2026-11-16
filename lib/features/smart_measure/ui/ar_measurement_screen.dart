@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sensors_plus/sensors_plus.dart';
@@ -17,8 +19,8 @@ import 'widgets/unit_selector_sheet.dart';
 import 'smart_measure_dashboard_screen.dart';
 
 /// Apple / iPhone Measure inspired live camera measurement screen.
-/// Implements 60 FPS non-blocking rendering, true 3D surface raycasting,
-/// dynamic dotted tracking line, and auto-orienting measurement labels.
+/// Backed by real Google ARCore 3D plane detection & spatial anchors on Android,
+/// with 60 FPS non-blocking overlays and optical raycast fallback.
 class ARMeasurementScreen extends StatefulWidget {
   final SmartMeasureToolType initialTool;
 
@@ -38,9 +40,34 @@ enum _DragTargetType {
   segmentEnd,
 }
 
+class _ARAnchorData {
+  final String id;
+  final double worldX;
+  final double worldY;
+  final double worldZ;
+  Offset screenPosition; // 0.0 to 1.0 normalized
+  final bool isNative;
+
+  _ARAnchorData({
+    required this.id,
+    required this.worldX,
+    required this.worldY,
+    required this.worldZ,
+    required this.screenPosition,
+    this.isNative = false,
+  });
+
+  double distanceTo(_ARAnchorData other) {
+    final dx = other.worldX - worldX;
+    final dy = other.worldY - worldY;
+    final dz = other.worldZ - worldZ;
+    return math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+}
+
 class _LockedSegment {
-  SpatialAnchor start;
-  SpatialAnchor end;
+  _ARAnchorData start;
+  _ARAnchorData end;
   double distanceMeters;
   String label;
 
@@ -52,23 +79,35 @@ class _LockedSegment {
   });
 
   void recalculate(DistanceUnit unit) {
-    distanceMeters = start.distanceToPoint(end);
+    distanceMeters = start.distanceTo(end);
     label = unit.formatMeters(distanceMeters, decimals: distanceMeters < 0.1 ? 1 : 0);
   }
 }
 
 class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsBindingObserver {
+  // Native ARCore state
+  bool _useNativeARCore = false;
+  bool _isNativeViewReady = false;
+  Timer? _arTrackingTimer;
+
+  // Camera fallback for devices without ARCore
   CameraController? _cameraController;
   List<CameraDescription> _availableCameras = [];
   bool _isCameraReady = false;
 
-  // Spatial Sensor Tracker (Extends ChangeNotifier, throttled to 60 FPS)
+  // Spatial Sensor Tracker (for sensor-fusion & fallback raycasting)
   final SpatialAnchorTracker _spatialTracker = SpatialAnchorTracker();
 
   // Anchors and Segments
-  SpatialAnchor? _activeStartAnchor;
+  _ARAnchorData? _activeStartAnchor;
   final List<_LockedSegment> _lockedSegments = [];
   final List<_LockedSegment> _undoHistory = [];
+
+  // Surface Detection & Guidance State
+  bool _isSurfaceDetected = false;
+  String _surfaceStatusMessage = 'Searching for a surface...';
+  String _surfaceType = 'NONE';
+  int _planesCount = 0;
 
   // Dragging & Interaction State
   _DragTargetType _activeDragType = _DragTargetType.none;
@@ -94,37 +133,57 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initSensorsAndCamera();
+    _initMeasurementSystem();
     _startLevelSensors();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _arTrackingTimer?.cancel();
     _spatialTracker.stopTracking();
     _levelAccelSub?.cancel();
     _cameraController?.dispose();
+    ARPlatformBridge().clearNativeView();
     ARPlatformBridge().setActiveCameraController(null);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
     if (state == AppLifecycleState.inactive) {
-      _cameraController?.dispose();
+      if (_useNativeARCore) {
+        ARPlatformBridge().pauseNativeSession();
+      } else {
+        _cameraController?.dispose();
+      }
     } else if (state == AppLifecycleState.resumed) {
-      _initCamera();
+      if (_useNativeARCore) {
+        ARPlatformBridge().resumeNativeSession();
+      } else {
+        _initCameraFallback();
+      }
     }
   }
 
-  Future<void> _initSensorsAndCamera() async {
-    // Sensor tracker notifies AnimatedBuilder directly - NO setState() calls on sensor ticks!
+  Future<void> _initMeasurementSystem() async {
     _spatialTracker.startTracking();
-    await _initCamera();
+
+    if (!kIsWeb && Platform.isAndroid) {
+      final cap = await ARPlatformBridge().checkCapabilities();
+      if (cap.canUseLiveAR) {
+        setState(() {
+          _useNativeARCore = true;
+        });
+        return;
+      }
+    }
+
+    // Fallback: Flutter CameraPreview + SpatialAnchorTracker
+    await _initCameraFallback();
   }
 
-  Future<void> _initCamera() async {
+  Future<void> _initCameraFallback() async {
     try {
       _availableCameras = await availableCameras();
       if (_availableCameras.isEmpty) return;
@@ -150,7 +209,80 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
       ARPlatformBridge().setActiveCameraController(controller);
       setState(() => _isCameraReady = true);
     } catch (e) {
-      debugPrint('Camera init error: $e');
+      debugPrint('Camera fallback init error: $e');
+    }
+  }
+
+  void _onPlatformViewCreated(int viewId) {
+    ARPlatformBridge().setNativeViewId(viewId);
+    setState(() => _isNativeViewReady = true);
+
+    // Start 60 FPS periodic sync for anchor reprojecting & surface status
+    _arTrackingTimer?.cancel();
+    _arTrackingTimer = Timer.periodic(const Duration(milliseconds: 20), (_) {
+      _syncARCoreTracking();
+    });
+  }
+
+  Future<void> _syncARCoreTracking() async {
+    if (!_useNativeARCore || !_isNativeViewReady) return;
+
+    // 1. Query surface state
+    final status = await ARPlatformBridge().querySurfaceStatus();
+    if (status != null && mounted) {
+      final hasSurf = status['hasSurface'] as bool? ?? false;
+      final planes = status['planesCount'] as int? ?? 0;
+      final type = status['surfaceType'] as String? ?? 'NONE';
+      final msg = status['statusMessage'] as String? ?? '';
+
+      if (_isSurfaceDetected != hasSurf || _surfaceStatusMessage != msg || _planesCount != planes) {
+        setState(() {
+          _isSurfaceDetected = hasSurf;
+          _planesCount = planes;
+          _surfaceType = type;
+          _surfaceStatusMessage = msg;
+        });
+      }
+    }
+
+    // 2. Query anchor screen reprojection from ARCore camera matrix
+    final anchorIds = <String>[];
+    if (_activeStartAnchor != null && _activeStartAnchor!.isNative) {
+      anchorIds.add(_activeStartAnchor!.id);
+    }
+    for (final seg in _lockedSegments) {
+      if (seg.start.isNative) anchorIds.add(seg.start.id);
+      if (seg.end.isNative) anchorIds.add(seg.end.id);
+    }
+
+    if (anchorIds.isNotEmpty) {
+      final positions = await ARPlatformBridge().getAnchorScreenPositions(anchorIds);
+      if (positions.isNotEmpty && mounted) {
+        if (_activeStartAnchor != null && positions.containsKey(_activeStartAnchor!.id)) {
+          final data = Map<String, dynamic>.from(positions[_activeStartAnchor!.id] as Map);
+          _activeStartAnchor!.screenPosition = Offset(
+            (data['x'] as num).toDouble(),
+            (data['y'] as num).toDouble(),
+          );
+        }
+
+        for (final seg in _lockedSegments) {
+          if (positions.containsKey(seg.start.id)) {
+            final data = Map<String, dynamic>.from(positions[seg.start.id] as Map);
+            seg.start.screenPosition = Offset(
+              (data['x'] as num).toDouble(),
+              (data['y'] as num).toDouble(),
+            );
+          }
+          if (positions.containsKey(seg.end.id)) {
+            final data = Map<String, dynamic>.from(positions[seg.end.id] as Map);
+            seg.end.screenPosition = Offset(
+              (data['x'] as num).toDouble(),
+              (data['y'] as num).toDouble(),
+            );
+          }
+        }
+      }
     }
   }
 
@@ -180,30 +312,67 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
     } catch (_) {}
   }
 
-  // --- Point Creation & Interaction ---
+  // --- Point Creation & AR Hit Testing ---
 
-  void _onPlusButtonTapped() {
+  Future<void> _onPlusButtonTapped() async {
     HapticFeedback.mediumImpact();
 
-    // Intersect the optical ray with the target surface plane
-    final currentAnchor = _spatialTracker.createAnchorAtScreenPoint(
-      UniqueKey().toString(),
-      const Offset(0.5, 0.5),
-    );
+    _ARAnchorData newAnchor;
+
+    if (_useNativeARCore && _isNativeViewReady) {
+      // Native ARCore hit-test on detected plane or instant placement
+      final hit = await ARPlatformBridge().nativeHitTest(x: 0.5, y: 0.5);
+      if (hit != null) {
+        newAnchor = _ARAnchorData(
+          id: hit['anchorId'] as String? ?? UniqueKey().toString(),
+          worldX: (hit['x'] as num).toDouble(),
+          worldY: (hit['y'] as num).toDouble(),
+          worldZ: (hit['z'] as num).toDouble(),
+          screenPosition: const Offset(0.5, 0.5),
+          isNative: true,
+        );
+      } else {
+        // Fallback raycast if no plane hit yet
+        final rayAnchor = _spatialTracker.createAnchorAtScreenPoint(
+          UniqueKey().toString(),
+          const Offset(0.5, 0.5),
+        );
+        newAnchor = _ARAnchorData(
+          id: rayAnchor.id,
+          worldX: rayAnchor.worldX,
+          worldY: rayAnchor.worldY,
+          worldZ: rayAnchor.worldZ,
+          screenPosition: const Offset(0.5, 0.5),
+          isNative: false,
+        );
+      }
+    } else {
+      // Optical fallback raycasting
+      final rayAnchor = _spatialTracker.createAnchorAtScreenPoint(
+        UniqueKey().toString(),
+        const Offset(0.5, 0.5),
+      );
+      newAnchor = _ARAnchorData(
+        id: rayAnchor.id,
+        worldX: rayAnchor.worldX,
+        worldY: rayAnchor.worldY,
+        worldZ: rayAnchor.worldZ,
+        screenPosition: const Offset(0.5, 0.5),
+        isNative: false,
+      );
+    }
 
     setState(() {
       if (_activeStartAnchor == null) {
-        // Step 1: Start measuring from current reticle position
-        _activeStartAnchor = currentAnchor;
+        _activeStartAnchor = newAnchor;
       } else {
-        // Step 2: Lock segment with exact Euclidean 3D distance on the surface
-        final dist = _activeStartAnchor!.distanceToPoint(currentAnchor);
+        final dist = _activeStartAnchor!.distanceTo(newAnchor);
         final label = _unit.formatMeters(dist, decimals: dist < 0.1 ? 1 : 0);
 
         _lockedSegments.add(
           _LockedSegment(
             start: _activeStartAnchor!,
-            end: currentAnchor,
+            end: newAnchor,
             distanceMeters: dist,
             label: label,
           ),
@@ -219,14 +388,8 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
   void _handlePanStart(Offset localPos, Size size) {
     const hitRadius = 42.0;
 
-    // Check active start anchor
     if (_activeStartAnchor != null) {
-      final norm = _activeStartAnchor!.projectToScreen(
-        currentYawDeg: _spatialTracker.currentYawDeg,
-        currentPitchDeg: _spatialTracker.currentPitchDeg,
-        currentRollDeg: _spatialTracker.currentRollDeg,
-      );
-      final px = Offset(norm.dx * size.width, norm.dy * size.height);
+      final px = Offset(_activeStartAnchor!.screenPosition.dx * size.width, _activeStartAnchor!.screenPosition.dy * size.height);
       if ((localPos - px).distance <= hitRadius) {
         HapticFeedback.selectionClick();
         setState(() {
@@ -237,15 +400,9 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
       }
     }
 
-    // Check locked segments
     for (int i = _lockedSegments.length - 1; i >= 0; i--) {
       final seg = _lockedSegments[i];
-      final endNorm = seg.end.projectToScreen(
-        currentYawDeg: _spatialTracker.currentYawDeg,
-        currentPitchDeg: _spatialTracker.currentPitchDeg,
-        currentRollDeg: _spatialTracker.currentRollDeg,
-      );
-      final endPx = Offset(endNorm.dx * size.width, endNorm.dy * size.height);
+      final endPx = Offset(seg.end.screenPosition.dx * size.width, seg.end.screenPosition.dy * size.height);
       if ((localPos - endPx).distance <= hitRadius) {
         HapticFeedback.selectionClick();
         setState(() {
@@ -256,12 +413,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
         return;
       }
 
-      final startNorm = seg.start.projectToScreen(
-        currentYawDeg: _spatialTracker.currentYawDeg,
-        currentPitchDeg: _spatialTracker.currentPitchDeg,
-        currentRollDeg: _spatialTracker.currentRollDeg,
-      );
-      final startPx = Offset(startNorm.dx * size.width, startNorm.dy * size.height);
+      final startPx = Offset(seg.start.screenPosition.dx * size.width, seg.start.screenPosition.dy * size.height);
       if ((localPos - startPx).distance <= hitRadius) {
         HapticFeedback.selectionClick();
         setState(() {
@@ -282,19 +434,28 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
       (localPos.dy / size.height).clamp(0.04, 0.94),
     );
 
-    final newAnchor = _spatialTracker.createAnchorAtScreenPoint(
+    final rayAnchor = _spatialTracker.createAnchorAtScreenPoint(
       UniqueKey().toString(),
       norm,
     );
 
+    final updatedData = _ARAnchorData(
+      id: rayAnchor.id,
+      worldX: rayAnchor.worldX,
+      worldY: rayAnchor.worldY,
+      worldZ: rayAnchor.worldZ,
+      screenPosition: norm,
+      isNative: false,
+    );
+
     setState(() {
       if (_activeDragType == _DragTargetType.activeStart && _activeStartAnchor != null) {
-        _activeStartAnchor = newAnchor;
+        _activeStartAnchor = updatedData;
       } else if (_activeDragType == _DragTargetType.segmentStart && _activeDragSegmentIndex != null) {
-        _lockedSegments[_activeDragSegmentIndex!].start = newAnchor;
+        _lockedSegments[_activeDragSegmentIndex!].start = updatedData;
         _lockedSegments[_activeDragSegmentIndex!].recalculate(_unit);
       } else if (_activeDragType == _DragTargetType.segmentEnd && _activeDragSegmentIndex != null) {
-        _lockedSegments[_activeDragSegmentIndex!].end = newAnchor;
+        _lockedSegments[_activeDragSegmentIndex!].end = updatedData;
         _lockedSegments[_activeDragSegmentIndex!].recalculate(_unit);
       }
     });
@@ -319,15 +480,22 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
     HapticFeedback.lightImpact();
     setState(() {
       if (_activeStartAnchor != null) {
+        if (_activeStartAnchor!.isNative) {
+          ARPlatformBridge().removeNativeAnchor(_activeStartAnchor!.id);
+        }
         _activeStartAnchor = null;
       } else if (_lockedSegments.isNotEmpty) {
-        _undoHistory.add(_lockedSegments.removeLast());
+        final removed = _lockedSegments.removeLast();
+        _undoHistory.add(removed);
+        if (removed.start.isNative) ARPlatformBridge().removeNativeAnchor(removed.start.id);
+        if (removed.end.isNative) ARPlatformBridge().removeNativeAnchor(removed.end.id);
       }
     });
   }
 
   void _clearAll() {
     HapticFeedback.lightImpact();
+    ARPlatformBridge().clearAllNativeAnchors();
     setState(() {
       _activeStartAnchor = null;
       _lockedSegments.clear();
@@ -361,13 +529,15 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                 children: [
                   Icon(Icons.straighten_rounded, color: Color(0xFF60A5FA), size: 22),
                   SizedBox(width: 8),
-                  Text('Surface Distance Calibration', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+                  Text('Surface Distance & Plane Calibration', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
                 ],
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Select your measurement surface height for millimeter accuracy:',
-                style: TextStyle(color: Colors.white70, fontSize: 13),
+              Text(
+                _useNativeARCore
+                    ? 'Active Engine: Google ARCore (Planes detected: $_planesCount, Type: $_surfaceType)'
+                    : 'Active Engine: Optical Depth Raycasting (Select surface height):',
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
               ),
               const SizedBox(height: 16),
               for (final preset in SurfacePreset.values)
@@ -384,7 +554,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                   child: ListTile(
                     leading: Icon(preset.icon, color: _spatialTracker.surfacePreset == preset ? const Color(0xFF60A5FA) : Colors.white60),
                     title: Text(preset.label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    subtitle: Text('~${(preset.distanceMeters * 100).toStringAsFixed(0)} cm height from surface', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                    subtitle: Text('~${(preset.distanceMeters * 100).toStringAsFixed(0)} cm surface elevation', style: const TextStyle(color: Colors.white54, fontSize: 12)),
                     trailing: _spatialTracker.surfacePreset == preset ? const Icon(Icons.check_circle_rounded, color: Color(0xFF60A5FA)) : null,
                     onTap: () {
                       HapticFeedback.selectionClick();
@@ -435,7 +605,8 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
 
     final secondary = <String, dynamic>{
       'Segments Count': _lockedSegments.length,
-      'Surface Setting': _spatialTracker.surfacePreset.label,
+      'AR Engine': _useNativeARCore ? 'Google ARCore Plane Detection' : 'Optical 3D Raycasting',
+      'Planes Count': _planesCount,
     };
     for (int i = 0; i < _lockedSegments.length; i++) {
       secondary['Segment #${i + 1}'] = _lockedSegments[i].label;
@@ -451,24 +622,26 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
         distanceUnit: _unit,
         formattedValue: _unit.formatMeters(totalDist),
         secondaryValues: secondary,
-        confidence: TrackingConfidence.high,
-        uncertaintyPercent: 0.8,
-        capabilityUsed: 'Precision 3D Surface Raycasting',
+        confidence: _useNativeARCore && _isSurfaceDetected ? TrackingConfidence.high : TrackingConfidence.medium,
+        uncertaintyPercent: _useNativeARCore ? 0.5 : 1.2,
+        capabilityUsed: _useNativeARCore ? 'Google ARCore Hardware Planes' : 'Optical Depth Raycasting',
       ),
     );
   }
 
   String get _topInstructionText {
-    if (_activeStartAnchor == null && _lockedSegments.isEmpty) {
-      return 'Find a surface to measure';
-    } else if (_activeStartAnchor != null) {
+    if (_activeStartAnchor != null) {
       return 'Move to end point & tap +';
-    } else {
+    } else if (_lockedSegments.isNotEmpty) {
       double total = 0.0;
       for (final s in _lockedSegments) {
         total += s.distanceMeters;
       }
       return 'Total: ${_unit.formatMeters(total)} (${_lockedSegments.length} seg)';
+    } else if (_useNativeARCore) {
+      return _isSurfaceDetected ? 'Surface detected • Ready to measure' : 'Move camera slowly to detect surfaces';
+    } else {
+      return 'Ready to measure • Tap + to start';
     }
   }
 
@@ -536,7 +709,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
     );
   }
 
-  // --- MEASURE VIEW (Apple Measure UI with Dotted Tracking Line & 60 FPS non-blocking render) ---
+  // --- MEASURE VIEW (ARCore Native Preview + 60 FPS Apple Measure Overlay) ---
 
   Widget _buildMeasureView() {
     final size = MediaQuery.of(context).size;
@@ -545,8 +718,13 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 1. Live Camera Preview (Built ONCE, never rebuilt on sensor updates!)
-        if (_isCameraReady && _cameraController != null)
+        // 1. Camera Feed: Native ARCore AndroidView OR Flutter CameraPreview fallback
+        if (_useNativeARCore)
+          AndroidView(
+            viewType: 'com.utility.app/smart_measure_ar_view',
+            onPlatformViewCreated: _onPlatformViewCreated,
+          )
+        else if (_isCameraReady && _cameraController != null)
           Center(
             child: AspectRatio(
               aspectRatio: 1 / _cameraController!.value.aspectRatio,
@@ -569,46 +747,39 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
             child: AnimatedBuilder(
               animation: _spatialTracker,
               builder: (context, _) {
-                // Project active start anchor to 2D screen coordinate
+                // Project active start anchor to screen
                 Offset? activeStartScreenPos;
                 String? liveDistanceLabel;
 
                 if (_activeStartAnchor != null) {
-                  final sNorm = _activeStartAnchor!.projectToScreen(
-                    currentYawDeg: _spatialTracker.currentYawDeg,
-                    currentPitchDeg: _spatialTracker.currentPitchDeg,
-                    currentRollDeg: _spatialTracker.currentRollDeg,
+                  activeStartScreenPos = Offset(
+                    _activeStartAnchor!.screenPosition.dx * size.width,
+                    _activeStartAnchor!.screenPosition.dy * size.height,
                   );
-                  activeStartScreenPos = Offset(sNorm.dx * size.width, sNorm.dy * size.height);
 
-                  final liveDist = _spatialTracker.liveDistanceToReticle(
-                    _activeStartAnchor!,
+                  // Compute live distance from active start point to center reticle
+                  final currentReticleAnchor = _spatialTracker.createAnchorAtScreenPoint(
+                    'reticle_temp',
                     const Offset(0.5, 0.5),
                   );
 
-                  // Clean Apple Measure label: e.g. "4 cm"
+                  final liveDist = math.sqrt(
+                    math.pow(currentReticleAnchor.worldX - _activeStartAnchor!.worldX, 2) +
+                    math.pow(currentReticleAnchor.worldY - _activeStartAnchor!.worldY, 2) +
+                    math.pow(currentReticleAnchor.worldZ - _activeStartAnchor!.worldZ, 2)
+                  );
+
                   liveDistanceLabel = _unit.formatMeters(liveDist, decimals: liveDist < 0.1 ? 1 : 0);
                 }
 
-                // Project locked segments and endpoints to screen
+                // Project locked segments and endpoints
                 final renderedSegments = <RenderedMeasurementSegment>[];
                 final renderedAnchors = <Offset>[];
 
                 for (int i = 0; i < _lockedSegments.length; i++) {
                   final seg = _lockedSegments[i];
-                  final sNorm = seg.start.projectToScreen(
-                    currentYawDeg: _spatialTracker.currentYawDeg,
-                    currentPitchDeg: _spatialTracker.currentPitchDeg,
-                    currentRollDeg: _spatialTracker.currentRollDeg,
-                  );
-                  final eNorm = seg.end.projectToScreen(
-                    currentYawDeg: _spatialTracker.currentYawDeg,
-                    currentPitchDeg: _spatialTracker.currentPitchDeg,
-                    currentRollDeg: _spatialTracker.currentRollDeg,
-                  );
-
-                  final sPx = Offset(sNorm.dx * size.width, sNorm.dy * size.height);
-                  final ePx = Offset(eNorm.dx * size.width, eNorm.dy * size.height);
+                  final sPx = Offset(seg.start.screenPosition.dx * size.width, seg.start.screenPosition.dy * size.height);
+                  final ePx = Offset(seg.end.screenPosition.dx * size.width, seg.end.screenPosition.dy * size.height);
 
                   renderedSegments.add(
                     RenderedMeasurementSegment(
@@ -638,18 +809,18 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
           ),
         ),
 
-        // 3. Apple Measure Aiming Reticle (Center dot with subtle ring)
+        // 3. Apple Measure Aiming Reticle with Surface Detection Visual Feedback
         Center(
           child: Container(
-            width: 16,
-            height: 16,
+            width: _isSurfaceDetected ? 18 : 14,
+            height: _isSurfaceDetected ? 18 : 14,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: Colors.white.withValues(alpha: 0.85),
+              color: _isSurfaceDetected ? const Color(0xFF60A5FA).withValues(alpha: 0.9) : Colors.white.withValues(alpha: 0.85),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.5),
-                  blurRadius: 4,
+                  color: _isSurfaceDetected ? const Color(0xFF2563EB).withValues(alpha: 0.6) : Colors.black.withValues(alpha: 0.5),
+                  blurRadius: _isSurfaceDetected ? 8 : 4,
                 ),
               ],
             ),
@@ -666,7 +837,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
           ),
         ),
 
-        // 4. Top Header Controls (Undo, Center Instruction, Surface Calibration, Unit, Trash)
+        // 4. Top Header Controls (Undo, Center Instruction with Surface indicator, Unit, Trash)
         Positioned(
           top: MediaQuery.of(context).padding.top + 8,
           left: 14,
@@ -693,25 +864,45 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                           margin: const EdgeInsets.symmetric(horizontal: 4),
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                           decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.60),
+                            color: Colors.black.withValues(alpha: 0.65),
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-                          ),
-                          child: Text(
-                            _topInstructionText,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
+                            border: Border.all(
+                              color: _isSurfaceDetected ? const Color(0xFF3B82F6).withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.16),
                             ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_isSurfaceDetected) ...[
+                                Container(
+                                  width: 7,
+                                  height: 7,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF10B981),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                              ],
+                              Flexible(
+                                child: Text(
+                                  _topInstructionText,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: _isSurfaceDetected ? Colors.white : Colors.white70,
+                                    fontSize: 12,
+                                    fontWeight: _isSurfaceDetected ? FontWeight.bold : FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
 
-                      // Surface Distance Pill (Quick Calibration)
+                      // Surface Distance / Engine Pill
                       GestureDetector(
                         onTap: _showSurfacePicker,
                         child: Container(
@@ -724,10 +915,10 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(_spatialTracker.surfacePreset.icon, color: const Color(0xFF60A5FA), size: 14),
+                              Icon(_useNativeARCore ? Icons.view_in_ar_rounded : _spatialTracker.surfacePreset.icon, color: const Color(0xFF60A5FA), size: 14),
                               const SizedBox(width: 4),
                               Text(
-                                '${(_spatialTracker.surfaceHeightMeters * 100).toStringAsFixed(0)}cm',
+                                _useNativeARCore ? 'ARCore' : '${(_spatialTracker.surfaceHeightMeters * 100).toStringAsFixed(0)}cm',
                                 style: const TextStyle(color: Color(0xFF93C5FD), fontSize: 11, fontWeight: FontWeight.bold),
                               ),
                             ],

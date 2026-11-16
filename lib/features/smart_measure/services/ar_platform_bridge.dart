@@ -19,6 +19,83 @@ class ARPlatformBridge {
   SmartMeasureCapability? _cachedCapability;
   CameraController? _activeCameraController;
   bool _isTorchOn = false;
+  MethodChannel? _viewChannel;
+
+  void setNativeViewId(int viewId) {
+    _viewChannel = MethodChannel('com.utility.app/smart_measure_ar_view_$viewId');
+  }
+
+  void clearNativeView() {
+    _viewChannel = null;
+  }
+
+  bool get hasNativeArView => _viewChannel != null;
+
+  /// Query live surface detection status from native ARCore
+  Future<Map<String, dynamic>?> querySurfaceStatus() async {
+    if (_viewChannel == null) return null;
+    try {
+      final res = await _viewChannel!.invokeMethod<Map<dynamic, dynamic>>('querySurfaceStatus');
+      if (res != null) {
+        return Map<String, dynamic>.from(res);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Perform native AR hit test at screen coordinates (0.0 to 1.0)
+  Future<Map<String, dynamic>?> nativeHitTest({double x = 0.5, double y = 0.5}) async {
+    if (_viewChannel == null) return null;
+    try {
+      final res = await _viewChannel!.invokeMethod<Map<dynamic, dynamic>>('hitTest', {'x': x, 'y': y});
+      if (res != null) {
+        return Map<String, dynamic>.from(res);
+      }
+    } catch (e) {
+      debugPrint('nativeHitTest error: $e');
+    }
+    return null;
+  }
+
+  /// Get real-time screen reprojected positions for tracked ARCore anchors
+  Future<Map<String, dynamic>> getAnchorScreenPositions(List<String> anchorIds) async {
+    if (_viewChannel == null || anchorIds.isEmpty) return {};
+    try {
+      final res = await _viewChannel!.invokeMethod<Map<dynamic, dynamic>>('getAnchorScreenPositions', {'anchorIds': anchorIds});
+      if (res != null) {
+        return Map<String, dynamic>.from(res);
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  /// Remove a native anchor
+  Future<void> removeNativeAnchor(String anchorId) async {
+    try {
+      await _viewChannel?.invokeMethod('removeAnchor', {'anchorId': anchorId});
+    } catch (_) {}
+  }
+
+  /// Clear all native anchors
+  Future<void> clearAllNativeAnchors() async {
+    try {
+      await _viewChannel?.invokeMethod('clearAllAnchors');
+    } catch (_) {}
+  }
+
+  /// Pause native AR session
+  Future<void> pauseNativeSession() async {
+    try {
+      await _viewChannel?.invokeMethod('pauseSession');
+    } catch (_) {}
+  }
+
+  /// Resume native AR session
+  Future<void> resumeNativeSession() async {
+    try {
+      await _viewChannel?.invokeMethod('resumeSession');
+    } catch (_) {}
+  }
 
   /// Check and retrieve device capabilities across Android, iOS, and Desktop platforms.
   Future<SmartMeasureCapability> checkCapabilities() async {
