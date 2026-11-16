@@ -31,6 +31,34 @@ class ARPlatformBridge {
 
   bool get hasNativeArView => _viewChannel != null;
 
+  /// Checks whether camera runtime permission is granted
+  Future<bool> hasCameraPermission() async {
+    if (kIsWeb) return true;
+    if (Platform.isAndroid) {
+      try {
+        final res = await _channel.invokeMethod<bool>('hasCameraPermission');
+        return res ?? false;
+      } catch (_) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Requests camera runtime permission from the user
+  Future<bool> requestCameraPermission() async {
+    if (kIsWeb) return true;
+    if (Platform.isAndroid) {
+      try {
+        final res = await _channel.invokeMethod<bool>('requestCameraPermission');
+        return res ?? false;
+      } catch (_) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   /// Query live surface detection status from native ARCore
   Future<Map<String, dynamic>?> querySurfaceStatus() async {
     if (_viewChannel == null) return null;

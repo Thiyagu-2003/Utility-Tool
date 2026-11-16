@@ -1,6 +1,8 @@
 package com.utility.app.utility_tool
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
@@ -8,6 +10,7 @@ import android.opengl.Matrix
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import androidx.core.content.ContextCompat
 import com.google.ar.core.Anchor
 import com.google.ar.core.Camera
 import com.google.ar.core.Config
@@ -91,6 +94,10 @@ class SmartMeasureArView(
     }
 
     private fun initSession() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+
         try {
             val arSession = Session(context)
             val config = Config(arSession).apply {
@@ -103,8 +110,13 @@ class SmartMeasureArView(
                 focusMode = Config.FocusMode.AUTO
             }
             arSession.configure(config)
+            arSession.resume() // Opens the camera hardware and begins streaming frames!
             session = arSession
             isSessionConfigured = true
+
+            if (cameraTextureId != -1) {
+                arSession.setCameraTextureName(cameraTextureId)
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -154,6 +166,10 @@ class SmartMeasureArView(
     override fun onDrawFrame(gl: GL10?) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 
+        if (session == null) {
+            initSession()
+        }
+
         val arSession = session ?: return
         if (!isSessionConfigured) return
 
@@ -167,10 +183,15 @@ class SmartMeasureArView(
             val frame = arSession.update()
             latestFrame = frame
 
+            // Always render the camera background feed so the user sees live video immediately!
+            drawBackground(frame)
+
             val camera = frame.camera
             if (camera.trackingState == TrackingState.TRACKING) {
-                drawBackground(frame)
                 updateSurfaceTracking(frame, arSession)
+            } else {
+                hasSurface = false
+                trackingStateStr = "SEARCHING"
             }
         } catch (e: Exception) {
             // Ignore camera frame drop exceptions during resume/pause
@@ -469,7 +490,11 @@ class SmartMeasureArView(
             }
             "resumeSession" -> {
                 try {
-                    session?.resume()
+                    if (session == null) {
+                        initSession()
+                    } else {
+                        session?.resume()
+                    }
                     result.success(true)
                 } catch (e: Exception) {
                     result.success(false)

@@ -1,12 +1,16 @@
 package com.utility.app.utility_tool
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.google.ar.core.ArCoreApk
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -15,6 +19,16 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val CHANNEL_VIBRATOR = "com.utility.app/vibrator"
     private val CHANNEL_SMART_MEASURE_AR = "com.utility.app/smart_measure_ar"
+    private var cameraPermissionResultCallback: MethodChannel.Result? = null
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1001) {
+            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            cameraPermissionResultCallback?.success(granted)
+            cameraPermissionResultCallback = null
+        }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -73,9 +87,21 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // Smart Measure AR Channel for device capabilities and AR session queries
+        // Smart Measure AR Channel for camera permission, device capabilities and AR session queries
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_SMART_MEASURE_AR).setMethodCallHandler { call, result ->
             when (call.method) {
+                "hasCameraPermission" -> {
+                    val hasPerm = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                    result.success(hasPerm)
+                }
+                "requestCameraPermission" -> {
+                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                        result.success(true)
+                    } else {
+                        cameraPermissionResultCallback = result
+                        ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 1001)
+                    }
+                }
                 "checkCapabilities" -> {
                     try {
                         val arAvailability = ArCoreApk.getInstance().checkAvailability(this)

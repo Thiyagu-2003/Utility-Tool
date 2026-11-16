@@ -20,7 +20,7 @@ import 'smart_measure_dashboard_screen.dart';
 
 /// Apple / iPhone Measure inspired live camera measurement screen.
 /// Backed by real Google ARCore 3D plane detection & spatial anchors on Android,
-/// with 60 FPS non-blocking overlays and optical raycast fallback.
+/// with 60 FPS non-blocking overlays, proper camera permissions, and safe navigation insets.
 class ARMeasurementScreen extends StatefulWidget {
   final SmartMeasureToolType initialTool;
 
@@ -85,6 +85,10 @@ class _LockedSegment {
 }
 
 class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsBindingObserver {
+  // Permission state
+  bool _hasCameraPermission = true;
+  bool _isCheckingPermission = true;
+
   // Native ARCore state
   bool _useNativeARCore = false;
   bool _isNativeViewReady = false;
@@ -160,21 +164,45 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
     } else if (state == AppLifecycleState.resumed) {
       if (_useNativeARCore) {
         ARPlatformBridge().resumeNativeSession();
-      } else {
+      } else if (_hasCameraPermission) {
         _initCameraFallback();
       }
     }
   }
 
   Future<void> _initMeasurementSystem() async {
+    // 1. Request and verify camera permission
+    final hasPerm = await ARPlatformBridge().hasCameraPermission();
+    if (!hasPerm) {
+      final granted = await ARPlatformBridge().requestCameraPermission();
+      if (!granted) {
+        if (mounted) {
+          setState(() {
+            _hasCameraPermission = false;
+            _isCheckingPermission = false;
+          });
+        }
+        return;
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _hasCameraPermission = true;
+        _isCheckingPermission = false;
+      });
+    }
+
     _spatialTracker.startTracking();
 
     if (!kIsWeb && Platform.isAndroid) {
       final cap = await ARPlatformBridge().checkCapabilities();
       if (cap.canUseLiveAR) {
-        setState(() {
-          _useNativeARCore = true;
-        });
+        if (mounted) {
+          setState(() {
+            _useNativeARCore = true;
+          });
+        }
         return;
       }
     }
@@ -216,6 +244,9 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
   void _onPlatformViewCreated(int viewId) {
     ARPlatformBridge().setNativeViewId(viewId);
     setState(() => _isNativeViewReady = true);
+
+    // Make sure the native ARCore session opens the camera hardware immediately
+    ARPlatformBridge().resumeNativeSession();
 
     // Start 60 FPS periodic sync for anchor reprojecting & surface status
     _arTrackingTimer?.cancel();
@@ -535,8 +566,8 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
               const SizedBox(height: 8),
               Text(
                 _useNativeARCore
-                    ? 'Active Engine: Google ARCore (Planes detected: $_planesCount, Type: $_surfaceType)'
-                    : 'Active Engine: Optical Depth Raycasting (Select surface height):',
+                    ? 'Engine: Google ARCore (Planes: $_planesCount, Surface: $_surfaceType)'
+                    : 'Engine: Optical Depth Raycasting (Select surface height):',
                 style: const TextStyle(color: Colors.white70, fontSize: 13),
               ),
               const SizedBox(height: 16),
@@ -647,29 +678,104 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
 
   @override
   Widget build(BuildContext context) {
+    // If checking camera permission or permission was denied
+    if (_isCheckingPermission) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
+      );
+    }
+
+    if (!_hasCameraPermission) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0F172A),
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          foregroundColor: Colors.white,
+          title: const Text('Camera Permission'),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xFF2563EB).withValues(alpha: 0.2),
+                    border: Border.all(color: const Color(0xFF3B82F6), width: 2),
+                  ),
+                  child: const Center(
+                    child: Icon(Icons.videocam_off_rounded, color: Color(0xFF60A5FA), size: 40),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Camera Access Required',
+                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Smart Measure requires camera permission to detect real-world surfaces and measure objects accurately using AR.',
+                  style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 32),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    final granted = await ARPlatformBridge().requestCameraPermission();
+                    if (granted) {
+                      _initMeasurementSystem();
+                    }
+                  },
+                  icon: const Icon(Icons.check_circle_rounded),
+                  label: const Text('Grant Camera Permission', style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         fit: StackFit.expand,
         children: [
           // 1. Content View based on active dock tab (0 = Measure, 1 = Level)
-          if (_activeDockTab == 0) _buildMeasureView() else _buildLevelView(),
+          if (_activeDockTab == 0) _buildMeasureView(bottomInset) else _buildLevelView(bottomInset),
 
-          // 2. Persistent Bottom Dock: [ Measure ] and [ Level ]
+          // 2. Persistent Bottom Dock: [ Measure ] and [ Level ] (Non-overlapping above navigation bar)
           Positioned(
-            bottom: 12,
+            bottom: bottomInset > 0 ? bottomInset + 10 : 16,
             left: 0,
             right: 0,
             child: Center(
               child: Container(
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.75),
+                  color: Colors.black.withValues(alpha: 0.80),
                   borderRadius: BorderRadius.circular(32),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.20)),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.5),
+                      color: Colors.black.withValues(alpha: 0.6),
                       blurRadius: 16,
                       offset: const Offset(0, 4),
                     ),
@@ -711,7 +817,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
 
   // --- MEASURE VIEW (ARCore Native Preview + 60 FPS Apple Measure Overlay) ---
 
-  Widget _buildMeasureView() {
+  Widget _buildMeasureView(double bottomInset) {
     final size = MediaQuery.of(context).size;
     final reticleCenter = Offset(size.width * 0.5, size.height * 0.5);
 
@@ -837,7 +943,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
           ),
         ),
 
-        // 4. Top Header Controls (Undo, Center Instruction with Surface indicator, Unit, Trash)
+        // 4. Top Header Controls (Undo, Center Instruction with indicator, Unit, Torch, Trash)
         Positioned(
           top: MediaQuery.of(context).padding.top + 8,
           left: 14,
@@ -852,80 +958,49 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                 tooltip: 'Undo',
               ),
 
-              // Top-Center: Translucent instruction capsule & Surface Calibration pill
+              // Top-Center: Full-width Instruction Capsule (Tapping opens surface info)
               Expanded(
                 child: Center(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Guidance text
-                      Flexible(
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 4),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.65),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: _isSurfaceDetected ? const Color(0xFF3B82F6).withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.16),
+                  child: GestureDetector(
+                    onTap: _showSurfacePicker,
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: _isSurfaceDetected ? const Color(0xFF3B82F6).withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.16),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              color: _isSurfaceDetected ? const Color(0xFF10B981) : Colors.amber,
+                              shape: BoxShape.circle,
                             ),
                           ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (_isSurfaceDetected) ...[
-                                Container(
-                                  width: 7,
-                                  height: 7,
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFF10B981),
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                              ],
-                              Flexible(
-                                child: Text(
-                                  _topInstructionText,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: _isSurfaceDetected ? Colors.white : Colors.white70,
-                                    fontSize: 12,
-                                    fontWeight: _isSurfaceDetected ? FontWeight.bold : FontWeight.w500,
-                                  ),
-                                ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              _topInstructionText,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: _isSurfaceDetected ? Colors.white : Colors.white70,
+                                fontSize: 12,
+                                fontWeight: _isSurfaceDetected ? FontWeight.bold : FontWeight.w500,
                               ),
-                            ],
+                            ),
                           ),
-                        ),
+                        ],
                       ),
-
-                      // Surface Distance / Engine Pill
-                      GestureDetector(
-                        onTap: _showSurfacePicker,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.60),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: const Color(0xFF3B82F6).withValues(alpha: 0.5)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(_useNativeARCore ? Icons.view_in_ar_rounded : _spatialTracker.surfacePreset.icon, color: const Color(0xFF60A5FA), size: 14),
-                              const SizedBox(width: 4),
-                              Text(
-                                _useNativeARCore ? 'ARCore' : '${(_spatialTracker.surfaceHeightMeters * 100).toStringAsFixed(0)}cm',
-                                style: const TextStyle(color: Color(0xFF93C5FD), fontSize: 11, fontWeight: FontWeight.bold),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -940,13 +1015,13 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                     onTap: _toggleTorch,
                     tooltip: 'Torch',
                   ),
-                  const SizedBox(width: 5),
+                  const SizedBox(width: 6),
 
                   // Unit pill
                   GestureDetector(
                     onTap: _showUnitPicker,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.60),
                         borderRadius: BorderRadius.circular(16),
@@ -964,7 +1039,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                       ),
                     ),
                   ),
-                  const SizedBox(width: 5),
+                  const SizedBox(width: 6),
 
                   // Trash / Clear button
                   _buildCircularIconButton(
@@ -978,9 +1053,9 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
           ),
         ),
 
-        // 5. Bottom Controls (Apple Measure style large + button & Shutter)
+        // 5. Bottom Controls (Non-overlapping above navigation buttons)
         Positioned(
-          bottom: 74,
+          bottom: bottomInset > 0 ? bottomInset + 78 : 84,
           left: 0,
           right: 0,
           child: Center(
@@ -1074,12 +1149,13 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
 
   // --- LEVEL VIEW (Seamless Apple Measure Spirit Level tab) ---
 
-  Widget _buildLevelView() {
+  Widget _buildLevelView(double bottomInset) {
     final activeColor = _isLevelAligned ? const Color(0xFF10B981) : Colors.white;
 
     return Container(
       color: _isLevelAligned ? const Color(0xFF064E3B) : Colors.black,
       child: SafeArea(
+        bottom: false,
         child: Column(
           children: [
             const SizedBox(height: 30),
@@ -1120,7 +1196,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
               ),
             ),
             const Spacer(),
-            const SizedBox(height: 80),
+            SizedBox(height: bottomInset > 0 ? bottomInset + 76 : 84),
           ],
         ),
       ),
