@@ -69,6 +69,43 @@ class SpatialAnchor {
     return Offset(0.5 + rotX, 0.5 + rotY);
   }
 
+  /// Creates a SpatialAnchor from a 2D screen coordinate (0.0 to 1.0)
+  /// given the camera's current orientation and estimated depth.
+  static SpatialAnchor fromScreenPoint({
+    required String id,
+    required Offset normalizedScreen,
+    required double currentYawDeg,
+    required double currentPitchDeg,
+    required double currentRollDeg,
+    required double depthMeters,
+    double fovHorizontalDeg = 58.0,
+    double fovVerticalDeg = 75.0,
+  }) {
+    final fovHRad = fovHorizontalDeg * (math.pi / 180.0);
+    final fovVRad = fovVerticalDeg * (math.pi / 180.0);
+
+    double rotX = (normalizedScreen.dx - 0.5).clamp(-0.5, 0.5);
+    double rotY = (normalizedScreen.dy - 0.5).clamp(-0.5, 0.5);
+
+    double tanYaw = -rotX / (0.5 / math.tan(fovHRad / 2));
+    double tanPitch = rotY / (0.5 / math.tan(fovVRad / 2));
+
+    double deltaYawRad = math.atan(tanYaw);
+    double deltaPitchRad = math.atan(tanPitch);
+
+    double targetYaw = currentYawDeg - (deltaYawRad * (180.0 / math.pi));
+    double targetPitch = currentPitchDeg - (deltaPitchRad * (180.0 / math.pi));
+
+    return SpatialAnchor(
+      id: id,
+      yawDeg: targetYaw,
+      pitchDeg: targetPitch,
+      rollDeg: currentRollDeg,
+      depthMeters: depthMeters,
+      createdAt: DateTime.now(),
+    );
+  }
+
   /// Physical distance in meters from this anchor to another anchor or target.
   double distanceTo({
     required double targetYawDeg,

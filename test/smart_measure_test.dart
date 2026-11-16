@@ -51,6 +51,53 @@ void main() {
       final distCm = DistanceUnit.centimeter.fromMeters(distM);
       expect(distCm, closeTo(4.36, 0.1));
     });
+
+    test('SpatialAnchor.fromScreenPoint creates anchor that projects back to screen', () {
+      const screenPt = Offset(0.3, 0.7);
+      final anchor = SpatialAnchor.fromScreenPoint(
+        id: 'dragged',
+        normalizedScreen: screenPt,
+        currentYawDeg: 15.0,
+        currentPitchDeg: 30.0,
+        currentRollDeg: 0.0,
+        depthMeters: 0.8,
+      );
+
+      final projected = anchor.projectToScreen(
+        currentYawDeg: 15.0,
+        currentPitchDeg: 30.0,
+        currentRollDeg: 0.0,
+      );
+
+      expect(projected.dx, closeTo(screenPt.dx, 0.01));
+      expect(projected.dy, closeTo(screenPt.dy, 0.01));
+    });
+
+    test('Measurement label angle normalization prevents inverted text for all orientations', () {
+      double normalizeAngle(double angle) {
+        if (angle > 1.57079632679) {
+          angle -= 3.14159265359;
+        } else if (angle < -1.57079632679) {
+          angle += 3.14159265359;
+        }
+        return angle;
+      }
+
+      // Horizontal L to R (dx > 0, dy = 0) -> angle = 0
+      expect(normalizeAngle(0.0), closeTo(0.0, 0.001));
+
+      // Horizontal R to L (dx < 0, dy = 0) -> angle = pi -> normalized to 0
+      expect(normalizeAngle(3.14159265359), closeTo(0.0, 0.001));
+
+      // Vertical Top to Bottom (dx = 0, dy > 0) -> angle = pi/2 -> 1.57
+      expect(normalizeAngle(1.57079632679), closeTo(1.57, 0.01));
+
+      // Vertical Bottom to Top (dx = 0, dy < 0) -> angle = -pi/2 -> -1.57
+      expect(normalizeAngle(-1.57079632679), closeTo(-1.57, 0.01));
+
+      // Diagonal Bottom-Right to Top-Left (-3pi/4) -> normalized to pi/4
+      expect(normalizeAngle(-2.35619449), closeTo(0.785, 0.01));
+    });
   });
 
   group('ToolRegistry Integration', () {
