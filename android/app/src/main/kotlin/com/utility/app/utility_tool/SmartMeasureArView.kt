@@ -9,7 +9,9 @@ import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import android.os.Handler
 import android.os.Looper
+import android.view.Surface
 import android.view.View
+import android.view.WindowManager
 import androidx.core.content.ContextCompat
 import com.google.ar.core.Anchor
 import com.google.ar.core.Camera
@@ -56,14 +58,25 @@ class SmartMeasureArView(
     private val glSurfaceView = GLSurfaceView(context)
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    companion object {
+        private const val COORDS_PER_VERTEX = 2
+        private const val TEXCOORDS_PER_VERTEX = 2
+        private const val FLOAT_SIZE = 4
+        private val QUAD_COORDS = floatArrayOf(
+            -1.0f, -1.0f,
+            +1.0f, -1.0f,
+            -1.0f, +1.0f,
+            +1.0f, +1.0f
+        )
+    }
+
     private var session: Session? = null
     private var isSessionConfigured = false
     private var cameraTextureId = -1
 
-    // Rendering buffers
-    private var quadVertices: FloatBuffer? = null
+    // Rendering buffers for camera background
+    private var quadCoords: FloatBuffer? = null
     private var quadTexCoords: FloatBuffer? = null
-    private var transformedTexCoords: FloatBuffer? = null
     private var glProgram = 0
     private var positionAttrib = 0
     private var texCoordAttrib = 0
@@ -72,6 +85,8 @@ class SmartMeasureArView(
     private var viewportWidth = 1080
     private var viewportHeight = 2400
     private var viewportChanged = false
+    private var lastDisplayRotation = -1
+    private var hasTransformedUvs = false
 
     // State Tracking
     @Volatile
@@ -163,6 +178,22 @@ class SmartMeasureArView(
         GLES20.glViewport(0, 0, width, height)
     }
 
+    private fun getDisplayRotation(): Int {
+        return try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                glSurfaceView.display?.rotation
+                    ?: (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay?.rotation
+                    ?: Surface.ROTATION_0
+            } else {
+                @Suppress("DEPRECATION")
+                (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay?.rotation
+                    ?: Surface.ROTATION_0
+            }
+        } catch (e: Exception) {
+            Surface.ROTATION_0
+        }
+    }
+
     override fun onDrawFrame(gl: GL10?) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 
@@ -174,9 +205,12 @@ class SmartMeasureArView(
         if (!isSessionConfigured) return
 
         try {
-            if (viewportChanged) {
-                arSession.setDisplayGeometry(0, viewportWidth, viewportHeight)
+            val currentRotation = getDisplayRotation()
+            if (viewportChanged || currentRotation != lastDisplayRotation) {
+                arSession.setDisplayGeometry(currentRotation, viewportWidth, viewportHeight)
+                lastDisplayRotation = currentRotation
                 viewportChanged = false
+                hasTransformedUvs = false
             }
 
             arSession.setCameraTextureName(cameraTextureId)
@@ -260,57 +294,51 @@ class SmartMeasureArView(
     }
 
     private fun setupQuadBuffers() {
-        val quadCoords = floatArrayOf(
-            -1.0f, -1.0f, 0.0f,
-            -1.0f,  1.0f, 0.0f,
-             1.0f, -1.0f, 0.0f,
-             1.0f,  1.0f, 0.0f
-        )
-        val texCoords = floatArrayOf(
-            0.0f, 1.0f,
-            0.0f, 0.0f,
-            1.0f, 1.0f,
-            1.0f, 0.0f
-        )
+        val bbCoords = ByteBuffer.allocateDirect(QUAD_COORDS.size * FLOAT_SIZE)
+        bbCoords.order(ByteOrder.nativeOrder())
+        quadCoords = bbCoords.asFloatBuffer().apply {
+            put(QUAD_COORDS)
+            position(0)
+        }
 
-        quadVertices = ByteBuffer.allocateDirect(quadCoords.size * 4)
-            .order(ByteOrder.nativeOrder())
-            .asFloatBuffer()
-            .apply { put(quadCoords); position(0) }
-
-        quadTexCoords = ByteBuffer.allocateDirect(texCoords.size * 4)
-            .order(ByteOrder.nativeOrder())
-            .asFloatBuffer()
-            .apply { put(texCoords); position(0) }
-
-        transformedTexCoords = ByteBuffer.allocateDirect(texCoords.size * 4)
-            .order(ByteOrder.nativeOrder())
-            .asFloatBuffer()
+        val bbTexCoords = ByteBuffer.allocateDirect(4 * TEXCOORDS_PER_VERTEX * FLOAT_SIZE)
+        bbTexCoords.order(ByteOrder.nativeOrder())
+        quadTexCoords = bbTexCoords.asFloatBuffer()
     }
 
     private fun drawBackground(frame: Frame) {
-        val texCoordsIn = quadTexCoords ?: return
-        val texCoordsOut = transformedTexCoords ?: return
-        val vertices = quadVertices ?: return
+        val coords = quadCoords ?: return
+        val texCoords = quadTexCoords ?: return
 
-        frame.transformCoordinates2d(
-            Coordinates2d.OPENGL_NORMALIZED_DEVICE_COORDINATES,
-            texCoordsIn,
-            Coordinates2d.IMAGE_NORMALIZED,
-            texCoordsOut
-        )
-        texCoordsOut.position(0)
-        vertices.position(0)
+        // Recalculate texture UVs when display geometry changes or on first frame.
+        // ARCore automatically adjusts for sensor orientation (landscape to portrait),
+        // display rotation, and center-crops the feed to preserve the natural aspect ratio.
+        if (frame.hasDisplayGeometryChanged() || !hasTransformedUvs) {
+            coords.position(0)
+            texCoords.position(0)
+            frame.transformCoordinates2d(
+                Coordinates2d.OPENGL_NORMALIZED_DEVICE_COORDINATES,
+                coords,
+                Coordinates2d.TEXTURE_NORMALIZED,
+                texCoords
+            )
+            hasTransformedUvs = true
+        }
+
+        coords.position(0)
+        texCoords.position(0)
+
+        GLES20.glDepthMask(false)
+        GLES20.glDisable(GLES20.GL_DEPTH_TEST)
 
         GLES20.glUseProgram(glProgram)
-        GLES20.glDepthMask(false)
 
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId)
         GLES20.glUniform1i(textureUniform, 0)
 
-        GLES20.glVertexAttribPointer(positionAttrib, 3, GLES20.GL_FLOAT, false, 0, vertices)
-        GLES20.glVertexAttribPointer(texCoordAttrib, 2, GLES20.GL_FLOAT, false, 0, texCoordsOut)
+        GLES20.glVertexAttribPointer(positionAttrib, COORDS_PER_VERTEX, GLES20.GL_FLOAT, false, 0, coords)
+        GLES20.glVertexAttribPointer(texCoordAttrib, TEXCOORDS_PER_VERTEX, GLES20.GL_FLOAT, false, 0, texCoords)
 
         GLES20.glEnableVertexAttribArray(positionAttrib)
         GLES20.glEnableVertexAttribArray(texCoordAttrib)
@@ -319,6 +347,7 @@ class SmartMeasureArView(
 
         GLES20.glDisableVertexAttribArray(positionAttrib)
         GLES20.glDisableVertexAttribArray(texCoordAttrib)
+        GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glDepthMask(true)
     }
 

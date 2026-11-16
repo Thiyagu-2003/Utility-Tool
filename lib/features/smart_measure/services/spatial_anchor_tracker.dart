@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
 enum SurfacePreset {
-  desk('Desk / Object', 0.35, Icons.laptop_chromebook_rounded),
-  table('Tabletop', 0.60, Icons.table_restaurant_rounded),
-  floor('Floor Plane', 1.20, Icons.border_all_rounded);
+  desk('Desk / Countertop', 0.35, Icons.table_chart_rounded),
+  table('Tabletop / Furniture', 0.60, Icons.table_restaurant_rounded),
+  floor('Floor / Ground Plane', 1.20, Icons.border_all_rounded);
 
   final String label;
   final double distanceMeters;

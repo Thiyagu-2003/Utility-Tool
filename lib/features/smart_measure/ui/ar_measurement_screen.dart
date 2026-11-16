@@ -958,48 +958,45 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                 tooltip: 'Undo',
               ),
 
-              // Top-Center: Full-width Instruction Capsule (Tapping opens surface info)
+              // Top-Center: Apple Measure style instruction capsule
               Expanded(
                 child: Center(
-                  child: GestureDetector(
-                    onTap: _showSurfacePicker,
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.65),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: _isSurfaceDetected ? const Color(0xFF3B82F6).withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.16),
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.65),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: _isSurfaceDetected ? const Color(0xFF3B82F6).withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.16),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            color: _isSurfaceDetected ? const Color(0xFF10B981) : Colors.amber,
+                            shape: BoxShape.circle,
+                          ),
                         ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 7,
-                            height: 7,
-                            decoration: BoxDecoration(
-                              color: _isSurfaceDetected ? const Color(0xFF10B981) : Colors.amber,
-                              shape: BoxShape.circle,
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            _topInstructionText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: _isSurfaceDetected ? Colors.white : Colors.white70,
+                              fontSize: 12,
+                              fontWeight: _isSurfaceDetected ? FontWeight.bold : FontWeight.w500,
                             ),
                           ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              _topInstructionText,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: _isSurfaceDetected ? Colors.white : Colors.white70,
-                                fontSize: 12,
-                                fontWeight: _isSurfaceDetected ? FontWeight.bold : FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
