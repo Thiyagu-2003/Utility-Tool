@@ -95,7 +95,7 @@ class MeasurementOverlayPainter extends CustomPainter {
     }
 
     if (activeStartPoint != null) {
-      _drawAnchorMarker(canvas, activeStartPoint!, isSelected: true);
+      _drawAnchorMarker(canvas, activeStartPoint!);
     }
 
     // 4. Point-list rendering (for polygon/room mode screens)
@@ -122,46 +122,22 @@ class MeasurementOverlayPainter extends CustomPainter {
     final ux = dx / lineLength;
     final uy = dy / lineLength;
 
-    // Dash specifications: 7.0px dash, 5.5px gap for clean iPhone Measure styling
-    const double dashLength = 7.0;
-    const double dashSpace = 5.5;
-
-    // 1. Slight shadow underneath for high visibility against light and dark backgrounds
-    final shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.45)
-      ..strokeWidth = 4.5
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-    _renderDottedPath(canvas, p1.translate(0, 1.2), ux, uy, lineLength, dashLength, dashSpace, shadowPaint);
-
-    // 2. Crisp white dotted/dashed line
-    final linePaint = Paint()
-      ..color = isSelected ? const Color(0xFF60A5FA) : Colors.white
-      ..strokeWidth = isLive ? 3.2 : 3.5
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-    _renderDottedPath(canvas, p1, ux, uy, lineLength, dashLength, dashSpace, linePaint);
+    // Round dots, equal size and spacing, first and last dot exactly on the endpoints.
+    final fill = isSelected ? const Color(0xFF60A5FA) : Colors.white;
+    _renderDots(canvas, p1, p2, lineLength, 3.2, Paint()..color = Colors.black.withValues(alpha: 0.35)); // contrast halo
+    _renderDots(canvas, p1, p2, lineLength, 2.3, Paint()..color = fill);
 
     if (label.isEmpty) return;
 
-    // 3. Midpoint and angle calculation
     final mid = Offset((p1.dx + p2.dx) / 2, (p1.dy + p2.dy) / 2);
 
-    // Calculate line angle
-    double angle = math.atan2(dy, dx);
-
-    // Normalize angle: prevent text from appearing upside down (-pi/2 <= angle <= pi/2)
-    if (angle > math.pi / 2) {
-      angle -= math.pi;
-    } else if (angle < -math.pi / 2) {
-      angle += math.pi;
-    }
-
+    // Label stays horizontal (always faces the viewer) rather than rotating with the line,
+    // which made it swing and jitter as the projected angle changed.
     _drawMeasurementCapsule(
       canvas,
       mid,
       label,
-      angle,
+      0,
       lineLength: lineLength,
       lineNormal: Offset(-uy, ux),
       screenSize: screenSize,
@@ -170,57 +146,30 @@ class MeasurementOverlayPainter extends CustomPainter {
     );
   }
 
-  /// Steps along the line vector and renders rounded dashes
-  void _renderDottedPath(
-    Canvas canvas,
-    Offset start,
-    double ux,
-    double uy,
-    double totalLength,
-    double dashLength,
-    double dashSpace,
-    Paint paint,
-  ) {
-    double current = 0.0;
-    while (current < totalLength) {
-      final sX = start.dx + ux * current;
-      final sY = start.dy + uy * current;
-      final eDist = math.min(current + dashLength, totalLength);
-      final eX = start.dx + ux * eDist;
-      final eY = start.dy + uy * eDist;
-      canvas.drawLine(Offset(sX, sY), Offset(eX, eY), paint);
-      current += dashLength + dashSpace;
+  static const double _dotSpacing = 9.0;
+
+  /// Evenly spaced dots from [a] to [b]: spacing is stretched slightly so dots land on both ends.
+  void _renderDots(Canvas canvas, Offset a, Offset b, double length, double radius, Paint paint) {
+    final n = math.max(1, (length / _dotSpacing).round());
+    for (int i = 0; i <= n; i++) {
+      canvas.drawCircle(Offset.lerp(a, b, i / n)!, radius, paint);
     }
   }
 
-  /// Circular endpoint marker matching iPhone Measure
+  /// Small white endpoint dot (iPhone Measure style). Blue ring only while being dragged.
   void _drawAnchorMarker(Canvas canvas, Offset pos, {bool isSelected = false}) {
-    // 1. Drop shadow
-    final shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.45)
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(pos.translate(0, 1.5), 8.5, shadowPaint);
-
-    // 2. Selection ring if active/hovered
+    canvas.drawCircle(pos, 6.0, Paint()..color = Colors.black.withValues(alpha: 0.35));
     if (isSelected) {
-      final selectRing = Paint()
-        ..color = const Color(0xFF3B82F6).withValues(alpha: 0.4)
-        ..strokeWidth = 4.0
-        ..style = PaintingStyle.stroke;
-      canvas.drawCircle(pos, 13.0, selectRing);
+      canvas.drawCircle(
+        pos,
+        10.0,
+        Paint()
+          ..color = const Color(0xFF3B82F6).withValues(alpha: 0.5)
+          ..strokeWidth = 2.5
+          ..style = PaintingStyle.stroke,
+      );
     }
-
-    // 3. Solid white outer ring
-    final outerPaint = Paint()
-      ..color = isSelected ? const Color(0xFF60A5FA) : Colors.white
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(pos, 7.5, outerPaint);
-
-    // 4. Inner dark dot
-    final innerPaint = Paint()
-      ..color = Colors.black87
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(pos, 2.8, innerPaint);
+    canvas.drawCircle(pos, 4.8, Paint()..color = isSelected ? const Color(0xFF60A5FA) : Colors.white);
   }
 
   /// iPhone Measure rotated measurement pill with screen boundary protection
@@ -262,7 +211,8 @@ class MeasurementOverlayPainter extends CustomPainter {
     // Screen bounds clamping so label never disappears outside the screen
     final clampedX = capsuleCenter.dx.clamp(pillWidth / 2 + 12, screenSize.width - (pillWidth / 2 + 12));
     final clampedY = capsuleCenter.dy.clamp(pillHeight / 2 + 50, screenSize.height - (pillHeight / 2 + 80));
-    capsuleCenter = Offset(clampedX, clampedY);
+    // Whole-pixel position: sub-pixel tracking noise otherwise makes the text shimmer.
+    capsuleCenter = Offset(clampedX.roundToDouble(), clampedY.roundToDouble());
 
     final pillRect = RRect.fromRectAndRadius(
       Rect.fromCenter(center: Offset.zero, width: pillWidth, height: pillHeight),

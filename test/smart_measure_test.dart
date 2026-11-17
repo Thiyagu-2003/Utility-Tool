@@ -327,6 +327,15 @@ void main() {
   });
 
   group('Audit regressions', () {
+    test('Measure labels keep useful precision in every unit', () {
+      expect(DistanceUnit.meter.formatMeasurement(0.42), '0.42 m'); // was "0 m"
+      expect(DistanceUnit.centimeter.formatMeasurement(0.33), '33 cm');
+      expect(DistanceUnit.centimeter.formatMeasurement(0.052), '5.2 cm');
+      expect(DistanceUnit.millimeter.formatMeasurement(0.1234), '123 mm');
+      expect(DistanceUnit.inch.formatMeasurement(0.0254 * 5.5), '5.5 in');
+      expect(DistanceUnit.foot.formatMeasurement(0.3048 * 2.25), '2.25 ft');
+    });
+
     test('Camera down-angle: upright = horizon, flat face-up = floor, tilted back = negative', () {
       expect(MeasurementMathEngine.cameraDownAngleDegrees(0, 9.81, 0), closeTo(0, 0.01));
       expect(MeasurementMathEngine.cameraDownAngleDegrees(0, 0, 9.81), closeTo(90, 0.01));

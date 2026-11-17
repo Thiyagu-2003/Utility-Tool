@@ -28,6 +28,18 @@ enum DistanceUnit {
     return targetUnit.fromMeters(inMeters);
   }
 
+  /// Measure-app style label: precision suited to the unit, so 0.42 m never shows as "0 m".
+  String formatMeasurement(double meters) {
+    final v = fromMeters(meters).abs();
+    final decimals = switch (this) {
+      DistanceUnit.millimeter => 0,
+      DistanceUnit.centimeter || DistanceUnit.inch => v < 10 ? 1 : 0,
+      DistanceUnit.kilometer => 3,
+      _ => 2, // m, ft, yd
+    };
+    return formatMeters(meters, decimals: decimals);
+  }
+
   /// Format a meter value into a readable string with unit symbol.
   String formatMeters(double meters, {int decimals = 2}) {
     final converted = fromMeters(meters);

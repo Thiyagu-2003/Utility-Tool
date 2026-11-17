@@ -73,6 +73,8 @@ class SmartMeasureArView(
         private const val RETICLE_EMA_ALPHA = 0.2f    // low-pass weight of each new hit (60 fps)
         private const val RETICLE_DEADBAND_M = 0.003f // published reticle ignores jitter below 3 mm
         private const val RETICLE_JUMP_M = 0.08f      // a bigger jump = new surface, reset the filter
+        private const val MIN_RANGE_M = 0.2f          // ARCore depth/planes get unreliable closer than this
+        private const val MAX_RANGE_M = 3.5f          // error grows quickly beyond this
     }
 
     private var session: Session? = null
@@ -99,7 +101,7 @@ class SmartMeasureArView(
     @Volatile private var statusSnapshot: Map<String, Any> = mapOf(
         "hasSurface" to false, "canPlace" to false, "planesCount" to 0,
         "surfaceType" to "NONE", "trackingState" to "SEARCHING",
-        "statusMessage" to "Move camera slowly to detect surfaces"
+        "statusMessage" to "Move your phone slowly to find a surface", "hint" to ""
     )
     @Volatile private var anchorSnapshot: Map<String, Any> = emptyMap()
 
@@ -300,18 +302,30 @@ class SmartMeasureArView(
         }
         if (reticleTrackable is DepthPoint) type = "DEPTH"
 
-        val onSurface = tracking && reticlePublished != null
+        val reticle = reticlePublished
+        val onSurface = tracking && reticle != null
         val message = when {
             !tracking -> when (frame.camera.trackingFailureReason) {
-                TrackingFailureReason.INSUFFICIENT_LIGHT -> "Move camera slowly • More light needed"
-                TrackingFailureReason.INSUFFICIENT_FEATURES -> "Move camera slowly • Aim at a textured area"
-                else -> "Move camera slowly"
+                TrackingFailureReason.INSUFFICIENT_LIGHT -> "Tracking limited • More light needed"
+                TrackingFailureReason.INSUFFICIENT_FEATURES -> "Point at a textured surface"
+                TrackingFailureReason.EXCESSIVE_MOTION -> "Move your phone slowly"
+                else -> "Tracking limited • Move your phone slowly"
             }
-            !onSurface -> "Move camera slowly to detect surfaces"
+            !onSurface -> "Move your phone slowly to find a surface"
             activeAnchors.isEmpty() -> "Surface detected • Ready to measure"
             else -> "Move to second point & tap +"
         }
+        // Range hint while placement is still allowed (only shown when it applies).
+        val hint = if (onSurface && reticle != null) {
+            val range = dist(reticle, frame.camera.pose.translation)
+            when {
+                range < MIN_RANGE_M -> "Move further away"
+                range > MAX_RANGE_M -> "Move closer"
+                else -> ""
+            }
+        } else ""
         statusSnapshot = mapOf(
+            "hint" to hint,
             "hasSurface" to onSurface,
             "canPlace" to onSurface,
             "planesCount" to count,

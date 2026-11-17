@@ -16,6 +16,7 @@ import '../services/measurement_math_engine.dart';
 import 'painters/measurement_overlay_painter.dart';
 import 'widgets/measurement_summary_sheet.dart';
 import 'widgets/unit_selector_sheet.dart';
+import 'widgets/ar_reticle.dart';
 import 'smart_measure_dashboard_screen.dart';
 
 /// Apple / iPhone Measure inspired live camera measurement screen.
@@ -83,7 +84,7 @@ class _LockedSegment {
   void recalculate(DistanceUnit unit) {
     // Native segments are frozen at placement (from the two anchor poses); only re-label them.
     if (!start.isNative || !end.isNative) distanceMeters = start.distanceTo(end);
-    label = unit.formatMeters(distanceMeters, decimals: distanceMeters < 0.1 ? 1 : 0);
+    label = unit.formatMeasurement(distanceMeters);
   }
 }
 
@@ -120,6 +121,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
   // Surface Detection & Guidance State
   bool _isSurfaceDetected = false;
   bool _canPlacePoint = false; // ARCore TRACKING and reticle on a tracked plane/depth hit
+  String _rangeHint = ''; // "Move closer" / "Move further away", empty when distance is fine
   String _surfaceStatusMessage = 'Searching for a surface...';
   String _surfaceType = 'NONE';
   int _planesCount = 0;
@@ -285,14 +287,17 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
         final planes = status['planesCount'] as int? ?? 0;
         final type = status['surfaceType'] as String? ?? 'NONE';
         final msg = status['statusMessage'] as String? ?? '';
+        final hint = status['hint'] as String? ?? '';
 
         if (_isSurfaceDetected != hasSurf ||
             _canPlacePoint != canPlace ||
+            _rangeHint != hint ||
             _surfaceStatusMessage != msg ||
             _planesCount != planes) {
           setState(() {
             _isSurfaceDetected = hasSurf;
             _canPlacePoint = canPlace;
+            _rangeHint = hint;
             _planesCount = planes;
             _surfaceType = type;
             _surfaceStatusMessage = msg;
@@ -425,7 +430,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
         _activeStartAnchor = newAnchor;
       } else {
         final dist = _activeStartAnchor!.distanceTo(newAnchor);
-        final label = _unit.formatMeters(dist, decimals: dist < 0.1 ? 1 : 0);
+        final label = _unit.formatMeasurement(dist);
 
         _lockedSegments.add(
           _LockedSegment(
@@ -691,7 +696,9 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
 
   String get _topInstructionText {
     if (_useNativeARCore && !_canPlacePoint) {
-      return _surfaceStatusMessage; // "Move camera slowly…" from ARCore tracking state
+      return _surfaceStatusMessage; // tracking guidance from ARCore ("Move your phone slowly", …)
+    } else if (_useNativeARCore && _rangeHint.isNotEmpty) {
+      return _rangeHint;
     } else if (_activeStartAnchor != null) {
       return 'Move to end point & tap +';
     } else if (_lockedSegments.isNotEmpty) {
@@ -699,7 +706,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
       for (final s in _lockedSegments) {
         total += s.distanceMeters;
       }
-      return 'Total: ${_unit.formatMeters(total)} (${_lockedSegments.length} seg)';
+      return 'Total: ${_unit.formatMeasurement(total)} (${_lockedSegments.length} seg)';
     } else if (_useNativeARCore) {
       return _isSurfaceDetected ? 'Surface detected • Ready to measure' : 'Move camera slowly to detect surfaces';
     } else {
@@ -920,7 +927,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                   }
 
                   if (liveDist != null) {
-                    liveDistanceLabel = _unit.formatMeters(liveDist, decimals: liveDist < 0.1 ? 1 : 0);
+                    liveDistanceLabel = _unit.formatMeasurement(liveDist);
                   }
                 }
 
@@ -962,33 +969,8 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
           ),
         ),
 
-        // 3. Apple Measure Aiming Reticle with Surface Detection Visual Feedback
-        Center(
-          child: Container(
-            width: _isSurfaceDetected ? 18 : 14,
-            height: _isSurfaceDetected ? 18 : 14,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _isSurfaceDetected ? const Color(0xFF60A5FA).withValues(alpha: 0.9) : Colors.white.withValues(alpha: 0.85),
-              boxShadow: [
-                BoxShadow(
-                  color: _isSurfaceDetected ? const Color(0xFF2563EB).withValues(alpha: 0.6) : Colors.black.withValues(alpha: 0.5),
-                  blurRadius: _isSurfaceDetected ? 8 : 4,
-                ),
-              ],
-            ),
-            child: Center(
-              child: Container(
-                width: 4,
-                height: 4,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.black87,
-                ),
-              ),
-            ),
-          ),
-        ),
+        // 3. Small Measure-style aiming reticle (bright when on a real surface)
+        IgnorePointer(child: ARReticle(isLockedOnSurface: _isSurfaceDetected)),
 
         // 4. Top Header Controls (Undo, Center Instruction with indicator, Unit, Torch, Trash)
         Positioned(
