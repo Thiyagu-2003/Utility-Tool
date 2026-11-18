@@ -102,6 +102,13 @@ class ARPlatformBridge {
     return {};
   }
 
+  /// Tell the native view which lines/points to draw in the camera frame itself (no overlay lag).
+  Future<void> setNativeOverlay(List<List<String>> segments, String? activeStart) async {
+    try {
+      await _viewChannel?.invokeMethod('setOverlay', {'segments': segments, 'activeStart': activeStart});
+    } catch (_) {}
+  }
+
   /// Remove a native anchor
   Future<void> removeNativeAnchor(String anchorId) async {
     try {

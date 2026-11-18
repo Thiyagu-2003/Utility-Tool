@@ -43,7 +43,11 @@ class MeasurementOverlayPainter extends CustomPainter {
   final bool isClosedPolygon;
   final Color primaryColor;
 
+  /// ARCore mode: lines and points are drawn natively in the camera frame; only draw labels here.
+  final bool labelsOnly;
+
   MeasurementOverlayPainter({
+    this.labelsOnly = false,
     List<RenderedMeasurementSegment>? segments,
     List<Offset>? anchorPoints,
     this.activeStartPoint,
@@ -89,12 +93,12 @@ class MeasurementOverlayPainter extends CustomPainter {
     }
 
     // 3. Draw circular endpoint markers
-    for (int i = 0; i < anchorPoints.length; i++) {
+    for (int i = 0; i < anchorPoints.length && !labelsOnly; i++) {
       final isSelected = selectedAnchorIndex != null && selectedAnchorIndex == i;
       _drawAnchorMarker(canvas, anchorPoints[i], isSelected: isSelected);
     }
 
-    if (activeStartPoint != null) {
+    if (activeStartPoint != null && !labelsOnly) {
       _drawAnchorMarker(canvas, activeStartPoint!);
     }
 
@@ -122,10 +126,21 @@ class MeasurementOverlayPainter extends CustomPainter {
     final ux = dx / lineLength;
     final uy = dy / lineLength;
 
-    // Round dots, equal size and spacing, first and last dot exactly on the endpoints.
     final fill = isSelected ? const Color(0xFF60A5FA) : Colors.white;
-    _renderDots(canvas, p1, p2, lineLength, 3.2, Paint()..color = Colors.black.withValues(alpha: 0.35)); // contrast halo
-    _renderDots(canvas, p1, p2, lineLength, 2.3, Paint()..color = fill);
+    if (labelsOnly) {
+      // line drawn natively
+    } else if (isLive) {
+      // Live line: round dots, equal size and spacing, first and last dot exactly on the endpoints.
+      _renderDots(canvas, p1, p2, lineLength, 3.2, Paint()..color = Colors.black.withValues(alpha: 0.35)); // contrast halo
+      _renderDots(canvas, p1, p2, lineLength, 2.3, Paint()..color = fill);
+    } else {
+      // Finished measurement: solid line, as iPhone Measure does once the second point is placed.
+      final stroke = Paint()
+        ..strokeCap = StrokeCap.round
+        ..style = PaintingStyle.stroke;
+      canvas.drawLine(p1, p2, stroke..color = Colors.black.withValues(alpha: 0.35)..strokeWidth = 5.0);
+      canvas.drawLine(p1, p2, stroke..color = fill..strokeWidth = 3.0);
+    }
 
     if (label.isEmpty) return;
 

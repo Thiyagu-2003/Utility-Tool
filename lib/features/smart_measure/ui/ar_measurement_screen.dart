@@ -117,6 +117,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
   double? _reticleWorldZ;
   bool _isSyncingTracking = false;
   bool _isPlacingPoint = false;
+  bool _usedEstimatedSurface = false; // a point was placed on a depth-fitted surface, not a detected plane
 
   // Surface Detection & Guidance State
   bool _isSurfaceDetected = false;
@@ -168,10 +169,19 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive) {
-      if (_useNativeARCore) {
+    if (_useNativeARCore) {
+      // Pause ARCore only when the app really leaves the screen. `inactive` also fires on a mere
+      // loss of window focus (system popup, notification shade, floating window) while the camera
+      // is still visible; pausing there froze the AR view until focus came back.
+      if (state == AppLifecycleState.hidden || state == AppLifecycleState.paused) {
         ARPlatformBridge().pauseNativeSession();
-      } else {
+      } else if (state == AppLifecycleState.resumed) {
+        ARPlatformBridge().resumeNativeSession();
+      }
+      return;
+    }
+    if (state == AppLifecycleState.inactive) {
+      {
         // Null it before disposing so CameraPreview never rebuilds on a disposed controller.
         final c = _cameraController;
         _cameraController = null;
@@ -180,11 +190,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
         c?.dispose();
       }
     } else if (state == AppLifecycleState.resumed) {
-      if (_useNativeARCore) {
-        ARPlatformBridge().resumeNativeSession();
-      } else if (_hasCameraPermission) {
-        _initCameraFallback();
-      }
+      if (_hasCameraPermission) _initCameraFallback();
     }
   }
 
@@ -400,6 +406,8 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
       final hit = await ARPlatformBridge().nativeHitTest(x: 0.5, y: 0.5);
       _isPlacingPoint = false;
       if (hit == null || !mounted) return;
+      // Anything but a detected plane means the surface height was estimated from depth.
+      if (hit['planeType'] != 'PLANE') _usedEstimatedSurface = true;
       newAnchor = _ARAnchorData(
         id: hit['anchorId'] as String,
         worldX: (hit['x'] as num).toDouble(),
@@ -444,6 +452,19 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
         _activeStartAnchor = null;
       }
     });
+    _syncNativeOverlay();
+  }
+
+  /// Native view draws the lines/points in the camera frame itself; tell it what exists.
+  void _syncNativeOverlay() {
+    if (!_useNativeARCore) return;
+    ARPlatformBridge().setNativeOverlay(
+      [
+        for (final s in _lockedSegments)
+          if (s.start.isNative && s.end.isNative) [s.start.id, s.end.id],
+      ],
+      (_activeStartAnchor?.isNative ?? false) ? _activeStartAnchor!.id : null,
+    );
   }
 
   // --- Pan / Dragging Points on Screen ---
@@ -556,6 +577,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
         if (removed.end.isNative) ARPlatformBridge().removeNativeAnchor(removed.end.id);
       }
     });
+    _syncNativeOverlay();
   }
 
   void _clearAll() {
@@ -565,7 +587,9 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
       _activeStartAnchor = null;
       _lockedSegments.clear();
       _selectedAnchorIndex = null;
+      _usedEstimatedSurface = false;
     });
+    _syncNativeOverlay();
   }
 
   Future<void> _toggleTorch() async {
@@ -687,9 +711,13 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
         distanceUnit: _unit,
         formattedValue: _unit.formatMeters(totalDist),
         secondaryValues: secondary,
-        confidence: _useNativeARCore && _isSurfaceDetected ? TrackingConfidence.high : TrackingConfidence.medium,
-        uncertaintyPercent: _useNativeARCore ? 0.5 : 1.2,
-        capabilityUsed: _useNativeARCore ? 'Google ARCore Hardware Planes' : 'Optical Depth Raycasting',
+        // Honest figures: ~2% on a detected plane; ~5% when the surface had to be estimated from depth
+        // (measured on a plain table: 4 of 5 readings within 5% of a 146.7 mm reference).
+        confidence: _useNativeARCore && !_usedEstimatedSurface ? TrackingConfidence.high : TrackingConfidence.medium,
+        uncertaintyPercent: !_useNativeARCore ? 10.0 : (_usedEstimatedSurface ? 5.0 : 2.0),
+        capabilityUsed: !_useNativeARCore
+            ? 'Optical Depth Raycasting'
+            : (_usedEstimatedSurface ? 'Google ARCore (surface estimated from depth)' : 'Google ARCore Planes'),
       ),
     );
   }
@@ -956,6 +984,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
 
                 return CustomPaint(
                   painter: MeasurementOverlayPainter(
+                    labelsOnly: _useNativeARCore,
                     segments: renderedSegments,
                     anchorPoints: renderedAnchors,
                     activeStartPoint: activeStartScreenPos,
@@ -1015,7 +1044,7 @@ class _ARMeasurementScreenState extends State<ARMeasurementScreen> with WidgetsB
                         Flexible(
                           child: Text(
                             _topInstructionText,
-                            maxLines: 1,
+                            maxLines: 2, // guidance must be readable in full (was cut off at one line)
                             overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.center,
                             style: TextStyle(
